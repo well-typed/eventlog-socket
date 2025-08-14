@@ -59,29 +59,3 @@ For an example of an instrumented application, see [examples/fibber](examples/fi
 If you instrument your application from Haskell, the GHC RTS is started with the default file writer, and only swiches over to the socket writer once `GHC.Eventlog.Socket.start` is evaluated. This means that running your application will still create an initial eventlog file and that some events might be lost. To avoid this, you can instrument your application from C, by writing a custom C main file.
 
 For an example of an application instrumented from a custom C main, see [examples/fibber-c-main](examples/fibber-c-main/).
-
-## Design notes
-
-This is a prototype to play around with the possibility of using the eventlog
-for realtime profiling and performance analysis.
-There are still numerous open questions:
-
-- Access control?
-- Support only Unix domain sockets or also TCP/IP?
-- Do we want to support multiple consumers?
-- What should happen when a consumer disconnects?
-  At the moment, we pause the eventlog stream until a new consumer shows up.
-  Alternatively, we could:
-  - Close the socket and stop streaming.
-  - Pause the program until a new consumer shows up.
-  - Kill the program.
-
-## Development
-
-As the most code is C using following line will speedup development
-considerably (change your GHC installation path accordingly):
-
-```sh
-gcc -c -Iinclude -I/opt/ghc/9.0.1/lib/ghc-9.0.1/include -o eventlog_socket.o cbits/eventlog_socket.c
-gcc -c -Iinclude -I/opt/ghc/9.2.0.20210821/lib/ghc-9.2.0.20210821/include -o eventlog_socket.o cbits/eventlog_socket.c
-```
