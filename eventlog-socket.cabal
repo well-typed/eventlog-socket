@@ -23,6 +23,9 @@ extra-source-files:
   cbits/eventlog_socket.c
   include/eventlog_socket.h
 
+extra-doc-files:
+  README.md
+
 source-repository head
   type:     git
   location: https://github.com/bgamari/ghc-eventlog-socket.git
