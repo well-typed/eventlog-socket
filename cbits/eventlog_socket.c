@@ -227,7 +227,7 @@ static void writer_stop(void)
   pthread_mutex_unlock(&mutex);
 }
 
-const EventLogWriter socket_writer = {
+static const EventLogWriter SocketEventLogWriter = {
   .initEventLogWriter = writer_init,
   .writeEventLog = writer_write,
   .flushEventLog = writer_flush,
@@ -296,7 +296,7 @@ static void listen_iteration() {
   pthread_mutex_unlock(&mutex);
 
   // start writing
-  startEventLogging(&socket_writer);
+  startEventLogging(&SocketEventLogWriter);
 
   // Announce new connection
   pthread_cond_broadcast(&new_conn_cond);
@@ -487,6 +487,21 @@ static void open_socket(const char *sock_path)
  * Public interface
  *********************************************************************************/
 
+
+void eventlog_socket_init(const char *sock_path)
+{
+  if (!initialized) {
+    pthread_mutex_init(&mutex, NULL);
+    pthread_cond_init(&new_conn_cond, NULL);
+    initialized = true;
+  }
+
+  if (!sock_path)
+    return;
+
+  open_socket(sock_path);
+}
+
 void eventlog_socket_wait(void)
 {
   pthread_mutex_lock(&mutex);
@@ -528,7 +543,7 @@ void eventlog_socket_start(const char *sock_path, bool wait)
   //     printAndClearEventLog: could not flush event log
   //
   // warning messages from showing up in stderr.
-  startEventLogging(&socket_writer);
+  startEventLogging(&SocketEventLogWriter);
 
   open_socket(sock_path);
   if (wait) {
