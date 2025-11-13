@@ -529,6 +529,7 @@ void eventlog_socket_start(const char *sock_path, bool wait)
   if (!initialized) {
     pthread_mutex_init(&mutex, NULL);
     pthread_cond_init(&new_conn_cond, NULL);
+    atexit(cleanup_socket);
     initialized = true;
   }
 
