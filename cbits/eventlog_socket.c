@@ -68,6 +68,12 @@ struct write_buffer {
 // variables read and written by worker only:
 static bool initialized = false;
 static int listen_fd = -1;
+static const char *g_sock_path = NULL;
+
+static void cleanup_socket(void) {
+    if (g_sock_path) unlink(g_sock_path);
+}
+
 
 // concurrency variables
 static pthread_t listen_thread;
@@ -465,6 +471,9 @@ static void open_socket(const char *sock_path)
 
   listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
+  // Record the sock_path so it can be unlinked at exit
+  g_sock_path = strdup(sock_path);
+
   struct sockaddr_un local;
   local.sun_family = AF_UNIX;
   strncpy(local.sun_path, sock_path, sizeof(local.sun_path) - 1);
@@ -493,6 +502,7 @@ void eventlog_socket_init(const char *sock_path)
   if (!initialized) {
     pthread_mutex_init(&mutex, NULL);
     pthread_cond_init(&new_conn_cond, NULL);
+    atexit(cleanup_socket);
     initialized = true;
   }
 
