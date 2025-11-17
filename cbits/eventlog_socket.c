@@ -233,7 +233,7 @@ static void writer_stop(void)
   pthread_mutex_unlock(&mutex);
 }
 
-static const EventLogWriter SocketEventLogWriter = {
+const EventLogWriter SocketEventLogWriter = {
   .initEventLogWriter = writer_init,
   .writeEventLog = writer_write,
   .flushEventLog = writer_flush,
@@ -244,8 +244,8 @@ static const EventLogWriter SocketEventLogWriter = {
  * Main worker (in own thread)
  *********************************************************************************/
 
-static void listen_iteration() {
-  DEBUG0_ERR("enter");
+static void listen_iteration(void) {
+  bool start_eventlog = false;
 
   if (listen(listen_fd, LISTEN_BACKLOG) == -1) {
     PRINT_ERR("listen() failed: %s\n", strerror(errno));
@@ -290,9 +290,11 @@ static void listen_iteration() {
     PRINT_ERR("fnctl F_SETFL failed: %s\n", strerror(errno));
   }
 
-  // we stop existing logging
+
+  // we stop existing logging so we can replay header on the new connection
   if (eventLogStatus() == EVENTLOG_RUNNING) {
     endEventLogging();
+    start_eventlog = true;
   }
 
   // we got client_id now.
@@ -301,8 +303,10 @@ static void listen_iteration() {
   // Drop lock to allow initial batch of events to be written.
   pthread_mutex_unlock(&mutex);
 
-  // start writing
-  startEventLogging(&SocketEventLogWriter);
+  if (start_eventlog) {
+    // start writing
+    startEventLogging(&SocketEventLogWriter);
+  }
 
   // Announce new connection
   pthread_cond_broadcast(&new_conn_cond);
@@ -429,7 +433,7 @@ static void write_iteration(int fd) {
   }
 }
 
-static void iteration() {
+static void iteration(void) {
   pthread_mutex_lock(&mutex);
   int fd = client_fd;
   bool empty = wt.head == NULL;
@@ -452,8 +456,9 @@ static void iteration() {
  * - either we have connection, then we poll for writes (and drop of connection).
  * - or we don't have, then we poll for accept.
  */
-static void *worker(void * _unused)
+static void *worker(void *arg)
 {
+  (void)arg;
   while (true) {
     iteration();
   }
@@ -507,6 +512,9 @@ static void ensure_initialized(void)
   }
 }
 
+// Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
+// It only sets up the listener and condition variable; the RTS will invoke
+// startEventLogging() itself during initialization.
 void eventlog_socket_init(const char *sock_path)
 {
   ensure_initialized();
@@ -529,6 +537,8 @@ void eventlog_socket_wait(void)
   pthread_mutex_unlock(&mutex);
 }
 
+// Use this from an already-running RTS: it reconfigures eventlogging to use
+// SocketEventLogWriter and restarts the log when a client connects.
 void eventlog_socket_start(const char *sock_path, bool wait)
 {
   ensure_initialized();
@@ -561,5 +571,6 @@ void eventlog_socket_start(const char *sock_path, bool wait)
     DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", sock_path);
     eventlog_socket_wait();
   }
-}
 
+
+}

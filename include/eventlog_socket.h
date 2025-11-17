@@ -2,7 +2,7 @@
 #define EVENGLOG_SOCKET_H
 #include <rts/EventLogWriter.h>
 
-static const EventLogWriter SocketEventLogWriter;
+extern const EventLogWriter SocketEventLogWriter;
 
 void eventlog_socket_init(const char *sock_path);
 
