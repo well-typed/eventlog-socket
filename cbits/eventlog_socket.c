@@ -497,7 +497,7 @@ static void open_socket(const char *sock_path)
  *********************************************************************************/
 
 
-void eventlog_socket_init(const char *sock_path)
+static void ensure_initialized(void)
 {
   if (!initialized) {
     pthread_mutex_init(&mutex, NULL);
@@ -505,6 +505,11 @@ void eventlog_socket_init(const char *sock_path)
     atexit(cleanup_socket);
     initialized = true;
   }
+}
+
+void eventlog_socket_init(const char *sock_path)
+{
+  ensure_initialized();
 
   if (!sock_path)
     return;
@@ -526,12 +531,7 @@ void eventlog_socket_wait(void)
 
 void eventlog_socket_start(const char *sock_path, bool wait)
 {
-  if (!initialized) {
-    pthread_mutex_init(&mutex, NULL);
-    pthread_cond_init(&new_conn_cond, NULL);
-    atexit(cleanup_socket);
-    initialized = true;
-  }
+  ensure_initialized();
 
   if (!sock_path)
     return;
