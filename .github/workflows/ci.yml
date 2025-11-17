@@ -50,6 +50,10 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         run: ./examples/fibber/fibber.sh
 
+      - name: 🔁 Test reconnect
+        if: ${{ runner.os == 'Linux' }}
+        run: ./examples/fibber-c-reconnect/test/reconnect.sh
+
     strategy:
       matrix:
         os:
