@@ -470,9 +470,11 @@ static void *worker(void *arg)
  * Initialization
  *********************************************************************************/
 
-static void open_socket(const char *sock_path)
+// Initialize the Unix-domain listener socket and bind it to the provided path.
+// This function does not start any threads; open_socket() completes the setup.
+static void init_unix_listener(const char *sock_path)
 {
-  DEBUG_ERR("enter: %s\n", sock_path);
+  DEBUG_ERR("init Unix listener: %s\n", sock_path);
 
   listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -480,6 +482,7 @@ static void open_socket(const char *sock_path)
   g_sock_path = strdup(sock_path);
 
   struct sockaddr_un local;
+  memset(&local, 0, sizeof(local));
   local.sun_family = AF_UNIX;
   strncpy(local.sun_path, sock_path, sizeof(local.sun_path) - 1);
   unlink(sock_path);
@@ -488,6 +491,11 @@ static void open_socket(const char *sock_path)
     PRINT_ERR("failed to bind socket %s: %s\n", sock_path, strerror(errno));
     abort();
   }
+}
+
+static void open_socket(const char *sock_path)
+{
+  init_unix_listener(sock_path);
 
   int ret = pthread_create(&listen_thread, NULL, worker, NULL);
   if (ret != 0) {
