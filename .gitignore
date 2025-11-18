@@ -3,3 +3,4 @@ dist-newstyle
 cabal.project.local
 eventlog_socket.o
 *.eventlog
+__pycache__
