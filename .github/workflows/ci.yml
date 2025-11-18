@@ -45,21 +45,9 @@ jobs:
           ghc-events-version: "0.20.0.0"
           ghc-version: ${{ matrix.ghc-version }}
 
-      - name: 🧪 Test fibber (finite)
+      - name: 🚀 Testing
         if: ${{ runner.os == 'Linux' }}
-        run: tests/test-normal.sh fibber 24
-
-      - name: 🧪 Test fibber (forever, with reconnect)
-        if: ${{ runner.os == 'Linux' }}
-        run: tests/test-reconnect.sh fibber --forever 24
-
-      - name: 🛠️ Test fibber-c-main (finite)
-        if: ${{ runner.os == 'Linux' }}
-        run: tests/test-normal.sh fibber-c-main 24
-
-      - name: 🔁 Test fibber-c-main (forever, with reconnect)
-        if: ${{ runner.os == 'Linux' }}
-        run: tests/test-reconnect.sh fibber-c-main --forever 30
+        run: ./ci.sh
 
     strategy:
       matrix:
