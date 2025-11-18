@@ -110,7 +110,7 @@ cabal build "$TARGET"
 rm -f "$SOCKET_PATH" "$FIRST_EVENTLOG" "$SECOND_EVENTLOG" "$APP_STDOUT"
 
 log "Launching $TARGET..."
-cabal run "$TARGET" -- "$@" >"$APP_STDOUT" 2>&1 &
+cabal run "$TARGET" -- "$@" +RTS --eventlog-flush-interval=1 -RTS >"$APP_STDOUT" 2>&1 &
 APP_PID=$!
 log "$TARGET is running with pid $APP_PID (stdout -> $APP_STDOUT)"
 
