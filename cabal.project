@@ -1,3 +1,4 @@
 packages: .
 packages: examples/fibber/fibber.cabal
 packages: examples/fibber-c-main/fibber-c-main.cabal
+packages: examples/fibber-tcp/fibber-tcp.cabal

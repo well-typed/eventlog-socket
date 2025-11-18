@@ -41,7 +41,7 @@ main = do
 
 If you wish for your application to block until the client process connects to the eventlog socket, you can call `GHC.Eventlog.Socket.startWait`.
 
-For an example of an instrumented application, see [examples/fibber](examples/fibber/).
+For Unix-domain usage, see [examples/fibber](examples/fibber/). For a TCP-based example, see [examples/fibber-tcp](examples/fibber-tcp/).
 
 ### Instrument your application from C
 
