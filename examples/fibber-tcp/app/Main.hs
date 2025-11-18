@@ -3,8 +3,10 @@ module Main where
 import Control.Monad (forever)
 import Data.Foldable (for_)
 import Data.Maybe (fromMaybe)
+import Data.Word (Word16)
 import GHC.Eventlog.Socket
 import System.Environment
+import Text.Read (readMaybe)
 
 data Mode = Finite | Infinite
 
@@ -14,9 +16,12 @@ parseArgs args = (Finite, args)
 
 main :: IO ()
 main = do
-    fibberHost <- fromMaybe "localhost" <$> lookupEnv "FIBBER_EVENTLOG_TCP_HOST"
-    fibberPort <- fromMaybe "4242" <$> lookupEnv "FIBBER_EVENTLOG_TCP_PORT"
-    startTcp fibberHost fibberPort
+    fibberHostEnv <- lookupEnv "FIBBER_EVENTLOG_TCP_HOST"
+    fibberPortEnv <- lookupEnv "FIBBER_EVENTLOG_TCP_PORT"
+    let fibberHost = fromMaybe "127.0.0.1" fibberHostEnv
+        fibberPort :: Word16
+        fibberPort = fromMaybe 4242 (fibberPortEnv >>= readMaybe)
+    startTcp TcpSocket{ tcpHost = fibberHost, tcpPort = fibberPort }
     wait
     args <- getArgs
     let (mode, fibArgs) = parseArgs args
