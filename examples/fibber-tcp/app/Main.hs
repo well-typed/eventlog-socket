@@ -14,7 +14,7 @@ parseArgs args = (Finite, args)
 
 main :: IO ()
 main = do
-    fibberHost <- lookupEnv "FIBBER_EVENTLOG_TCP_HOST"
+    fibberHost <- fromMaybe "localhost" <$> lookupEnv "FIBBER_EVENTLOG_TCP_HOST"
     fibberPort <- fromMaybe "4242" <$> lookupEnv "FIBBER_EVENTLOG_TCP_PORT"
     startTcp fibberHost fibberPort
     wait
