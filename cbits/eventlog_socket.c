@@ -13,14 +13,25 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <stdint.h>
 
 #include <Rts.h>
+#include <rts/prof/Heap.h>
 
 #include "eventlog_socket.h"
 
 #define LISTEN_BACKLOG 5
 #define POLL_LISTEN_TIMEOUT 10000
 #define POLL_WRITE_TIMEOUT 1000
+#define CONTROL_MAGIC "GCTL"
+#define CONTROL_MAGIC_LEN 4
+
+enum control_command {
+  CONTROL_CMD_START_HEAP_PROFILING = 0x01,
+  CONTROL_CMD_STOP_HEAP_PROFILING = 0x02,
+  CONTROL_CMD_REQUEST_HEAP_PROFILE = 0x03,
+};
 
 #ifndef POLLRDHUP
 #define POLLRDHUP POLLHUP
@@ -37,6 +48,21 @@
 #define DEBUG_ERR(fmt, ...) fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__, __VA_ARGS__)
 #define DEBUG0_ERR(fmt) fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__)
 #endif
+
+struct write_buffer;
+void write_buffer_free(struct write_buffer *buf);
+static void start_control_receiver(int fd);
+static void *control_receiver(void *arg);
+static void control_connection_closed(int fd);
+// control channel read status: keeps writer socket alive as long as we can
+// still read from the peer, even if the payload is malformed.
+enum control_recv_status {
+  CONTROL_RECV_OK,
+  CONTROL_RECV_PROTOCOL_ERROR,
+  CONTROL_RECV_DISCONNECTED,
+};
+static enum control_recv_status control_receive_command(int fd, enum control_command *cmd_out);
+static void handle_control_command(enum control_command cmd);
 
 /*********************************************************************************
  * data definitions
@@ -61,9 +87,10 @@ struct write_buffer {
  *********************************************************************************/
 
 /* This module is concurrent.
- * There are two thread(group)s:
+ * There are three thread(group)s:
  * 1. RTS
- * 2. worker spawned by open_socket
+ * 2. worker spawned by open_socket (this writes to the socket)
+ * 3. listener spawned by start_control_reciever (this recieves messages on the socket)
  */
 
 // variables read and written by worker only:
@@ -106,10 +133,23 @@ static void cleanup_socket(void) {
 // concurrency variables
 static pthread_t listen_thread;
 static pthread_cond_t new_conn_cond;
+// Signal to the control thread to start.
+static pthread_cond_t control_ready_cond;
+// Whether we have started the control thread
+static bool control_ready = false;
+// Whether the controller thread is ready to start
+static bool control_ready_armed = false;
+// Global mutex guarding all shared state between RTS threads, the worker thread,
+// and the detached control receiver. Only client_fd and wt need protection, but
+// using a single mutex ensures we keep their updates consistent.
 static pthread_mutex_t mutex;
 
-// variables accessed by both threads.
-// their access should be guarded by mutex.
+// variables accessed by multiple threads and guarded by mutex:
+//  * client_fd: written by worker, writer_stop, and control receiver to signal
+//    when a client connects/disconnects. The lock ensures the fd value does not
+//    change while other threads inspect or write to it.
+//  * wt: queue of pending eventlog chunks. RTS writers append while the worker
+//    thread consumes; the lock ensures push/pop operations stay consistent.
 //
 // Note: RTS writes client_fd in writer_stop.
 static volatile int client_fd = -1;
@@ -119,10 +159,179 @@ static struct write_buffer wt = {
 };
 
 /*********************************************************************************
+ * control channel helpers (minimal protocol)
+ *********************************************************************************/
+
+static bool control_wait_for_data(int fd)
+{
+  struct pollfd pfd = {
+    .fd = fd,
+    .events = POLLIN | POLLRDHUP,
+    .revents = 0,
+  };
+
+  int pret = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
+  if (pret == -1) {
+    if (errno == EINTR)
+      return true;
+    PRINT_ERR("control poll() failed: %s\n", strerror(errno));
+    return false;
+  }
+  if (pret == 0)
+    return true; // timeout, simply retry
+
+  if (pfd.revents & POLLRDHUP)
+    return false;
+
+  return true;
+}
+
+static enum control_recv_status control_read_exact(int fd, uint8_t *buf, size_t len)
+{
+  size_t have = 0;
+  while (have < len) {
+    ssize_t got = recv(fd, buf + have, len - have, 0);
+    DEBUG_ERR("control_read_exact %d/%d\n", got, len);
+    if (got == 0)
+      return CONTROL_RECV_DISCONNECTED;
+    if (got < 0) {
+      if (errno == EINTR)
+        continue;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        if (!control_wait_for_data(fd))
+          return CONTROL_RECV_DISCONNECTED;
+        continue;
+      }
+      PRINT_ERR("control recv() failed: %s\n", strerror(errno));
+      return CONTROL_RECV_DISCONNECTED;
+    }
+    have += (size_t)got;
+  }
+  return CONTROL_RECV_OK;
+}
+
+static enum control_recv_status control_receive_command(int fd, enum control_command *cmd_out)
+{
+  uint8_t header[CONTROL_MAGIC_LEN];
+  enum control_recv_status status =
+      control_read_exact(fd, header, CONTROL_MAGIC_LEN);
+  if (status != CONTROL_RECV_OK)
+    return status;
+  if (memcmp(header, CONTROL_MAGIC, CONTROL_MAGIC_LEN) != 0) {
+    DEBUG_ERR("invalid control magic: %02x %02x %02x %02x\n",
+              header[0], header[1], header[2], header[3]);
+    return CONTROL_RECV_PROTOCOL_ERROR;
+  }
+  uint8_t cmd_id = 0;
+  status = control_read_exact(fd, &cmd_id, 1);
+  if (status != CONTROL_RECV_OK)
+    return status;
+
+  switch (cmd_id) {
+    case CONTROL_CMD_START_HEAP_PROFILING:
+    case CONTROL_CMD_STOP_HEAP_PROFILING:
+    case CONTROL_CMD_REQUEST_HEAP_PROFILE:
+      *cmd_out = (enum control_command)cmd_id;
+      DEBUG_ERR("control command 0x%02x\n", cmd_id);
+      break;
+    default:
+      PRINT_ERR("unknown control command id 0x%02x\n", cmd_id);
+      return CONTROL_RECV_PROTOCOL_ERROR;
+  }
+
+  return CONTROL_RECV_OK;
+}
+
+static void handle_control_command(enum control_command cmd)
+{
+  switch (cmd) {
+    case CONTROL_CMD_START_HEAP_PROFILING:
+      DEBUG0_ERR("control: startHeapProfiling\n");
+      startHeapProfTimer();
+      break;
+    case CONTROL_CMD_STOP_HEAP_PROFILING:
+      DEBUG0_ERR("control: stopHeapProfiling\n");
+      stopHeapProfTimer();
+      break;
+    case CONTROL_CMD_REQUEST_HEAP_PROFILE:
+      DEBUG0_ERR("control: requestHeapProfile\n");
+      requestHeapCensus();
+      break;
+    default:
+      PRINT_ERR("control: unhandled command %d\n", cmd);
+      break;
+  }
+}
+
+static void start_control_receiver(int fd)
+{
+  pthread_t tid;
+  int ret = pthread_create(&tid, NULL, control_receiver, (void *)(intptr_t)fd);
+  if (ret != 0) {
+    PRINT_ERR("failed to start control receiver: %s\n", strerror(ret));
+    return;
+  }
+  ret = pthread_detach(tid);
+  if (ret != 0) {
+    PRINT_ERR("failed to detach control receiver: %s\n", strerror(ret));
+  }
+}
+
+static void control_connection_closed(int fd)
+{
+  // Control receiver runs concurrently with RTS writers,
+  // so clear client_fd/wt within the shared mutex.
+  pthread_mutex_lock(&mutex);
+  if (client_fd == fd) {
+    client_fd = -1;
+    write_buffer_free(&wt);
+  }
+  pthread_mutex_unlock(&mutex);
+}
+
+static void *control_receiver(void *arg)
+{
+  int fd = (int)(intptr_t)arg;
+
+  pthread_mutex_lock(&mutex);
+  while (!control_ready) {
+    pthread_cond_wait(&control_ready_cond, &mutex);
+  }
+  pthread_mutex_unlock(&mutex);
+
+  while (true) {
+    // Grab consistent snapshot of client_fd; connection teardown may happen
+    // at any time so we must hold the mutex while comparing.
+    pthread_mutex_lock(&mutex);
+    int current_fd = client_fd;
+    pthread_mutex_unlock(&mutex);
+    if (current_fd != fd)
+      break;
+
+    enum control_command cmd;
+    enum control_recv_status status = control_receive_command(fd, &cmd);
+    if (status == CONTROL_RECV_DISCONNECTED) {
+      control_connection_closed(fd);
+      break;
+    } else if (status == CONTROL_RECV_PROTOCOL_ERROR) {
+      // Ignore protocol errors: they indicate garbage control traffic but
+      // shouldn't drop the data writer. Keep listening for valid commands.
+      continue;
+    }
+
+    handle_control_command(cmd);
+  }
+
+  return NULL;
+}
+
+/*********************************************************************************
  * write_buffer
  *********************************************************************************/
 
 // push to the back.
+// Caller must serialize externally (writer_write/write_iteration hold mutex)
+// so that head/last invariants stay intact.
 void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
   DEBUG_ERR("%p, %lu\n", data, size);
   uint8_t *copy = malloc(size);
@@ -149,6 +358,7 @@ void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
 };
 
 // pop from the front.
+// Requires the same external synchronization as write_buffer_push.
 void write_buffer_pop(struct write_buffer *buf) {
   struct write_buffer_item *head = buf->head;
   if (head == NULL) {
@@ -180,7 +390,7 @@ void write_buffer_free(struct write_buffer *buf) {
 
 static void writer_init(void)
 {
-  // no-op
+  // nothing
 }
 
 static void writer_enqueue(uint8_t *data, size_t size) {
@@ -198,6 +408,8 @@ static void writer_enqueue(uint8_t *data, size_t size) {
 static bool writer_write(void *eventlog, size_t size)
 {
   DEBUG_ERR("size: %lu\n", size);
+  // Serialize against worker/control threads so that client_fd and wt are read
+  // atomically with respect to connection establishment/teardown.
   pthread_mutex_lock(&mutex);
   int fd = client_fd;
   if (fd < 0) {
@@ -252,6 +464,8 @@ static void writer_flush(void)
 
 static void writer_stop(void)
 {
+  // RTS shutdown path must hold mutex so updates to client_fd/wt stay ordered
+  // with the worker thread noticing the disconnect.
   pthread_mutex_lock(&mutex);
   if (client_fd >= 0) {
     close(client_fd);
@@ -326,10 +540,14 @@ static void listen_iteration(void) {
   }
 
   // we got client_id now.
+  // Publish new fd under mutex so RTS writers either see the connection along
+  // with an empty queue or not at all.
   pthread_mutex_lock(&mutex);
   client_fd = fd;
   // Drop lock to allow initial batch of events to be written.
   pthread_mutex_unlock(&mutex);
+
+  start_control_receiver(fd);
 
   if (start_eventlog) {
     // start writing
@@ -370,6 +588,8 @@ static void nonwrite_iteration(int fd) {
     DEBUG_ERR("(%d) POLLRDHUP\n", fd);
 
     // reset client_fd
+    // Take lock to ensure we don't race with writer threads still referencing
+    // the old fd when clearing shared state.
     pthread_mutex_lock(&mutex);
     // note: writer_stop may close the connection as well.
     client_fd = -1;
@@ -414,6 +634,7 @@ static void write_iteration(int fd) {
     DEBUG_ERR("(%d) POLLRDHUP\n", fd);
 
     // reset client_fd
+    // Protect concurrent access to client_fd and wt during teardown.
     pthread_mutex_lock(&mutex);
     assert(fd == client_fd);
     client_fd = -1;
@@ -425,6 +646,7 @@ static void write_iteration(int fd) {
   if (pfd.revents & POLLOUT) {
     DEBUG_ERR("(%d) POLLOUT\n", fd);
 
+    // RTS writers also access wt, so consume queued buffers under the mutex.
     pthread_mutex_lock(&mutex);
     while (wt.head) {
       struct write_buffer_item *item = wt.head;
@@ -462,6 +684,8 @@ static void write_iteration(int fd) {
 }
 
 static void iteration(void) {
+  // Snapshot shared state under lock so worker decisions (listen vs write)
+  // align with the current connection/queue state.
   pthread_mutex_lock(&mutex);
   int fd = client_fd;
   bool empty = wt.head == NULL;
@@ -611,22 +835,56 @@ static void ensure_initialized(void)
   if (!initialized) {
     pthread_mutex_init(&mutex, NULL);
     pthread_cond_init(&new_conn_cond, NULL);
+    pthread_cond_init(&control_ready_cond, NULL);
+    control_ready = false;
     atexit(cleanup_socket);
     initialized = true;
   }
 }
 
+static void signal_control_ready(void)
+{
+  pthread_mutex_lock(&mutex);
+  if (!control_ready) {
+    control_ready = true;
+    pthread_cond_broadcast(&control_ready_cond);
+  }
+  pthread_mutex_unlock(&mutex);
+}
+
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
-// It only sets up the listener and condition variable; the RTS will invoke
-// startEventLogging() itself during initialization.
-static void eventlog_socket_init(const struct listener_config *config)
+// It spawns the worker immediately but defers handling of control messages
+// until eventlog_socket_ready() is invoked after RTS initialization.
+static void
+eventlog_socket_init(const struct listener_config *config)
 {
   ensure_initialized();
 
   if (!listener_config_valid(config))
     return;
 
+  pthread_mutex_lock(&mutex);
+  control_ready = false;
+  control_ready_armed = true;
+  pthread_mutex_unlock(&mutex);
+
   open_socket(config);
+}
+
+void eventlog_socket_ready(void)
+{
+  bool armed = false;
+
+  pthread_mutex_lock(&mutex);
+  if (control_ready_armed) {
+    control_ready_armed = false;
+    armed = true;
+  }
+  pthread_mutex_unlock(&mutex);
+
+  if (armed) {
+    signal_control_ready();
+  }
 }
 
 void eventlog_socket_init_unix(const char *sock_path)
@@ -653,6 +911,8 @@ void eventlog_socket_init_tcp(const char *host, const char *port)
 
 void eventlog_socket_wait(void)
 {
+  // Condition variable pairs with the mutex so reader threads can wait for the
+  // worker to publish a connected client_fd atomically.
   pthread_mutex_lock(&mutex);
   while (client_fd == -1) {
     int ret = pthread_cond_wait(&new_conn_cond, &mutex);
@@ -661,6 +921,45 @@ void eventlog_socket_wait(void)
     }
   }
   pthread_mutex_unlock(&mutex);
+}
+
+int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf, StgClosure *main_closure)
+{
+  SchedulerStatus status;
+  int exit_status;
+
+  hs_init_ghc(&argc, &argv, conf);
+
+  // Signal that the RTS is ready so the eventlog writer can accept control connections.
+  eventlog_socket_ready();
+
+  {
+    Capability *cap = rts_lock();
+    rts_evalLazyIO(&cap, main_closure, NULL);
+    status = rts_getSchedStatus(cap);
+    rts_unlock(cap);
+  }
+
+  switch (status) {
+  case Killed:
+    errorBelch("main thread exited (uncaught exception)");
+    exit_status = EXIT_KILLED;
+    break;
+  case Interrupted:
+    errorBelch("interrupted");
+    exit_status = EXIT_INTERRUPTED;
+    break;
+  case HeapExhausted:
+    exit_status = EXIT_HEAPOVERFLOW;
+    break;
+  case Success:
+    exit_status = EXIT_SUCCESS;
+    break;
+  default:
+    barf("main thread completed with invalid status");
+  }
+
+  shutdownHaskellAndExit(exit_status, 0 /* !fastExit */);
 }
 
 // Use this from an already-running RTS: it reconfigures eventlogging to use
@@ -693,6 +992,9 @@ static void eventlog_socket_start(const struct listener_config *config, bool wai
   startEventLogging(&SocketEventLogWriter);
 
   open_socket(config);
+  // Presume that the RTS is already running and we're ready if you're directly using this
+  // function.
+  signal_control_ready();
   if (wait) {
     switch (config->kind) {
       case LISTENER_UNIX:
