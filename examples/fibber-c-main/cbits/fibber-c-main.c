@@ -14,7 +14,7 @@ int main (int argc, char *argv[])
 
     // Enable RTS options:
     conf.rts_opts_enabled = RtsOptsAll;
-    conf.rts_opts = "-l --eventlog-flush-interval=1";
+    conf.rts_opts = "-l";
 
     // Start the eventlog writer:
     const char* sock_path = getenv("GHC_EVENTLOG_SOCKET");
