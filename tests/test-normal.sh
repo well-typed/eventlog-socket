@@ -66,7 +66,7 @@ init_socket_env() {
 }
 
 log() {
-    printf '[test-normal] %s\n' "$*"
+    printf '[%s:%s] %s\n' "$SOCKET_TYPE" "$MODE" "$*"
 }
 
 summarize_eventlog() {
