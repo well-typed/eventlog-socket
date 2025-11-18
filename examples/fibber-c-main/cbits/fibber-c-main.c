@@ -1,8 +1,5 @@
 #include <stdlib.h>
-#include <ghcversion.h>
-#include <rts/PosixSource.h>
 #include <Rts.h>
-#include <HsFFI.h>
 #include <eventlog_socket.h>
 
 int main (int argc, char *argv[])
