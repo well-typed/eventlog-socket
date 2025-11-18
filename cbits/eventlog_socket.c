@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <netdb.h>
 #include <pthread.h>
 #include <fcntl.h>
 
@@ -69,6 +70,18 @@ struct write_buffer {
 static bool initialized = false;
 static int listen_fd = -1;
 static const char *g_sock_path = NULL;
+
+enum listener_kind {
+  LISTENER_UNIX,
+  LISTENER_TCP,
+};
+
+struct listener_config {
+  enum listener_kind kind;
+  const char *sock_path;
+  const char *tcp_host;
+  const char *tcp_port;
+};
 
 static void cleanup_socket(void) {
     if (g_sock_path) unlink(g_sock_path);
@@ -493,9 +506,77 @@ static void init_unix_listener(const char *sock_path)
   }
 }
 
-static void open_socket(const char *sock_path)
+// Initialize a TCP listener bound to the specified host/port combination.
+// Either host or port may be NULL, in which case the defaults used by
+// getaddrinfo (INADDR_ANY / unspecified port) apply.
+static void init_tcp_listener(const char *host, const char *port)
 {
-  init_unix_listener(sock_path);
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_PASSIVE;
+
+  struct addrinfo *res = NULL;
+  int ret = getaddrinfo(host, port, &hints, &res);
+  if (ret != 0) {
+    PRINT_ERR("getaddrinfo failed: %s\n", gai_strerror(ret));
+    abort();
+  }
+
+  struct addrinfo *rp;
+  for (rp = res; rp != NULL; rp = rp->ai_next) {
+    listen_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (listen_fd == -1) {
+      continue;
+    }
+
+    int reuse = 1;
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
+      PRINT_ERR("setsockopt(SO_REUSEADDR) failed: %s\n", strerror(errno));
+      close(listen_fd);
+      listen_fd = -1;
+      continue;
+    }
+
+    if (bind(listen_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+      char hostbuf[NI_MAXHOST];
+      char servbuf[NI_MAXSERV];
+      if (getnameinfo(rp->ai_addr, rp->ai_addrlen,
+                      hostbuf, sizeof(hostbuf),
+                      servbuf, sizeof(servbuf),
+                      NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+        DEBUG_ERR("bound TCP listener to %s:%s\n", hostbuf, servbuf);
+      }
+      break; // success
+    }
+
+    PRINT_ERR("failed to bind TCP socket: %s\n", strerror(errno));
+    close(listen_fd);
+    listen_fd = -1;
+  }
+
+  freeaddrinfo(res);
+
+  if (listen_fd == -1) {
+    PRINT_ERR("unable to bind TCP listener\n");
+    abort();
+  }
+}
+
+static void open_socket(const struct listener_config *config)
+{
+  switch (config->kind) {
+    case LISTENER_UNIX:
+      init_unix_listener(config->sock_path);
+      break;
+    case LISTENER_TCP:
+      init_tcp_listener(config->tcp_host, config->tcp_port);
+      break;
+    default:
+      PRINT_ERR("unknown listener kind\n");
+      abort();
+  }
 
   int ret = pthread_create(&listen_thread, NULL, worker, NULL);
   if (ret != 0) {
@@ -530,7 +611,13 @@ void eventlog_socket_init(const char *sock_path)
   if (!sock_path)
     return;
 
-  open_socket(sock_path);
+  struct listener_config config = {
+    .kind = LISTENER_UNIX,
+    .sock_path = sock_path,
+    .tcp_host = NULL,
+    .tcp_port = NULL,
+  };
+  open_socket(&config);
 }
 
 void eventlog_socket_wait(void)
@@ -574,7 +661,13 @@ void eventlog_socket_start(const char *sock_path, bool wait)
   // warning messages from showing up in stderr.
   startEventLogging(&SocketEventLogWriter);
 
-  open_socket(sock_path);
+  struct listener_config config = {
+    .kind = LISTENER_UNIX,
+    .sock_path = sock_path,
+    .tcp_host = NULL,
+    .tcp_port = NULL,
+  };
+  open_socket(&config);
   if (wait) {
     DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", sock_path);
     eventlog_socket_wait();
