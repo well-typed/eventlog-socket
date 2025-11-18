@@ -1,8 +1,15 @@
 #!/bin/sh
 set -eu
 
+print_usage() {
+    cat >&2 <<-EOF
+Usage: $0 <socket-type: unix|tcp> <cabal-executable> [program-args...]
+Run the specified cabal executable and capture its eventlog via socket.
+EOF
+}
+
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <socket-type: unix|tcp> <cabal-executable> [program-args...]" >&2
+    print_usage
     exit 1
 fi
 
@@ -18,24 +25,27 @@ APP_STDOUT="${APP_STDOUT:-/tmp/${TARGET}.stdout}"
 
 APP_PID=""
 NC_PID=""
+ACTIVE_NC_PID=""
 
-case "$SOCKET_TYPE" in
-    unix)
-        SOCKET_PATH="${EVENTLOG_SOCKET_PATH:-/tmp/${TARGET}_eventlog.sock}"
-        export FIBBER_EVENTLOG_SOCKET="$SOCKET_PATH"
-        export GHC_EVENTLOG_SOCKET="$SOCKET_PATH"
-        ;;
-    tcp)
-        export FIBBER_EVENTLOG_TCP_HOST="$TCP_HOST"
-        export FIBBER_EVENTLOG_TCP_PORT="$TCP_PORT"
-        export GHC_EVENTLOG_TCP_HOST="$TCP_HOST"
-        export GHC_EVENTLOG_TCP_PORT="$TCP_PORT"
-        ;;
-    *)
-        echo "Unknown socket type: $SOCKET_TYPE (expected unix or tcp)" >&2
-        exit 1
-        ;;
-esac
+init_socket_env() {
+  case "$SOCKET_TYPE" in
+        unix)
+            SOCKET_PATH="${EVENTLOG_SOCKET_PATH:-/tmp/${TARGET}_eventlog.sock}"
+            export FIBBER_EVENTLOG_SOCKET="$SOCKET_PATH"
+            export GHC_EVENTLOG_SOCKET="$SOCKET_PATH"
+            ;;
+        tcp)
+            export FIBBER_EVENTLOG_TCP_HOST="$TCP_HOST"
+            export FIBBER_EVENTLOG_TCP_PORT="$TCP_PORT"
+            export GHC_EVENTLOG_TCP_HOST="$TCP_HOST"
+            export GHC_EVENTLOG_TCP_PORT="$TCP_PORT"
+            ;;
+        *)
+            echo "Unknown socket type: $SOCKET_TYPE (expected unix or tcp)" >&2
+            exit 1
+            ;;
+    esac
+}
 
 log() {
     printf '[test-normal] %s\n' "$*"
@@ -71,6 +81,8 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+init_socket_env
 
 wait_for_socket() {
     case "$SOCKET_TYPE" in
@@ -138,7 +150,7 @@ if [ $APP_STATUS -ne 0 ]; then
 fi
 
 test -s "$EVENTLOG_PATH"
-log "Eventlog captured at $EVENTLOG_PATH; running ghc-events..."
+log "Eventlog captured at $EVENTLOG_PATH"
 summarize_eventlog "$EVENTLOG_PATH"
 
 log "Test completed successfully."
