@@ -4,10 +4,12 @@
 
 extern const EventLogWriter SocketEventLogWriter;
 
-void eventlog_socket_init(const char *sock_path);
+void eventlog_socket_init_unix(const char *sock_path);
+void eventlog_socket_init_tcp(const char *host, const char *port);
 
 void eventlog_socket_wait(void);
 
-void eventlog_socket_start(const char *sock_path, bool wait);
+void eventlog_socket_start_unix(const char *sock_path, bool wait);
+void eventlog_socket_start_tcp(const char *host, const char *port, bool wait);
 
 #endif

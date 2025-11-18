@@ -30,7 +30,7 @@ c_start' block socketPath =
     withCString socketPath $ \socketPathCString ->
     c_start socketPathCString block
 
-foreign import capi safe "eventlog_socket.h eventlog_socket_start"
+foreign import capi safe "eventlog_socket.h eventlog_socket_start_unix"
     c_start :: CString -> Bool -> IO ()
 
 foreign import capi safe "eventlog_socket.h eventlog_socket_wait"

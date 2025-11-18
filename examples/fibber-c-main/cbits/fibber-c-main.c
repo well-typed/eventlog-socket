@@ -15,7 +15,7 @@ int main (int argc, char *argv[])
 
     // Start the eventlog writer:
     const char* sock_path = getenv("GHC_EVENTLOG_SOCKET");
-    eventlog_socket_init(sock_path);
+    eventlog_socket_init_unix(sock_path);
     // Wait for the monitoring process to connect.
     eventlog_socket_wait();
 
