@@ -19,9 +19,9 @@ run_step() {
 }
 
 run_step "Test fibber (finite)" "$TESTS_DIR/test-normal.sh" unix fibber 30
-run_step "Test fibber (forever, with reconnect)" "$TESTS_DIR/test-reconnect.sh" fibber --forever 24
+run_step "Test fibber (forever, with reconnect)" "$TESTS_DIR/test-reconnect.sh" unix fibber --forever 24
 run_step "Test fibber-tcp (finite)" "$TESTS_DIR/test-normal.sh" tcp fibber-tcp 24
 run_step "Test fibber-c-main (finite)" "$TESTS_DIR/test-normal.sh" unix fibber-c-main 30
-run_step "Test fibber-c-main (forever, with reconnect)" "$TESTS_DIR/test-reconnect.sh" fibber-c-main --forever 24
+run_step "Test fibber-c-main (forever, with reconnect)" "$TESTS_DIR/test-reconnect.sh" unix fibber-c-main --forever 24
 
 printf '\nAll requested steps completed.\n'
