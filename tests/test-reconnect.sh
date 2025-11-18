@@ -25,6 +25,19 @@ log() {
     printf '[test-reconnect] %s\n' "$*"
 }
 
+summarize_eventlog() {
+    file="$1"
+    tmp_output="$(mktemp)"
+    if ghc-events show "$file" >"$tmp_output"; then
+        line_count=$(wc -l <"$tmp_output")
+        log "ghc-events output for $file: ${line_count} lines"
+    else
+        rm -f "$tmp_output"
+        return 1
+    fi
+    rm -f "$tmp_output"
+}
+
 cleanup() {
     if [ -n "${APP_PID:-}" ] && kill -0 "$APP_PID" 2>/dev/null; then
         log "Terminating $TARGET (pid=$APP_PID)"
@@ -115,7 +128,7 @@ sleep 1
 capture_eventlog "$SECOND_EVENTLOG" "$CAPTURE_DURATION"
 
 log "Validating captured eventlogs..."
-ghc-events show "$FIRST_EVENTLOG"
-ghc-events show "$SECOND_EVENTLOG"
+summarize_eventlog "$FIRST_EVENTLOG"
+summarize_eventlog "$SECOND_EVENTLOG"
 
 log "Reconnect test completed successfully."
