@@ -45,14 +45,21 @@ jobs:
           ghc-events-version: "0.20.0.0"
           ghc-version: ${{ matrix.ghc-version }}
 
-      - name: 🧪 Test
-        # NOTE: The fibber script appears to hang on macOS runners.
+      - name: 🧪 Test fibber (finite)
         if: ${{ runner.os == 'Linux' }}
-        run: ./examples/fibber/fibber.sh
+        run: tests/test-normal.sh fibber 24
 
-      - name: 🔁 Test reconnect
+      - name: 🧪 Test fibber (forever, with reconnect)
         if: ${{ runner.os == 'Linux' }}
-        run: ./examples/fibber-c-reconnect/test/reconnect.sh
+        run: tests/test-reconnect.sh fibber --forever 24
+
+      - name: 🛠️ Test fibber-c-main (finite)
+        if: ${{ runner.os == 'Linux' }}
+        run: tests/test-normal.sh fibber-c-main 24
+
+      - name: 🔁 Test fibber-c-main (forever, with reconnect)
+        if: ${{ runner.os == 'Linux' }}
+        run: tests/test-reconnect.sh fibber-c-main --forever 30
 
     strategy:
       matrix:
