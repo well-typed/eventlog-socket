@@ -2,3 +2,4 @@ dist-newstyle
 .vscode
 cabal.project.local
 eventlog_socket.o
+*.eventlog
