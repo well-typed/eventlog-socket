@@ -83,6 +83,21 @@ struct listener_config {
   const char *tcp_port;
 };
 
+static bool listener_config_valid(const struct listener_config *config) {
+  if (config == NULL) {
+    return false;
+  }
+
+  switch (config->kind) {
+    case LISTENER_UNIX:
+      return config->sock_path != NULL;
+    case LISTENER_TCP:
+      return config->tcp_port != NULL;
+    default:
+      return false;
+  }
+}
+
 static void cleanup_socket(void) {
     if (g_sock_path) unlink(g_sock_path);
 }
@@ -604,20 +619,36 @@ static void ensure_initialized(void)
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
 // It only sets up the listener and condition variable; the RTS will invoke
 // startEventLogging() itself during initialization.
-void eventlog_socket_init(const char *sock_path)
+static void eventlog_socket_init(const struct listener_config *config)
 {
   ensure_initialized();
 
-  if (!sock_path)
+  if (!listener_config_valid(config))
     return;
 
+  open_socket(config);
+}
+
+void eventlog_socket_init_unix(const char *sock_path)
+{
   struct listener_config config = {
     .kind = LISTENER_UNIX,
     .sock_path = sock_path,
     .tcp_host = NULL,
     .tcp_port = NULL,
   };
-  open_socket(&config);
+  eventlog_socket_init(&config);
+}
+
+void eventlog_socket_init_tcp(const char *host, const char *port)
+{
+  struct listener_config config = {
+    .kind = LISTENER_TCP,
+    .sock_path = NULL,
+    .tcp_host = host,
+    .tcp_port = port,
+  };
+  eventlog_socket_init(&config);
 }
 
 void eventlog_socket_wait(void)
@@ -634,11 +665,11 @@ void eventlog_socket_wait(void)
 
 // Use this from an already-running RTS: it reconfigures eventlogging to use
 // SocketEventLogWriter and restarts the log when a client connects.
-void eventlog_socket_start(const char *sock_path, bool wait)
+static void eventlog_socket_start(const struct listener_config *config, bool wait)
 {
   ensure_initialized();
 
-  if (!sock_path)
+  if (!listener_config_valid(config))
     return;
 
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
@@ -661,17 +692,42 @@ void eventlog_socket_start(const char *sock_path, bool wait)
   // warning messages from showing up in stderr.
   startEventLogging(&SocketEventLogWriter);
 
+  open_socket(config);
+  if (wait) {
+    switch (config->kind) {
+      case LISTENER_UNIX:
+        DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", config->sock_path);
+        break;
+      case LISTENER_TCP: {
+        const char *host = config->tcp_host ? config->tcp_host : "*";
+        DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", host, config->tcp_port);
+        break;
+      }
+      default:
+        break;
+    }
+    eventlog_socket_wait();
+  }
+}
+
+void eventlog_socket_start_unix(const char *sock_path, bool wait)
+{
   struct listener_config config = {
     .kind = LISTENER_UNIX,
     .sock_path = sock_path,
     .tcp_host = NULL,
     .tcp_port = NULL,
   };
-  open_socket(&config);
-  if (wait) {
-    DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", sock_path);
-    eventlog_socket_wait();
-  }
+  eventlog_socket_start(&config, wait);
+}
 
-
+void eventlog_socket_start_tcp(const char *host, const char *port, bool wait)
+{
+  struct listener_config config = {
+    .kind = LISTENER_TCP,
+    .sock_path = NULL,
+    .tcp_host = host,
+    .tcp_port = port,
+  };
+  eventlog_socket_start(&config, wait);
 }
