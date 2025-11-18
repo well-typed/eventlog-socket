@@ -7,18 +7,7 @@ A library to send GHC's eventlog stream over a Unix domain socket.
 
 To use the code in this repository to profile your own application, follow these steps.
 
-### Add `eventlog-socket` as a dependency
-
-The `eventlog-socket` package is not yet published on Hackage, so you must add it to your `cabal.project` file as a source repository package:
-
-```cabal
-source-repository-package
-  type:     git
-  location: https://github.com/well-typed/eventlog-socket
-  tag:      LATEST_COMMIT_HASH
-```
-
-Then add `eventlog-socket` to the `build-depends` for your application:
+Add `eventlog-socket` to the `build-depends` for your application:
 
 ```cabal
 executable my-app
@@ -59,3 +48,7 @@ For an example of an instrumented application, see [examples/fibber](examples/fi
 If you instrument your application from Haskell, the GHC RTS is started with the default file writer, and only swiches over to the socket writer once `GHC.Eventlog.Socket.start` is evaluated. This means that running your application will still create an initial eventlog file and that some events might be lost. To avoid this, you can instrument your application from C, by writing a custom C main file.
 
 For an example of an application instrumented from a custom C main, see [examples/fibber-c-main](examples/fibber-c-main/).
+
+# Running tests
+
+The `./ci.sh` script can be executed to run the eventlog-socket tests.
