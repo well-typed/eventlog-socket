@@ -110,22 +110,19 @@ class TestRunner:
     def _setup_paths(self) -> None:
         target = self.case.target
         tmp = Path(tempfile.gettempdir())
-        self.app_stdout = Path(os.environ.get("APP_STDOUT", tmp / f"{target}.stdout"))
+        self.app_stdout = Path(tmp / f"{target}.stdout")
 
     def init_socket_env(self) -> None:
         target = self.case.target
         if self.case.socket_type == "unix":
-            sock_path = Path(os.environ.get("EVENTLOG_SOCKET_PATH", f"/tmp/{target}_eventlog.sock"))
+            sock_path = Path(f"/tmp/{target}_eventlog.sock")
             self.socket_path = sock_path
             self.env["FIBBER_EVENTLOG_SOCKET"] = str(sock_path)
-            self.env["GHC_EVENTLOG_SOCKET"] = str(sock_path)
         elif self.case.socket_type == "tcp":
             host = self.tcp_host
             port = str(self.tcp_port)
             self.env["FIBBER_EVENTLOG_TCP_HOST"] = host
             self.env["FIBBER_EVENTLOG_TCP_PORT"] = port
-            self.env["GHC_EVENTLOG_TCP_HOST"] = host
-            self.env["GHC_EVENTLOG_TCP_PORT"] = port
         else:
             raise ValueError(f"Unknown socket type {self.case.socket_type}")
 
