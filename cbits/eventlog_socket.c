@@ -136,7 +136,7 @@ static pthread_cond_t new_conn_cond;
 // Signal to the control thread to start.
 static pthread_cond_t control_ready_cond;
 // Whether we have started the control thread
-static bool control_ready = false;
+static volatile bool control_ready = false;
 // Whether the controller thread is ready to start
 static bool control_ready_armed = false;
 // Global mutex guarding all shared state between RTS threads, the worker thread,
@@ -227,11 +227,11 @@ static enum control_recv_status control_receive_command(int fd, enum control_com
   if (status != CONTROL_RECV_OK)
     return status;
 
-  switch (cmd_id) {
+  switch ((enum control_command) cmd_id) {
     case CONTROL_CMD_START_HEAP_PROFILING:
     case CONTROL_CMD_STOP_HEAP_PROFILING:
     case CONTROL_CMD_REQUEST_HEAP_PROFILE:
-      *cmd_out = (enum control_command)cmd_id;
+      *cmd_out = cmd_id;
       DEBUG_ERR("control command 0x%02x\n", cmd_id);
       break;
     default:
