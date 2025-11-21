@@ -10,9 +10,10 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Optional
 
 from cases import TestCase, default_cases
 from scripts import ControlScript, ControlContext
