@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from cases import TestCase, default_cases
-from scripts import ControlScript, ControlContext
+from .cases import TestCase, default_cases
+from .scripts import ControlScript, ControlContext
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CAPTURE_DURATION = 2.0
