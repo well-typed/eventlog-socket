@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -62,11 +63,15 @@ class EventlogCapture(threading.Thread):
         self.join(timeout=5)
 
 
+@dataclass
 class ControlBridge:
-    def __init__(self, sock: socket.socket, script: Optional[ControlScript]):
-        self.sock = sock
-        self.script = script
-        self.thread: Optional[threading.Thread] = None
+    sock: socket.socket
+    script: Optional[ControlScript]
+    thread: Optional[threading.Thread] = field(init=False)
+    stop_event: threading.Event = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.thread = None
         self.stop_event = threading.Event()
 
     def start(self) -> None:
@@ -92,41 +97,43 @@ class ControlBridge:
         if self.thread:
             self.thread.join(timeout=5)
 
-
+@dataclass
 class TestRunner:
-    def __init__(self, case: TestCase, control_script: Optional[ControlScript], keep_eventlogs: bool = False, print_stdout: bool = False):
-        self.case = case
-        self.control_script = control_script
-        self.keep_eventlogs = keep_eventlogs
-        self.print_stdout = print_stdout
+    testCase: TestCase
+    control_script: Optional[ControlScript]
+    keep_eventlogs: bool = False
+    print_stdout: bool = False
+    env: dict[str,str] = field(init=False)
+    socket_path: Optional[Path] = field(init=False)
+    tcp_host: str = field(init=False)
+    tcp_port: int = field(init=False)
+    capture_duration: float = field(init=False)
+    app_stdout: Path = field(init=False)
+
+    def __post_init__(self) -> None:
         self.env = os.environ.copy()
-        self.socket_path: Optional[Path] = None
+        self.socket_path = None
         self.tcp_host = self.env.get("EVENTLOG_TCP_HOST", "127.0.0.1")
         self.tcp_port = int(self.env.get("EVENTLOG_TCP_PORT", "4242"))
         self.capture_duration = float(self.env.get("RECONNECT_CAPTURE_DURATION", DEFAULT_CAPTURE_DURATION))
-        self._setup_paths()
-
-    def _setup_paths(self) -> None:
-        target = self.case.target
-        tmp = Path(tempfile.gettempdir())
-        self.app_stdout = Path(tmp / f"{target}.stdout")
+        self.app_stdout = Path(tempfile.gettempdir()) / f"{self.testCase.target}.stdout"
 
     def init_socket_env(self) -> None:
-        target = self.case.target
-        if self.case.socket_type == "unix":
+        target = self.testCase.target
+        if self.testCase.socket_type == "unix":
             sock_path = Path(f"/tmp/{target}_eventlog.sock")
             self.socket_path = sock_path
             self.env["FIBBER_EVENTLOG_SOCKET"] = str(sock_path)
-        elif self.case.socket_type == "tcp":
+        elif self.testCase.socket_type == "tcp":
             host = self.tcp_host
             port = str(self.tcp_port)
             self.env["FIBBER_EVENTLOG_TCP_HOST"] = host
             self.env["FIBBER_EVENTLOG_TCP_PORT"] = port
         else:
-            raise ValueError(f"Unknown socket type {self.case.socket_type}")
+            raise ValueError(f"Unknown socket type {self.testCase.socket_type}")
 
     def build_target(self) -> None:
-        run_command(["cabal", "build", self.case.target], env=self.env, cwd=ROOT_DIR)
+        run_command(["cabal", "build", self.testCase.target], env=self.env, cwd=ROOT_DIR)
 
     def cleanup_paths(self) -> None:
         if self.app_stdout.exists():
@@ -140,7 +147,7 @@ class TestRunner:
         if not self.app_stdout.exists():
             log(f"[stdout] {self.app_stdout} missing")
             return
-        log(f"--- begin stdout ({self.case.target}) ---")
+        log(f"--- begin stdout ({self.testCase.target}) ---")
         with open(self.app_stdout, "r", encoding="utf-8", errors="replace") as handle:
             contents = handle.read()
             if contents:
@@ -150,22 +157,22 @@ class TestRunner:
                 sys.stdout.flush()
             else:
                 log("(stdout empty)")
-        log(f"--- end stdout ({self.case.target}) ---")
+        log(f"--- end stdout ({self.testCase.target}) ---")
 
     def launch_target(self) -> subprocess.Popen:
         eventlog_rts = []
-        if self.case.mode == "reconnect":
+        if self.testCase.mode == "reconnect":
             eventlog_rts = ["+RTS", "--eventlog-flush-interval=1", "-RTS"]
 
-        args = ["cabal", "run", self.case.target, "--", "+RTS", "-hT", "--no-automatic-heap-samples", "-RTS", *eventlog_rts, *self.case.args]
+        args = ["cabal", "run", self.testCase.target, "--", "+RTS", "-hT", "--no-automatic-heap-samples", "-RTS", *eventlog_rts, *self.testCase.args]
         stdout_file = open(self.app_stdout, "w", encoding="utf-8", errors="replace")
         proc = subprocess.Popen(args, stdout=stdout_file, stderr=subprocess.STDOUT, cwd=ROOT_DIR, env=self.env)
         self._stdout_handle = stdout_file
-        log(f"Launched {self.case.target} (pid={proc.pid})")
+        log(f"Launched {self.testCase.target} (pid={proc.pid})")
         return proc
 
     def wait_for_socket(self) -> None:
-        if self.case.socket_type == "unix":
+        if self.testCase.socket_type == "unix":
             assert self.socket_path is not None
             for _ in range(40):
                 if self.socket_path.exists():
@@ -178,7 +185,7 @@ class TestRunner:
             time.sleep(1)
 
     def connect_socket(self) -> socket.socket:
-        if self.case.socket_type == "unix":
+        if self.testCase.socket_type == "unix":
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             assert self.socket_path is not None
             sock.connect(str(self.socket_path))
@@ -208,14 +215,14 @@ class TestRunner:
             return result.stdout
 
     def run(self) -> None:
-        log(f"=== {self.case.description} ===")
+        log(f"=== {self.testCase.description} ===")
         self.init_socket_env()
         self.build_target()
         self.cleanup_paths()
         proc = self.launch_target()
         try:
             self.wait_for_socket()
-            if self.case.mode == "reconnect":
+            if self.testCase.mode == "reconnect":
                 self.run_reconnect(proc)
             else:
                 self.run_normal(proc)
@@ -226,7 +233,7 @@ class TestRunner:
 
     @contextmanager
     def _temporary_eventlog(self, tag: str) -> Iterator[Path]:
-        fd, name = tempfile.mkstemp(suffix=".eventlog", prefix=f"{self.case.target}_{tag}_")
+        fd, name = tempfile.mkstemp(suffix=".eventlog", prefix=f"{self.testCase.target}_{tag}_")
         os.close(fd)
         path = Path(name)
         try:
@@ -247,9 +254,9 @@ class TestRunner:
             bridge.stop()
             sock.close()
             if rc != 0:
-                raise RuntimeError(f"{self.case.target} exited with {rc}")
+                raise RuntimeError(f"{self.testCase.target} exited with {rc}")
             output = self.summarize_eventlog(eventlog_path)
-            self.case.verify_eventlog(eventlog_path, output)
+            self.testCase.verify_eventlog(eventlog_path, output)
 
     def capture_for_duration(self, output: Path, duration: float) -> None:
         sock = self.connect_socket()
@@ -268,15 +275,15 @@ class TestRunner:
         with self._temporary_eventlog("first") as first_eventlog, self._temporary_eventlog("second") as second_eventlog:
             self.capture_for_duration(first_eventlog, self.capture_duration)
             if proc.poll() is not None:
-                raise RuntimeError(f"{self.case.target} exited unexpectedly; see {self.app_stdout}")
+                raise RuntimeError(f"{self.testCase.target} exited unexpectedly; see {self.app_stdout}")
             time.sleep(1)
             self.capture_for_duration(second_eventlog, self.capture_duration)
             proc.terminate()
             proc.wait()
             first_output = self.summarize_eventlog(first_eventlog)
-            self.case.verify_eventlog(first_eventlog, first_output)
+            self.testCase.verify_eventlog(first_eventlog, first_output)
             second_output = self.summarize_eventlog(second_eventlog)
-            self.case.verify_eventlog(second_eventlog, second_output)
+            self.testCase.verify_eventlog(second_eventlog, second_output)
 
 
 def main() -> None:
