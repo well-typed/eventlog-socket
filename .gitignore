@@ -1,6 +1,16 @@
-dist-newstyle
-.vscode
+# Haskell
+/dist-newstyle
 cabal.project.local
-eventlog_socket.o
 *.eventlog
+*.o
+*.hp
+
+# VSCode
+/.vscode
+
+# Python
 __pycache__
+.ruff_cache
+.venv
+dist
+*.egg-info
