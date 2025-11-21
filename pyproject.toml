@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tests"
+version = "0.1.0.0"
+description = "Tests for eventlog-socket"
+dependencies = []
+requires-python = ">= 3.10"
+
+[project.scripts]
+run_tests = "tests.run_tests:main"
+
+[tool.setuptools]
+packages = ["tests"]
+
+# [tool.setuptools.package-dir]
+# tests = "."
