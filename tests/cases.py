@@ -1,6 +1,4 @@
 """Test case definitions for the Python harness."""
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List
