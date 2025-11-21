@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
-from scripts import ControlScript, start_heap_profiling, request_heap_profile, script_junk_then_sample
+from .scripts import ControlScript, start_heap_profiling, request_heap_profile, script_junk_then_sample
 
 
 @dataclass
