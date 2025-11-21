@@ -1,7 +1,7 @@
 """Test case definitions for the Python harness."""
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable
 from scripts import ControlScript, start_heap_profiling, request_heap_profile, script_junk_then_sample
 
 
@@ -11,8 +11,8 @@ class EventlogAssertions:
 
     min_lines: int | None = None
     max_lines: int | None = None
-    grep_includes: List[str] = field(default_factory=list)
-    grep_excludes: List[str] = field(default_factory=list)
+    grep_includes: list[str] = field(default_factory=list)
+    grep_excludes: list[str] = field(default_factory=list)
 
     def verify(self, path: Path, output: str) -> None:
         lines = output.splitlines()
@@ -39,7 +39,7 @@ class TestCase:
     socket_type: str
     mode: str
     target: str
-    args: List[str]
+    args: list[str]
     control_script: ControlScript | None = None
     eventlog_assertions: EventlogAssertions | None = None
 
@@ -60,7 +60,7 @@ HEAP_PROF_SAMPLE_1_PATTERN = "heap prof sample 1"
 def eventlog_assertions_no_start(
     *,
     min_lines: int | None = None,
-    grep_includes: List[str] | None = None,
+    grep_includes: list[str] | None = None,
 ) -> EventlogAssertions:
     return EventlogAssertions(
         min_lines=min_lines,
@@ -91,9 +91,9 @@ one_shot_num = "35"
 class ProgramScenario:
     target: str
     socket_type: str
-    args: List[str]
+    args: list[str]
 
-    def args_for_mode(self, mode: str) -> List[str]:
+    def args_for_mode(self, mode: str) -> list[str]:
         if mode == "normal":
             return self.args
         if mode == "reconnect":
@@ -108,7 +108,7 @@ class ControlScenario:
     assertions_factory: Callable[[str], EventlogAssertions]
 
 
-PROGRAM_SCENARIOS: List[ProgramScenario] = [
+PROGRAM_SCENARIOS: list[ProgramScenario] = [
     ProgramScenario(
         target="fibber",
         socket_type="unix",
@@ -132,7 +132,7 @@ def _no_control_assertions(mode: str) -> EventlogAssertions:
     return eventlog_assertions_no_start(min_lines=min_lines)
 
 
-CONTROL_SCENARIOS: List[ControlScenario] = [
+CONTROL_SCENARIOS: list[ControlScenario] = [
     ControlScenario("", None, _no_control_assertions),
     ControlScenario(
         ", start heap profiling",
@@ -158,8 +158,8 @@ MODE_LABELS = {
 }
 
 
-def default_cases() -> List[TestCase]:
-    cases: List[TestCase] = []
+def default_cases() -> list[TestCase]:
+    cases: list[TestCase] = []
     for program in PROGRAM_SCENARIOS:
         for mode in ("normal", "reconnect"):
             args = program.args_for_mode(mode)
