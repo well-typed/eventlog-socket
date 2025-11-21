@@ -1,7 +1,7 @@
 """Declarative control scripts for ghc-eventlog-socket tests."""
 from __future__ import annotations
 
-from typing import Callable, Dict
+from typing import Callable
 import time
 
 CONTROL_MAGIC = b"GCTL"
