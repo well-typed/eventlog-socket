@@ -75,10 +75,10 @@ class ControlBridge:
         self.stop_event = threading.Event()
 
     def start(self) -> None:
-        if not self.script:
-            return
-
         def runner() -> None:
+            if not self.script:
+                return
+
             ctx = ControlContext(self.sock.sendall)
             try:
                 self.script(ctx)
