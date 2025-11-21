@@ -1,1 +1,1 @@
-"""Python-based test harness for ghc-eventlog-socket."""
+"""Python-based test harness for eventlog-socket."""
