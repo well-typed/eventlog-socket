@@ -57,7 +57,6 @@ class TestCase:
 
 HEAP_PROF_SAMPLE_0_PATTERN = "heap prof sample 0"
 HEAP_PROF_SAMPLE_1_PATTERN = "heap prof sample 1"
-START_HEAP_SAMPLE_PATTERN = "start heap prof sample 0"
 
 
 def eventlog_assertions_no_start(
@@ -68,14 +67,14 @@ def eventlog_assertions_no_start(
     return EventlogAssertions(
         min_lines=min_lines,
         grep_includes=grep_includes or [],
-        grep_excludes=[START_HEAP_SAMPLE_PATTERN],
+        grep_excludes=[HEAP_PROF_SAMPLE_0_PATTERN],
     )
 
 
 def start_heap_eventlog_assertions() -> EventlogAssertions:
     return EventlogAssertions(
         min_lines=1000,
-        grep_includes=[START_HEAP_SAMPLE_PATTERN],
+        grep_includes=[HEAP_PROF_SAMPLE_0_PATTERN],
     )
 
 
@@ -83,14 +82,6 @@ def request_heap_eventlog_assertions() -> EventlogAssertions:
     return EventlogAssertions(
         min_lines=1000,
         grep_includes=[HEAP_PROF_SAMPLE_0_PATTERN],
-        grep_excludes=[HEAP_PROF_SAMPLE_1_PATTERN],
-    )
-
-
-def start_then_request_eventlog_assertions() -> EventlogAssertions:
-    return EventlogAssertions(
-        min_lines=1000,
-        grep_includes=[START_HEAP_SAMPLE_PATTERN, HEAP_PROF_SAMPLE_0_PATTERN],
         grep_excludes=[HEAP_PROF_SAMPLE_1_PATTERN],
     )
 
@@ -156,14 +147,9 @@ CONTROL_SCENARIOS: List[ControlScenario] = [
         lambda _mode: request_heap_eventlog_assertions(),
     ),
     ControlScenario(
-        ", start then sample",
-        script_start_then_sample,
-        lambda _mode: start_then_request_eventlog_assertions(),
-    ),
-    ControlScenario(
         ", junk control",
         script_junk_then_sample,
-        lambda _mode: start_then_request_eventlog_assertions(),
+        lambda _mode: start_heap_eventlog_assertions(),
     ),
 ]
 

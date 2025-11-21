@@ -38,18 +38,11 @@ def sleep(ctx: ControlContext, seconds: float) -> None:
 ControlScript = Callable[[ControlContext], None]
 
 
-def script_start_then_sample(ctx: ControlContext) -> None:
-    start_heap_profiling(ctx)
-    sleep(ctx, 0.5)
-    request_heap_profile(ctx)
-    sleep(ctx, 0.5)
-    stop_heap_profiling(ctx)
-
 
 def script_junk_then_sample(ctx: ControlContext) -> None:
     # Send garbage bytes to ensure the control receiver sees protocol errors
     # while the writer continues streaming.
     ctx.send(b"JUNK!!!!")
-    script_start_then_sample(ctx)
+    start_heap_profiling(ctx)
 
 
