@@ -1,9 +1,12 @@
 """Declarative control scripts for ghc-eventlog-socket tests."""
 from typing import Callable
 import time
+import struct
 
 CONTROL_MAGIC = b"GCTL"
 CONTROL_NAMESPACE_CORE = 0
+CUSTOM_COMMAND_NAMESPACE = 0x44454D4F
+CUSTOM_COMMAND_ID = 0x01
 
 class ControlContext:
     """Simple wrapper providing helper methods to send control commands."""
@@ -32,6 +35,10 @@ def request_heap_profile(ctx: ControlContext) -> None:
     control_send_command(ctx, 0x03)
 
 
+def send_custom_command(ctx: ControlContext) -> None:
+    control_send_command(ctx, CUSTOM_COMMAND_ID, namespace=CUSTOM_COMMAND_NAMESPACE)
+
+
 def sleep(ctx: ControlContext, seconds: float) -> None:
     time.sleep(seconds)
 
@@ -44,5 +51,3 @@ def script_junk_then_sample(ctx: ControlContext) -> None:
     # while the writer continues streaming.
     ctx.send(b"JUNK!!!!")
     start_heap_profiling(ctx)
-
-
