@@ -1,10 +1,19 @@
 #ifndef EVENGLOG_SOCKET_H
 #define EVENGLOG_SOCKET_H
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <Rts.h>
 #include <rts/EventLogWriter.h>
 
 extern const EventLogWriter SocketEventLogWriter;
+
+typedef void (*eventlog_control_command_handler)(uint32_t namespace_id, uint8_t cmd_id, void *user_data);
+
+bool eventlog_socket_register_control_command(uint32_t namespace_id,
+                                              uint8_t cmd_id,
+                                              eventlog_control_command_handler handler,
+                                              void *user_data);
 
 void eventlog_socket_init_unix(const char *sock_path);
 void eventlog_socket_init_tcp(const char *host, const char *port);
