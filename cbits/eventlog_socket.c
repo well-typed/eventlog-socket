@@ -26,12 +26,14 @@
 #define POLL_WRITE_TIMEOUT 1000
 #define CONTROL_MAGIC "GCTL"
 #define CONTROL_MAGIC_LEN 4
+#define CONTROL_NAMESPACE_LEN 4
 
 enum control_command {
   CONTROL_CMD_START_HEAP_PROFILING = 0x01,
   CONTROL_CMD_STOP_HEAP_PROFILING = 0x02,
   CONTROL_CMD_REQUEST_HEAP_PROFILE = 0x03,
 };
+#define CONTROL_NAMESPACE_CORE 0
 
 #ifndef POLLRDHUP
 #define POLLRDHUP POLLHUP
@@ -61,8 +63,20 @@ enum control_recv_status {
   CONTROL_RECV_PROTOCOL_ERROR,
   CONTROL_RECV_DISCONNECTED,
 };
-static enum control_recv_status control_receive_command(int fd, enum control_command *cmd_out);
-static void handle_control_command(enum control_command cmd);
+typedef void (*control_command_handler_fn)(uint32_t namespace_id, uint8_t cmd_id, void *user_data);
+
+struct control_handler_entry {
+  uint32_t namespace_id;
+  uint8_t cmd_id;
+  control_command_handler_fn handler;
+  void *user_data;
+  struct control_handler_entry *next;
+};
+
+static enum control_recv_status control_receive_command(int fd, uint32_t *namespace_out, uint8_t *cmd_out);
+static void handle_control_command(uint32_t namespace_id, uint8_t cmd);
+static bool register_control_command(uint32_t namespace_id, uint8_t cmd_id, control_command_handler_fn handler, void *user_data);
+static void register_builtin_control_commands(void);
 
 /*********************************************************************************
  * data definitions
@@ -139,6 +153,9 @@ static pthread_cond_t control_ready_cond;
 static bool control_ready = false;
 // Whether the controller thread is ready to start
 static bool control_ready_armed = false;
+// Registry of control command handlers
+static struct control_handler_entry *control_handlers = NULL;
+static bool control_handlers_initialized = false;
 // Global mutex guarding all shared state between RTS threads, the worker thread,
 // and the detached control receiver. Only client_fd and wt need protection, but
 // using a single mutex ensures we keep their updates consistent.
@@ -210,7 +227,92 @@ static enum control_recv_status control_read_exact(int fd, uint8_t *buf, size_t 
   return CONTROL_RECV_OK;
 }
 
-static enum control_recv_status control_receive_command(int fd, enum control_command *cmd_out)
+static bool register_control_command(uint32_t namespace_id, uint8_t cmd_id,
+                                     control_command_handler_fn handler, void *user_data)
+{
+  if (handler == NULL) {
+    return false;
+  }
+
+  bool success = false;
+  pthread_mutex_lock(&mutex);
+  struct control_handler_entry *entry = control_handlers;
+  while (entry != NULL) {
+    if (entry->cmd_id == cmd_id && entry->namespace_id == namespace_id) {
+      PRINT_ERR("warning: duplicate registration for namespace 0x%08x command 0x%02x; keeping existing handler\n",
+                namespace_id, cmd_id);
+      goto out;
+    }
+    entry = entry->next;
+  }
+
+  entry = malloc(sizeof(struct control_handler_entry));
+  if (entry == NULL) {
+    PRINT_ERR("control: failed to allocate handler entry\n");
+    goto out;
+  }
+  entry->namespace_id = namespace_id;
+  entry->cmd_id = cmd_id;
+  entry->handler = handler;
+  entry->user_data = user_data;
+  entry->next = control_handlers;
+  control_handlers = entry;
+  success = true;
+
+out:
+  pthread_mutex_unlock(&mutex);
+  return success;
+}
+
+static void control_start_heap_profiling(uint32_t namespace_id, uint8_t cmd, void *user_data)
+{
+  (void)cmd;
+  (void)namespace_id;
+  (void)user_data;
+  DEBUG0_ERR("control: startHeapProfiling\n");
+  startHeapProfTimer();
+}
+
+static void control_stop_heap_profiling(uint32_t namespace_id, uint8_t cmd, void *user_data)
+{
+  (void)cmd;
+  (void)namespace_id;
+  (void)user_data;
+  DEBUG0_ERR("control: stopHeapProfiling\n");
+  stopHeapProfTimer();
+}
+
+static void control_request_heap_profile(uint32_t namespace_id, uint8_t cmd, void *user_data)
+{
+  (void)cmd;
+  (void)namespace_id;
+  (void)user_data;
+  DEBUG0_ERR("control: requestHeapProfile\n");
+  requestHeapCensus();
+}
+
+static void register_builtin_control_commands(void)
+{
+  if (control_handlers_initialized) {
+    return;
+  }
+
+  bool ok = true;
+  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE, CONTROL_CMD_START_HEAP_PROFILING,
+                                      control_start_heap_profiling, NULL);
+  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE, CONTROL_CMD_STOP_HEAP_PROFILING,
+                                      control_stop_heap_profiling, NULL);
+  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE, CONTROL_CMD_REQUEST_HEAP_PROFILE,
+                                      control_request_heap_profile, NULL);
+
+  if (!ok) {
+    PRINT_ERR("failed to register builtin control commands\n");
+  } else {
+    control_handlers_initialized = true;
+  }
+}
+
+static enum control_recv_status control_receive_command(int fd, uint32_t *namespace_out, uint8_t *cmd_out)
 {
   uint8_t header[CONTROL_MAGIC_LEN];
   enum control_recv_status status =
@@ -222,44 +324,46 @@ static enum control_recv_status control_receive_command(int fd, enum control_com
               header[0], header[1], header[2], header[3]);
     return CONTROL_RECV_PROTOCOL_ERROR;
   }
+  uint8_t namespace_buf[CONTROL_NAMESPACE_LEN];
+  status = control_read_exact(fd, namespace_buf, sizeof(namespace_buf));
+  if (status != CONTROL_RECV_OK)
+    return status;
+  uint32_t namespace_net = 0;
+  memcpy(&namespace_net, namespace_buf, sizeof(namespace_net));
+  uint32_t namespace_id = ntohl(namespace_net);
   uint8_t cmd_id = 0;
   status = control_read_exact(fd, &cmd_id, 1);
   if (status != CONTROL_RECV_OK)
     return status;
 
-  switch (cmd_id) {
-    case CONTROL_CMD_START_HEAP_PROFILING:
-    case CONTROL_CMD_STOP_HEAP_PROFILING:
-    case CONTROL_CMD_REQUEST_HEAP_PROFILE:
-      *cmd_out = (enum control_command)cmd_id;
-      DEBUG_ERR("control command 0x%02x\n", cmd_id);
-      break;
-    default:
-      PRINT_ERR("unknown control command id 0x%02x\n", cmd_id);
-      return CONTROL_RECV_PROTOCOL_ERROR;
-  }
-
+  *namespace_out = namespace_id;
+  *cmd_out = cmd_id;
+  DEBUG_ERR("control command namespace=0x%08x id=0x%02x\n", namespace_id, cmd_id);
   return CONTROL_RECV_OK;
 }
 
-static void handle_control_command(enum control_command cmd)
+static void handle_control_command(uint32_t namespace_id, uint8_t cmd)
 {
-  switch (cmd) {
-    case CONTROL_CMD_START_HEAP_PROFILING:
-      DEBUG0_ERR("control: startHeapProfiling\n");
-      startHeapProfTimer();
+  control_command_handler_fn handler = NULL;
+  void *user_data = NULL;
+
+  pthread_mutex_lock(&mutex);
+  struct control_handler_entry *entry = control_handlers;
+  while (entry != NULL) {
+    if (entry->cmd_id == cmd && entry->namespace_id == namespace_id) {
+      handler = entry->handler;
+      user_data = entry->user_data;
       break;
-    case CONTROL_CMD_STOP_HEAP_PROFILING:
-      DEBUG0_ERR("control: stopHeapProfiling\n");
-      stopHeapProfTimer();
-      break;
-    case CONTROL_CMD_REQUEST_HEAP_PROFILE:
-      DEBUG0_ERR("control: requestHeapProfile\n");
-      requestHeapCensus();
-      break;
-    default:
-      PRINT_ERR("control: unhandled command %d\n", cmd);
-      break;
+    }
+    entry = entry->next;
+  }
+  pthread_mutex_unlock(&mutex);
+
+  if (handler != NULL) {
+    handler(namespace_id, cmd, user_data);
+  } else {
+    PRINT_ERR("control: unhandled command namespace=0x%08x id=0x%02x\n",
+              namespace_id, cmd);
   }
 }
 
@@ -308,8 +412,9 @@ static void *control_receiver(void *arg)
     if (current_fd != fd)
       break;
 
-    enum control_command cmd;
-    enum control_recv_status status = control_receive_command(fd, &cmd);
+    uint32_t namespace_id = 0;
+    uint8_t cmd = 0;
+    enum control_recv_status status = control_receive_command(fd, &namespace_id, &cmd);
     if (status == CONTROL_RECV_DISCONNECTED) {
       control_connection_closed(fd);
       break;
@@ -319,7 +424,7 @@ static void *control_receiver(void *arg)
       continue;
     }
 
-    handle_control_command(cmd);
+    handle_control_command(namespace_id, cmd);
   }
 
   return NULL;
@@ -840,6 +945,16 @@ static void ensure_initialized(void)
     atexit(cleanup_socket);
     initialized = true;
   }
+  register_builtin_control_commands();
+}
+
+bool eventlog_socket_register_control_command(uint32_t namespace_id,
+                                              uint8_t cmd_id,
+                                              eventlog_control_command_handler handler,
+                                              void *user_data)
+{
+  ensure_initialized();
+  return register_control_command(namespace_id, cmd_id, handler, user_data);
 }
 
 static void signal_control_ready(void)

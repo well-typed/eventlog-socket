@@ -1,10 +1,10 @@
 """Declarative control scripts for ghc-eventlog-socket tests."""
-from __future__ import annotations
-
 from typing import Callable, Dict
+import struct
 import time
 
 CONTROL_MAGIC = b"GCTL"
+CONTROL_NAMESPACE_CORE = 0
 
 class ControlContext:
     """Simple wrapper providing helper methods to send control commands."""
@@ -16,8 +16,9 @@ class ControlContext:
         self._sender(data)
 
 
-def control_send_command(ctx: ControlContext, cmd_id: int) -> None:
-    ctx.send(CONTROL_MAGIC + bytes([cmd_id & 0xFF]))
+def control_send_command(ctx: ControlContext, cmd_id: int, namespace: int = CONTROL_NAMESPACE_CORE) -> None:
+    payload = CONTROL_MAGIC + struct.pack(">I", namespace & 0xFFFFFFFF) + bytes([cmd_id & 0xFF])
+    ctx.send(payload)
 
 
 def start_heap_profiling(ctx: ControlContext) -> None:
