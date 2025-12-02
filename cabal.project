@@ -1,6 +1,7 @@
 packages: eventlog-socket/eventlog-socket.cabal
 packages: eventlog-socket-control/eventlog-socket-control.cabal
 packages: eventlog-socket-tests/eventlog-socket-tests.cabal
+packages: examples/custom-command/custom-command.cabal
 packages: examples/fibber/fibber.cabal
 packages: examples/fibber-c-main/fibber-c-main.cabal
 packages: examples/oddball/oddball.cabal
