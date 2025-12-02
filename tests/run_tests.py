@@ -117,7 +117,13 @@ class TestRunner:
         if self.case.socket_type == "unix":
             sock_path = Path(f"/tmp/{target}_eventlog.sock")
             self.socket_path = sock_path
-            self.env["FIBBER_EVENTLOG_SOCKET"] = str(sock_path)
+            env_var_map = {
+                "fibber": "FIBBER_EVENTLOG_SOCKET",
+                "fibber-c-main": "FIBBER_EVENTLOG_SOCKET",
+                "custom-command": "CUSTOM_COMMAND_SOCKET",
+            }
+            env_var = env_var_map.get(target, "FIBBER_EVENTLOG_SOCKET")
+            self.env[env_var] = str(sock_path)
         elif self.case.socket_type == "tcp":
             host = self.tcp_host
             port = str(self.tcp_port)

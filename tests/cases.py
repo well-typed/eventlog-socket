@@ -57,6 +57,7 @@ class TestCase:
 
 HEAP_PROF_SAMPLE_0_PATTERN = "heap prof sample 0"
 HEAP_PROF_SAMPLE_1_PATTERN = "heap prof sample 1"
+CUSTOM_COMMAND_PATTERN = "custom command handled"
 
 
 def eventlog_assertions_no_start(
@@ -94,13 +95,21 @@ class ProgramScenario:
     target: str
     socket_type: str
     args: List[str]
+    supports_reconnect: bool = True
 
     def args_for_mode(self, mode: str) -> List[str]:
         if mode == "normal":
             return self.args
         if mode == "reconnect":
-            return [ "--forever", *self.args]
+            if not self.supports_reconnect:
+                raise ValueError(f"{self.target} does not support reconnect mode")
+            return ["--forever", *self.args]
         raise ValueError(f"unknown mode: {mode}")
+
+    def modes(self) -> List[str]:
+        if self.supports_reconnect:
+            return ["normal", "reconnect"]
+        return ["normal"]
 
 
 @dataclass(frozen=True)
@@ -125,6 +134,12 @@ PROGRAM_SCENARIOS: List[ProgramScenario] = [
         target="fibber-c-main",
         socket_type="unix",
         args=[one_shot_num],
+    ),
+    ProgramScenario(
+        target="custom-command",
+        socket_type="unix",
+        args=[],
+        supports_reconnect=False,
     ),
 ]
 
@@ -154,6 +169,22 @@ CONTROL_SCENARIOS: List[ControlScenario] = [
 ]
 
 
+def _custom_command_assertions(_mode: str) -> EventlogAssertions:
+    return EventlogAssertions(
+        min_lines=None,
+        grep_includes=[CUSTOM_COMMAND_PATTERN],
+    )
+
+
+CUSTOM_CONTROL_SCENARIOS: List[ControlScenario] = [
+    ControlScenario(
+        ", custom command",
+        send_custom_command,
+        _custom_command_assertions,
+    ),
+]
+
+
 MODE_LABELS = {
     "normal": "finite",
     "reconnect": "forever, reconnect",
@@ -163,10 +194,11 @@ MODE_LABELS = {
 def default_cases() -> List[TestCase]:
     cases: List[TestCase] = []
     for program in PROGRAM_SCENARIOS:
-        for mode in ("normal", "reconnect"):
+        control_scenarios = CUSTOM_CONTROL_SCENARIOS if program.target == "custom-command" else CONTROL_SCENARIOS
+        for mode in program.modes():
             args = program.args_for_mode(mode)
             mode_label = MODE_LABELS[mode]
-            for scenario in CONTROL_SCENARIOS:
+            for scenario in control_scenarios:
                 description = f"Test {program.target} ({mode_label}{scenario.suffix})"
                 cases.append(
                     TestCase(
