@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable
 from .scripts import (
     ControlScript,
+    send_custom_command,
     start_heap_profiling,
     request_heap_profile,
     script_junk_then_sample,
@@ -67,6 +68,7 @@ class TestCase:
 
 HEAP_PROF_SAMPLE_0_PATTERN = "heap prof sample 0"
 HEAP_PROF_SAMPLE_1_PATTERN = "heap prof sample 1"
+CUSTOM_COMMAND_PATTERN = "custom command handled"
 
 
 def eventlog_assertions_no_start(
@@ -101,13 +103,21 @@ class ProgramScenario:
     target: str
     socket_type: str
     args: list[str]
+    supports_reconnect: bool = True
 
     def args_for_mode(self, mode: str) -> list[str]:
         if mode == "normal":
             return self.args
         if mode == "reconnect":
+            if not self.supports_reconnect:
+                raise ValueError(f"{self.target} does not support reconnect mode")
             return ["--forever", *self.args]
         raise ValueError(f"unknown mode: {mode}")
+
+    def modes(self) -> list[str]:
+        if self.supports_reconnect:
+            return ["normal", "reconnect"]
+        return ["normal"]
 
 
 @dataclass(frozen=True)
@@ -132,6 +142,12 @@ PROGRAM_SCENARIOS: list[ProgramScenario] = [
         target="fibber-c-main",
         socket_type="unix",
         args=["35", "36", "37", "38"],
+    ),
+    ProgramScenario(
+        target="custom-command",
+        socket_type="unix",
+        args=[],
+        supports_reconnect=False,
     ),
 ]
 
@@ -161,6 +177,22 @@ CONTROL_SCENARIOS: list[ControlScenario] = [
 ]
 
 
+def _custom_command_assertions(_mode: str) -> EventlogAssertions:
+    return EventlogAssertions(
+        min_lines=None,
+        grep_includes=[CUSTOM_COMMAND_PATTERN],
+    )
+
+
+CUSTOM_CONTROL_SCENARIOS: list[ControlScenario] = [
+    ControlScenario(
+        ", custom command",
+        send_custom_command,
+        _custom_command_assertions,
+    ),
+]
+
+
 MODE_LABELS = {
     "normal": "finite",
     "reconnect": "forever, reconnect",
@@ -170,10 +202,11 @@ MODE_LABELS = {
 def default_cases() -> list[TestCase]:
     cases: list[TestCase] = []
     for program in PROGRAM_SCENARIOS:
-        for mode in ("normal", "reconnect"):
+        control_scenarios = CUSTOM_CONTROL_SCENARIOS if program.target == "custom-command" else CONTROL_SCENARIOS
+        for mode in program.modes():
             args = program.args_for_mode(mode)
             mode_label = MODE_LABELS[mode]
-            for scenario in CONTROL_SCENARIOS:
+            for scenario in control_scenarios:
                 description = f"Test {program.target} ({mode_label}{scenario.suffix})"
                 cases.append(
                     TestCase(
