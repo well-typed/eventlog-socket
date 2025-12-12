@@ -19,16 +19,17 @@ tested-with:
    || ==9.12.2
 
 extra-source-files:
-  ChangeLog.md
   cbits/eventlog_socket.c
   include/eventlog_socket.h
 
 extra-doc-files:
   README.md
+  CHANGELOG.md
 
 source-repository head
   type:     git
   location: https://github.com/bgamari/ghc-eventlog-socket.git
+  subdir:   eventlog-socket
 
 library
   exposed-modules:  GHC.Eventlog.Socket
