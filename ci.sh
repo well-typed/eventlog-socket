@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
 
-python3 -m tests.run_tests "$@"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname "$(dirname -- "$0")")" && pwd)"
+
+(cd "${ROOT_DIR}/eventlog-socket" && python3 -m tests.run_tests "$@")
