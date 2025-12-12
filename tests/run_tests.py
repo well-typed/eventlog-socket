@@ -164,7 +164,7 @@ class TestRunner:
         if self.testCase.mode == "reconnect":
             eventlog_rts = ["+RTS", "--eventlog-flush-interval=1", "-RTS"]
 
-        args = ["cabal", "run", self.testCase.target, "--", "+RTS", "-hT", "--no-automatic-heap-samples", "-RTS", *eventlog_rts, *self.testCase.args]
+        args = ["cabal", "run", self.testCase.target, "--", "+RTS", "-l", "-hT", "--no-automatic-heap-samples", "-RTS", *eventlog_rts, *self.testCase.args]
         stdout_file = open(self.app_stdout, "w", encoding="utf-8", errors="replace")
         proc = subprocess.Popen(args, stdout=stdout_file, stderr=subprocess.STDOUT, cwd=ROOT_DIR, env=self.env)
         self._stdout_handle = stdout_file
