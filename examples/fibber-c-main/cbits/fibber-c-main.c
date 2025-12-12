@@ -11,7 +11,6 @@ int main (int argc, char *argv[])
 
     // Enable RTS options:
     conf.rts_opts_enabled = RtsOptsAll;
-    conf.rts_opts = "-l";
 
 
     extern StgClosure ZCMain_main_closure;
