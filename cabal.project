@@ -3,3 +3,4 @@ packages: eventlog-socket-control/eventlog-socket-control.cabal
 packages: examples/fibber/fibber.cabal
 packages: examples/fibber-c-main/fibber-c-main.cabal
 packages: examples/fibber-tcp/fibber-tcp.cabal
+packages: examples/oddball/oddball.cabal
