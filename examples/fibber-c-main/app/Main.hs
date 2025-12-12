@@ -1,9 +1,9 @@
 module Main where
 
 import Control.Monad (forever)
-import Data.Foldable (for_)
+import Data.Foldable (for_, traverse_)
 import GHC.Eventlog.Socket (wait)
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
 
 data Mode = Finite | Infinite
 
@@ -13,7 +13,7 @@ parseArgs args = (Finite, args)
 
 main :: IO ()
 main = do
-    wait
+    traverse_ (const wait) =<< lookupEnv "GHC_EVENTLOG_SOCKET"
     args <- getArgs
     let (mode, fibArgs) = parseArgs args
         workload = for_ fibArgs $ \arg -> print (fib (read arg))
