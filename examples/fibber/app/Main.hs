@@ -1,10 +1,10 @@
 module Main where
 
 import Control.Monad (forever)
-import Data.Foldable (for_)
+import Data.Foldable (for_, traverse_)
 import Data.Maybe (fromMaybe)
-import GHC.Eventlog.Socket
-import System.Environment
+import GHC.Eventlog.Socket (startWait)
+import System.Environment (getArgs, lookupEnv)
 
 data Mode = Finite | Infinite
 
@@ -14,10 +14,7 @@ parseArgs args = (Finite, args)
 
 main :: IO ()
 main = do
-    fibberEventlogSocket <-
-        fromMaybe "/tmp/fibber_eventlog.sock"
-            <$> lookupEnv "FIBBER_EVENTLOG_SOCKET"
-    startWait fibberEventlogSocket
+    traverse_ startWait =<< lookupEnv "GHC_EVENTLOG_SOCKET"
     args <- getArgs
     let (mode, fibArgs) = parseArgs args
         workload = for_ fibArgs $ \arg -> print (fib (read arg))
