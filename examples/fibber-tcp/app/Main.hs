@@ -4,7 +4,7 @@ module Main where
 
 import Control.Monad (forever)
 import Data.Foldable (for_)
-import GHC.Eventlog.Socket (TcpSocket (..), startTcp, wait)
+import GHC.Eventlog.Socket (EventlogSocket (..), startWith)
 import System.Environment (getArgs, lookupEnv)
 import Text.Read (readMaybe)
 
@@ -19,7 +19,8 @@ main = do
     maybeTcpHost <- lookupEnv "GHC_EVENTLOG_TCP_HOST"
     maybeTcpPort <- lookupEnv "GHC_EVENTLOG_TCP_PORT"
     case (maybeTcpHost, readMaybe =<< maybeTcpPort) of
-        (Just tcpHost, Just tcpPort) -> startTcp TcpSocket{..} >> wait
+        (Just tcpHost, Just tcpPort) ->
+            startWith EventlogTcpSocket{..} True
         (Just _tcpHost, Nothing) -> error "missing GHC_EVENTLOG_TCP_PORT"
         (Nothing, Just _tcpPort) -> error "missing GHC_EVENTLOG_TCP_PORT"
         (Nothing, Nothing) -> pure ()
