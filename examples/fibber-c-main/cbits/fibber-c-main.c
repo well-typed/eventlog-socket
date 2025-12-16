@@ -15,8 +15,8 @@ int main (int argc, char *argv[])
     // Enable RTS options:
     conf.rts_opts_enabled = RtsOptsAll;
 
-    // If GHC_EVENTLOG_SOCKET is set...
-    const char* sock_path = getenv("GHC_EVENTLOG_SOCKET");
+    // If GHC_EVENTLOG_UNIX_SOCKET is set...
+    const char* sock_path = getenv("GHC_EVENTLOG_UNIX_SOCKET");
     if (sock_path != NULL) {
         // Start the eventlog writer.
         eventlog_socket_init_unix(sock_path);
