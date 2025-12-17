@@ -24,7 +24,7 @@ runs:
       id: cache-ghc-events
       with:
         path: "${{ github.workspace }}/.ghc-events/bin"
-        key: ${{ runner.os }}-ghc-events-${{ inputs.ghc-events-version }}-input-state-${{ inputs.hackage-index-state }}
+        key: ${{ runner.os }}-${{ runner.arch }}-ghc-events-${{ inputs.ghc-events-version }}-input-state-${{ inputs.hackage-index-state }}
 
     - name: 🛠️ Install Haskell
       if: ${{ env.ACT || steps.cache-ghc-events.outputs.cache-hit != 'true' }}
