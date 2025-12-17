@@ -126,14 +126,13 @@ PROGRAM_SCENARIOS: list[ProgramScenario] = [
     ),
 ]
 
-
-def _no_control_assertions(mode: str) -> EventlogAssertions:
-    min_lines = None if mode == "reconnect" else None
-    return eventlog_assertions_no_start(min_lines=min_lines)
-
-
 CONTROL_SCENARIOS: list[ControlScenario] = [
-    ControlScenario("", None, _no_control_assertions),
+    ControlScenario(
+        "",
+        None,
+        lambda _mode: eventlog_assertions_no_start(
+            grep_includes=["marker: Finished"],
+        )),
     ControlScenario(
         ", start heap profiling",
         start_heap_profiling,

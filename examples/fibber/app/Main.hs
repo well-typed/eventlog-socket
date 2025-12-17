@@ -3,6 +3,7 @@ module Main where
 import Control.Monad (forever)
 import Data.Foldable (for_, traverse_)
 import Data.Maybe (fromMaybe)
+import Debug.Trace (traceMarkerIO)
 import GHC.Eventlog.Socket (startFromEnv)
 import System.Environment (getArgs, lookupEnv)
 
@@ -17,7 +18,10 @@ main = do
     startFromEnv
     args <- getArgs
     let (mode, fibArgs) = parseArgs args
-        workload = for_ fibArgs $ \arg -> print (fib (read arg))
+        workload = for_ fibArgs $ \arg -> do
+            traceMarkerIO $ "Starting fib " <> arg
+            print $ fib (read arg)
+            traceMarkerIO $ "Finished fib " <> arg
     case (mode, fibArgs) of
         (_, []) -> putStrLn "Provide at least one integer argument."
         (Finite, _) -> workload
