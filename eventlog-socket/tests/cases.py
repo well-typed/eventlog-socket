@@ -115,7 +115,7 @@ PROGRAM_SCENARIOS: list[ProgramScenario] = [
         args=[one_shot_num],
     ),
     ProgramScenario(
-        target="fibber-tcp",
+        target="fibber",
         socket_type="tcp",
         args=[one_shot_num],
     ),
