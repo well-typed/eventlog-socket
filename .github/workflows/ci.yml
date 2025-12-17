@@ -47,8 +47,19 @@ jobs:
           ghc-events-version: "0.20.0.0"
           ghc-version: ${{ matrix.ghc-version }}
 
-      - name: 🚀 Testing
+      - name: 🚀 Testing (Python test suite)
         run: ./ci.sh
+
+      - name: 🚀 Testing (Haskell test suite)
+        if: ${{ always() }}
+        run: cabal test eventlog-socket-tests -f+debug 2>eventlog-socket-tests.log
+
+      - name: 📦 Upload test logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventlog-socket-tests-${{ runner.os }}-ghc-${{ matrix.ghc-version }}.log
+          path: eventlog-socket-tests.log
 
     strategy:
       fail-fast: false
