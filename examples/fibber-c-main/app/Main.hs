@@ -2,6 +2,7 @@ module Main where
 
 import Control.Monad (forever)
 import Data.Foldable (for_, traverse_)
+import Debug.Trace (traceMarkerIO)
 import GHC.Eventlog.Socket (wait)
 import System.Environment (getArgs, lookupEnv)
 
@@ -16,7 +17,10 @@ main = do
     traverse_ (const wait) =<< lookupEnv "GHC_EVENTLOG_SOCKET"
     args <- getArgs
     let (mode, fibArgs) = parseArgs args
-        workload = for_ fibArgs $ \arg -> print (fib (read arg))
+        workload = for_ fibArgs $ \arg -> do
+            traceMarkerIO $ "Starting fib " <> arg
+            print $ fib (read arg)
+            traceMarkerIO $ "Finished fib " <> arg
     case (mode, fibArgs) of
         (_, []) -> putStrLn "Provide at least one integer argument."
         (Finite, _) -> workload
