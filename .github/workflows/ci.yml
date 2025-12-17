@@ -19,9 +19,11 @@ jobs:
     name: |
       ${{ matrix.name
        || format(
-            '{0} on {1}{2}',
-            startsWith(matrix.os, 'ubuntu-') && 'Build and Test' || startsWith(matrix.os, 'macOS-') && 'Build',
-            startsWith(matrix.os, 'ubuntu-') && 'Linux' || startsWith(matrix.os, 'macOS-') && 'macOS',
+            'Test on {0}{1}',
+            ( startsWith(matrix.os, 'ubuntu-') && ( endsWith(matrix.os, '-arm') && 'Linux (aarch64)' || 'Linux (x86)' )
+            ) ||
+            ( startsWith(matrix.os, 'macOS-') && ( endsWith(matrix.os, '-intel') && 'macOS (x86)' || 'macOS (arm64)' )
+            ),
             matrix.ghc-version && format(' with GHC {0}', matrix.ghc-version)
           )
        }}
@@ -46,14 +48,13 @@ jobs:
           ghc-version: ${{ matrix.ghc-version }}
 
       - name: 🚀 Testing
-        if: ${{ runner.os == 'Linux' }}
         run: ./ci.sh
 
     strategy:
+      fail-fast: false
       matrix:
         os:
           - "ubuntu-latest"
-          - "macOS-latest"
         ghc-version:
           - "9.2.8"
           - "9.4.8"
@@ -61,7 +62,16 @@ jobs:
           - "9.8.4"
           - "9.10.2"
           - "9.12.2"
-
+        include:
+          # Include single ubuntu/arm64 runner:
+          - os: "ubuntu-24.04-arm"
+            ghc-version: "9.10.2"
+          # Include single macOS/x86 runner:
+          - os: "macOS-15-intel"
+            ghc-version: "9.10.2"
+          # Include single macOS/arm64 runner:
+          - os: "macOS-latest"
+            ghc-version: "9.10.2"
 
   #############################################################################
   # Lint with pyright
