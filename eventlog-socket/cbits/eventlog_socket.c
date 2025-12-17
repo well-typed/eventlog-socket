@@ -41,12 +41,12 @@ enum control_command {
 // - use PRINT_ERR to unconditionally log erroneous situations
 // - otherwise use DEBUG_ERR
 #define PRINT_ERR(...) fprintf(stderr, "ghc-eventlog-socket: " __VA_ARGS__)
-#ifdef NDEBUG
-#define DEBUG_ERR(fmt, ...)
-#define DEBUG0_ERR(fmt)
-#else
+#ifdef DEBUG
 #define DEBUG_ERR(fmt, ...) fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__, __VA_ARGS__)
 #define DEBUG0_ERR(fmt) fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__)
+#else
+#define DEBUG_ERR(fmt, ...)
+#define DEBUG0_ERR(fmt)
 #endif
 
 struct write_buffer;

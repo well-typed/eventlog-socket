@@ -31,6 +31,11 @@ source-repository head
   location: https://github.com/well-typed/eventlog-socket.git
   subdir:   eventlog-socket
 
+flag debug
+  description: Enable debug logging.
+  default: False
+  manual: True
+
 library
   exposed-modules:    GHC.Eventlog.Socket
   other-extensions:   CApiFFI
@@ -44,6 +49,8 @@ library
   include-dirs:       include/
   install-includes:   eventlog_socket.h
 
-  -- comment me out while debugging
-  -- https://github.com/haskell/cabal/issues/7635
-  cc-options:         -DNDEBUG=1
+  if flag(debug)
+    -- 2025-12-17:
+    -- cpp-options are not passed to C code, see:
+    -- https://github.com/haskell/cabal/issues/7635
+    cc-options:         -DDEBUG=1
