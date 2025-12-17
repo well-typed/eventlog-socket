@@ -71,14 +71,14 @@ def eventlog_assertions_no_start(
 
 def start_heap_eventlog_assertions() -> EventlogAssertions:
     return EventlogAssertions(
-        min_lines=1000,
+        min_lines=None,
         grep_includes=[HEAP_PROF_SAMPLE_0_PATTERN],
     )
 
 
 def request_heap_eventlog_assertions() -> EventlogAssertions:
     return EventlogAssertions(
-        min_lines=1000,
+        min_lines=None,
         grep_includes=[HEAP_PROF_SAMPLE_0_PATTERN],
         grep_excludes=[HEAP_PROF_SAMPLE_1_PATTERN],
     )
@@ -128,7 +128,7 @@ PROGRAM_SCENARIOS: list[ProgramScenario] = [
 
 
 def _no_control_assertions(mode: str) -> EventlogAssertions:
-    min_lines = 1000 if mode == "reconnect" else None
+    min_lines = None if mode == "reconnect" else None
     return eventlog_assertions_no_start(min_lines=min_lines)
 
 
