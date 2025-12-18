@@ -381,37 +381,39 @@ Evaluate the first machine until it stops, then continue as the second machine.
 Consume inputs until the predicate holds, then stop.
 Throw an exception if the input stream stops.
 -}
-anyOf :: (HasLogger) => (a -> Bool) -> (Int -> String) -> ProcessT IO a x
-anyOf p msgFor = go (0 :: Int)
+anyOf :: (HasLogger) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a x
+anyOf p onSuccess onFailure = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where
-        onNext a = if p a then stopped else go (count + 1)
-        onStop = failing (msgFor count)
+        onNext a = if p a then debugging (Info $ onSuccess count) else go (count + 1)
+        onStop = failing (onFailure count)
 
 {- |
 Evaluate `anyOf` for the given number of seconds, then fail.
 -}
-anyFor :: (HasLogger) => Double -> (a -> Bool) -> String -> ProcessT IO a x
-anyFor timeoutSec p msg = afterTimeoutSec timeoutSec (anyOf p $ const msg) (failing msg)
+anyFor :: (HasLogger) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a x
+anyFor timeoutSec p onSuccess onFailure =
+    afterTimeoutSec timeoutSec (anyOf p (const onSuccess) (const onFailure)) (failing onFailure)
 
 {- |
 Consume inputs forever.
 Throw an exception if the predicate fails to hold for any input.
 -}
-allOf :: (HasLogger) => (a -> Bool) -> (Int -> String) -> ProcessT IO a x
-allOf p msgFor = go (0 :: Int)
+allOf :: (HasLogger) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a x
+allOf p onSuccess onFailure = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where
-        onNext a = if p a then go (count + 1) else failing (msgFor count)
-        onStop = stopped
+        onNext a = if p a then go (count + 1) else failing (onFailure count)
+        onStop = debugging $ Info (onSuccess count)
 
 {- |
 Evaluate `allFor` for the given number of seconds, then fail.
 -}
-allFor :: (HasLogger) => Double -> (a -> Bool) -> String -> ProcessT IO a x
-allFor timeoutSec p msg = withTimeoutSec timeoutSec (allOf p $ const msg)
+allFor :: (HasLogger) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a x
+allFor timeoutSec p onSuccess onFailure =
+    withTimeoutSec timeoutSec (allOf p (const onSuccess) (const onFailure))
 
 {- |
 Immediately `assertFailure`.
@@ -420,6 +422,12 @@ failing :: (HasLogger) => String -> MachineT IO k o
 failing msg = MachineT $ do
     debug . Fail $ msg
     assertFailure msg
+
+{- |
+Write a debug messages and stop.
+-}
+debugging :: (HasLogger) => Message -> MachineT IO k o
+debugging message = MachineT $ debug message >> pure Stop
 
 {- |
 Drop all inputs.
@@ -446,36 +454,40 @@ Assert that the input stream contains a `HeapProfSampleString` event within the 
 -}
 hasHeapProfSampleBeginWithinSec :: (HasLogger) => Double -> ProcessT IO Event x
 hasHeapProfSampleBeginWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleBegin $
-        printf "Did not find HeapProfSampleBegin within %0.2f seconds." timeoutSec
+    anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
+  where
+    onSuccess = printf "Found HeapProfSampleBegin within %0.2f seconds." timeoutSec
+    onFailure = printf "Did not find HeapProfSampleBegin within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
 -}
 hasHeapProfSampleBeginWithin :: (HasLogger) => Int -> ProcessT IO Event x
 hasHeapProfSampleBeginWithin count =
-    taking count
-        ~> anyOf
-            isHeapProfSampleBegin
-            (printf "Did not find HeapProfSampleBegin after %d events.")
+    taking count ~> anyOf isHeapProfSampleBegin onSuccess onFailure
+  where
+    onSuccess = printf "Found HeapProfSampleBegin after %d events."
+    onFailure = printf "Did not find HeapProfSampleBegin after %d events."
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given timeout.
 -}
 hasNoHeapProfSampleBeginWithinSec :: (HasLogger) => Double -> ProcessT IO Event x
 hasNoHeapProfSampleBeginWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleBegin $
-        printf "Found HeapProfSampleBegin within %0.2f seconds." timeoutSec
+    anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
+  where
+    onSuccess = printf "Did not find HeapProfSampleBegin within %0.2f seconds." timeoutSec
+    onFailure = printf "Found HeapProfSampleBegin within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given number of events.
 -}
 hasNoHeapProfSampleBeginWithin :: (HasLogger) => Int -> ProcessT IO Event x
 hasNoHeapProfSampleBeginWithin count =
-    taking count
-        ~> anyOf
-            isHeapProfSampleBegin
-            (printf "Found HeapProfSampleBegin after %d events.")
+    taking count ~> anyOf isHeapProfSampleBegin onSuccess onFailure
+  where
+    onSuccess = printf "Did not find HeapProfSampleBegin after %d events."
+    onFailure = printf "Found HeapProfSampleBegin after %d events."
 
 {- |
 Test if an `Event` is a `HeapProfSampleString` event.
@@ -490,36 +502,40 @@ Assert that the input stream contains a `HeapProfSampleString` event within the 
 -}
 hasHeapProfSampleStringWithinSec :: (HasLogger) => Double -> ProcessT IO Event x
 hasHeapProfSampleStringWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleString $
-        printf "Did not find HeapProfSampleString within %0.2f seconds." timeoutSec
+    anyFor timeoutSec isHeapProfSampleString onSuccess onFailure
+  where
+    onSuccess = printf "Found HeapProfSampleString within %0.2f seconds." timeoutSec
+    onFailure = printf "Did not find HeapProfSampleString within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
 -}
 hasHeapProfSampleStringWithin :: (HasLogger) => Int -> ProcessT IO Event x
 hasHeapProfSampleStringWithin count =
-    taking count
-        ~> anyOf
-            isHeapProfSampleString
-            (printf "Did not find HeapProfSampleString after %d events.")
+    taking count ~> anyOf isHeapProfSampleString onSuccess onFailure
+  where
+    onSuccess = printf "Found HeapProfSampleString after %d events."
+    onFailure = printf "Did not find HeapProfSampleString after %d events."
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given timeout.
 -}
 hasNoHeapProfSampleStringWithinSec :: (HasLogger) => Double -> ProcessT IO Event x
 hasNoHeapProfSampleStringWithinSec timeoutSec =
-    allFor timeoutSec (not . isHeapProfSampleString) $
-        printf "Found HeapProfSampleString within %0.2f seconds." timeoutSec
+    allFor timeoutSec (not . isHeapProfSampleString) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find HeapProfSampleString within %0.2f seconds." timeoutSec
+    onFailure = printf "Found HeapProfSampleString within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given number of events.
 -}
 hasNoHeapProfSampleStringWithin :: (HasLogger) => Int -> ProcessT IO Event x
 hasNoHeapProfSampleStringWithin count =
-    taking count
-        ~> allOf
-            (not . isHeapProfSampleString)
-            (printf "Found HeapProfSampleString after %d events.")
+    taking count ~> allOf (not . isHeapProfSampleString) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find HeapProfSampleString after %d events."
+    onFailure = printf "Found HeapProfSampleString after %d events."
 
 {- |
 Test if an `Event` is a `UserMarker` whose message satisfies the given predicate.
@@ -534,27 +550,30 @@ Assert that the input stream contains a matching `UserMarker` event within the g
 -}
 hasMatchingUserMarkerWithinSec :: (HasLogger) => (Text -> Bool) -> Double -> ProcessT IO Event x
 hasMatchingUserMarkerWithinSec p timeoutSec =
-    anyFor timeoutSec (isMatchingUserMarker p) $
-        printf "Did not find matching UserMarker within %0.2f seconds." timeoutSec
+    anyFor timeoutSec (isMatchingUserMarker p) onSuccess onFailure
+  where
+    onSuccess = printf "Found matching UserMarker within %0.2f seconds." timeoutSec
+    onFailure = printf "Did not find matching UserMarker within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a matching `UserMarker` event within the given number of events.
 -}
 hasMatchingUserMarkerWithin :: (HasLogger) => (Text -> Bool) -> Int -> ProcessT IO Event x
 hasMatchingUserMarkerWithin p count =
-    taking count
-        ~> anyOf
-            (isMatchingUserMarker p)
-            (printf "Did not find matching UserMarker after %d events.")
+    taking count ~> anyOf (isMatchingUserMarker p) onSuccess onFailure
+  where
+    onSuccess = printf "Found matching UserMarker after %d events."
+    onFailure = printf "Did not find matching UserMarker after %d events."
 
 {- |
 Assert that the input stream contains a matching `UserMarker` event.
 -}
 hasMatchingUserMarker :: (HasLogger) => (Text -> Bool) -> ProcessT IO Event x
 hasMatchingUserMarker p =
-    anyOf
-        (isMatchingUserMarker p)
-        (const "Did not find matching UserMarker.")
+    anyOf (isMatchingUserMarker p) onSuccess onFailure
+  where
+    onSuccess = printf "Found matching UserMarker after %d events."
+    onFailure = printf "Did not find matching UserMarker after %d events."
 
 {- |
 Send the given `Command` over the `Handle`.
