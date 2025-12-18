@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Data.Functor ((<&>))
-import Data.Machine (dropping, (~>))
+import Data.Machine ((~>))
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Text as T
 import GHC.Eventlog.Socket.Control (Command (..))
@@ -11,7 +11,7 @@ import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withTempDirectory)
 import Test.Common
-import Test.Tasty (DependencyType (AllFinish), TestTree, defaultMain, sequentialTestGroup, testGroup)
+import Test.Tasty (TestTree, defaultMain, testGroup)
 import Text.Read (readMaybe)
 
 main :: IO ()
@@ -24,10 +24,10 @@ main = do
         -- Create temporary directory:
         withTempDirectory "/tmp" "eventlog-socket" $ \tmpDir -> do
             defaultMain . testGroup "Tests" $
-                [ sequentialTestGroup "Unix" AllFinish . catMaybes $
+                [ testGroup "Unix" . catMaybes $
                     tests <&> \test ->
                         test $ EventlogUnixSocket $ tmpDir </> "ghc_eventlog.sock"
-                , sequentialTestGroup "Tcp" AllFinish . catMaybes $
+                , testGroup "Tcp" . catMaybes $
                     tests <&> \test ->
                         test $ EventlogTcpSocket "127.0.0.1" tcpPort
                 ]
@@ -39,10 +39,11 @@ main = do
         , test_oddball
         , test_oddball_NoAutomaticHeapSamples
         , test_oddball_Reconnect
-        , test_oddball_StartHeapProfiling
-        , test_oddball_StopHeapProfiling
+        , test_oddball_StartAndStopHeapProfiling
         , test_oddball_RequestHeapProfile
-        , test_oddball_JunkCommand
+        , test_oddball_AfterJunk
+        , test_oddball_AlignedJunk
+        , test_oddball_MisalignedJunk
         ]
 
 {- |
@@ -51,9 +52,10 @@ Test that @fibber 35@ produces a parseable eventlog.
 test_fibber :: (HasLogger) => EventlogSocket -> Maybe TestTree
 test_fibber =
     testCaseFor "test_fibber" $ \eventlogSocket -> do
-        let fibber = Program "fibber" ["35"] ["-l"] eventlogSocket
+        let fibber = Program "fibber" ["35"] ["-l-au"] eventlogSocket
         withProgram fibber $
             assertEventlogWith eventlogSocket $
+                -- Validate that the Finished marker is seen.
                 hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
 
 {- |
@@ -64,9 +66,10 @@ __Note:__ This test does not support TCP sockets.
 test_fibberCMain :: (HasLogger) => EventlogSocket -> Maybe TestTree
 test_fibberCMain =
     testCaseForUnix "test_fibberCMain" $ \eventlogSocket -> do
-        let fibber = Program "fibber-c-main" ["35"] ["-l"] eventlogSocket
+        let fibber = Program "fibber-c-main" ["35"] ["-l-au"] eventlogSocket
         withProgram fibber $
             assertEventlogWith eventlogSocket $
+                -- Validate that the Finished marker is seen.
                 hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
 
 {- |
@@ -75,10 +78,13 @@ Test that @oddball@ produces heap profile samples.
 test_oddball :: (HasLogger) => EventlogSocket -> Maybe TestTree
 test_oddball =
     testCaseFor "test_oddball" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
+        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
         withProgram oddball $
             assertEventlogWith eventlogSocket $
-                hasHeapProfSampleStringWithin 50_000
+                -- Validate that the Summing marker is seen, and that the event
+                -- stream contains at least one heap profile sample.
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> hasHeapProfSampleString
 
 {- |
 Test that @--no-automatic-heap-samples@ is respected.
@@ -86,10 +92,14 @@ Test that @--no-automatic-heap-samples@ is respected.
 test_oddball_NoAutomaticHeapSamples :: (HasLogger) => EventlogSocket -> Maybe TestTree
 test_oddball_NoAutomaticHeapSamples =
     testCaseFor "test_oddball_NoAutomaticHeapSamples" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--no-automatic-heap-samples"] eventlogSocket
+        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         withProgram oddball $
             assertEventlogWith eventlogSocket $
-                hasNoHeapProfSampleStringWithin 50_000
+                -- Validate that the Summing marker is seen, and that the event
+                -- stream contains no heap profile samples for two iterations.
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> hasNoHeapProfSampleString
+                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
 {- |
 Test that @oddball@ produces heap profile samples even after reconnecting.
@@ -97,41 +107,34 @@ Test that @oddball@ produces heap profile samples even after reconnecting.
 test_oddball_Reconnect :: (HasLogger) => EventlogSocket -> Maybe TestTree
 test_oddball_Reconnect =
     testCaseFor "test_oddball_Reconnect" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
+        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
         withProgram oddball $ do
-            assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 50_000
-            assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 50_000
+            -- Validate that the event stream contains at least one heap
+            -- profile sample twice, connecting to the socket each time.
+            assertEventlogWith eventlogSocket $ hasHeapProfSampleString
+            assertEventlogWith eventlogSocket $ hasHeapProfSampleString
 
 {- |
-Test that the `StartHeapProfiling` command are respected, i.e., that once the
-`StartHeapProfiling` command is sent, a heap profile samples is received.
+Test that the `StartHeapProfiling` and `StopHeapProfiling` commands are
+respected, i.e., that once the `StartHeapProfiling` command is sent, heap
+profile samples are received, and once the `StopHeapProfiling` command is
+sent, after some iterations, no more heap profile samples are received.
 -}
-test_oddball_StartHeapProfiling :: (HasLogger) => EventlogSocket -> Maybe TestTree
-test_oddball_StartHeapProfiling =
-    testCaseFor "test_oddball_StartHeapProfiling" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+test_oddball_StartAndStopHeapProfiling :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_StartAndStopHeapProfiling =
+    testCaseFor "test_oddball_StartAndStopHeapProfiling" $ \eventlogSocket -> do
+        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         withProgram oddball $
             assertEventlogWith' eventlogSocket $ \handle ->
-                hasNoHeapProfSampleStringWithin 50_000
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> hasNoHeapProfSampleString
+                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> sendCommand handle StartHeapProfiling
-                    !> hasHeapProfSampleStringWithin 500_000
-                    &> hasHeapProfSampleEndWithin 500_000
-                    &> hasHeapProfSampleStringWithin 500_000
-
-{- |
-Test that the `StopHeapProfiling` command are respected, i.e., that once the
-`StopHeapProfiling` command is sent, a heap profile samples is received.
--}
-test_oddball_StopHeapProfiling :: (HasLogger) => EventlogSocket -> Maybe TestTree
-test_oddball_StopHeapProfiling =
-    testCaseFor "test_oddball_StopHeapProfiling" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1"] eventlogSocket
-        withProgram oddball $
-            assertEventlogWith' eventlogSocket $ \handle ->
-                hasHeapProfSampleStringWithin 500_000
+                    !> (2 `times` (hasHeapProfSampleString &> hasHeapProfSampleEnd))
                     &> sendCommand handle StopHeapProfiling
-                    !> dropping 100_000
-                    ~> hasNoHeapProfSampleStringWithin 50_000
+                    !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+                    &> hasNoHeapProfSampleString
+                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 
 {- |
 Test that the `RequestHeapProfile` signal is respected, i.e., that once the
@@ -140,29 +143,81 @@ Test that the `RequestHeapProfile` signal is respected, i.e., that once the
 test_oddball_RequestHeapProfile :: (HasLogger) => EventlogSocket -> Maybe TestTree
 test_oddball_RequestHeapProfile =
     testCaseFor "test_oddball_RequestHeapProfile" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         withProgram oddball $
             assertEventlogWith' eventlogSocket $ \handle ->
-                hasNoHeapProfSampleStringWithin 50_000
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> hasNoHeapProfSampleString
+                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> sendCommand handle RequestHeapProfile
-                    !> hasHeapProfSampleStringWithin 500_000
-                    &> hasHeapProfSampleEndWithin 500_000
-                    &> hasNoHeapProfSampleStringWithin 50_000
+                    -- validate that there is exactly one heap sample, and that
+                    -- afterwards there are no further samples, either in this
+                    -- or the next iteration.
+                    !> hasHeapProfSampleString
+                    &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
+                    &> hasNoHeapProfSampleString
+                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
 {- |
-Test that the eventlog validation in `test_oddball_StartHeapProfiling`
-still works if junk commands are sent beforehand.
+Test that the `RequestHeapProfile` command is still respected after junk has
+been sent over the control socket.
 -}
-test_oddball_JunkCommand :: (HasLogger) => EventlogSocket -> Maybe TestTree
-test_oddball_JunkCommand =
-    testCaseFor "test_oddball_JunkCommand" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+test_oddball_AfterJunk :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_AfterJunk =
+    testCaseFor "test_oddball_AfterJunk" $ \eventlogSocket -> do
+        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         withProgram oddball $
             assertEventlogWith' eventlogSocket $ \handle ->
-                hasNoHeapProfSampleStringWithin 50_000
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> hasNoHeapProfSampleString
+                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> sendJunk handle "JUNK!!!!"
-                    !> hasNoHeapProfSampleStringWithin 50_000
+                    !> hasNoHeapProfSampleString
+                    -- Validate that there are no heap profile samples in the
+                    -- remainder of this iteration AND the next iteration.
+                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
                     &> sendCommand handle RequestHeapProfile
-                    !> hasHeapProfSampleStringWithin 500_000
-                    &> hasHeapProfSampleEndWithin 500_000
-                    &> hasNoHeapProfSampleStringWithin 50_000
+                    !> hasHeapProfSampleString
+                    &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
+                    &> hasNoHeapProfSampleString
+                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+
+{- |
+Test that the `RequestHeapProfile` command is still respected after junk has
+been sent over the control socket.
+
+TODO: This test confirms a misfeature, which should be fixed.
+-}
+test_oddball_AlignedJunk :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_AlignedJunk =
+    testCaseFor "test_oddball_AlignedJunk" $ \eventlogSocket -> do
+        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+        withProgram oddball $
+            assertEventlogWith' eventlogSocket $ \handle ->
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> hasNoHeapProfSampleString
+                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> sendCommandWithJunk handle "FLORPIES" RequestHeapProfile "BLEHBLES"
+                    !> hasHeapProfSampleString
+                    &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
+                    &> hasNoHeapProfSampleString
+                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+
+{- |
+Test that the `RequestHeapProfile` command is still respected after junk has
+been sent over the control socket.
+
+TODO: This test confirms a misfeature, which should be fixed.
+-}
+test_oddball_MisalignedJunk :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_MisalignedJunk =
+    testCaseFor "test_oddball_MisalignedJunk" $ \eventlogSocket -> do
+        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+        withProgram oddball $
+            assertEventlogWith' eventlogSocket $ \handle ->
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> hasNoHeapProfSampleString
+                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> sendCommandWithJunk handle "FLORP" RequestHeapProfile "BLERP"
+                    !> hasNoHeapProfSampleString
+                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))

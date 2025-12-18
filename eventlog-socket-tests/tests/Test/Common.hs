@@ -20,26 +20,40 @@ module Test.Common (
     runEventlogAssertion,
     (!>),
     (&>),
+    times,
+    anyOf,
+    allOf,
     droppingFor,
+    isHeapProfSampleBegin,
     hasHeapProfSampleBeginWithinSec,
     hasHeapProfSampleBeginWithin,
+    hasHeapProfSampleBegin,
     hasNoHeapProfSampleBeginWithinSec,
     hasNoHeapProfSampleBeginWithin,
+    hasNoHeapProfSampleBegin,
     isHeapProfSampleEnd,
     hasHeapProfSampleEndWithinSec,
     hasHeapProfSampleEndWithin,
+    hasHeapProfSampleEnd,
     hasNoHeapProfSampleEndWithinSec,
     hasNoHeapProfSampleEndWithin,
+    hasNoHeapProfSampleEnd,
+    isHeapProfSampleString,
     hasHeapProfSampleStringWithinSec,
     hasHeapProfSampleStringWithin,
+    hasHeapProfSampleString,
     hasNoHeapProfSampleStringWithinSec,
     hasNoHeapProfSampleStringWithin,
+    hasNoHeapProfSampleString,
     isMatchingUserMarker,
     hasMatchingUserMarkerWithinSec,
     hasMatchingUserMarkerWithin,
     hasMatchingUserMarker,
+    failing,
+    debugging,
     sendCommand,
     sendJunk,
+    sendCommandWithJunk,
 
     -- * Debug
     HasTestInfo,
@@ -139,7 +153,7 @@ start program = do
                 unlines . concat $
                     [ ["Launching " <> showCommandForUser name args]
                     , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
-                      | (i, (k, v)) <- zip [(0 :: Int) ..] extraEnv
+                      | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
                       ]
                     ]
             -- Create the process:
@@ -232,7 +246,7 @@ data EventlogAssertion x
     { initialTimeoutS :: Double
     , timeoutExponent :: Double
     , eventlogSocket :: EventlogSocket
-    , validateEvents :: (HasProgramInfo) => Handle -> ProcessT IO Event x
+    , validateEvents :: Handle -> ProcessT IO Event x
     }
 
 defaultEventlogAssertion :: EventlogSocket -> EventlogAssertion Event
@@ -245,35 +259,35 @@ defaultEventlogAssertion eventlogSocket =
         }
 
 assertEventlogOk ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
+    (HasLogger, HasTestInfo) =>
     EventlogSocket ->
     Assertion
 assertEventlogOk eventlogSocket =
     assertEventlogWith eventlogSocket (debugEventCounter 1_000)
 
 assertEventlogWith ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
+    (HasLogger, HasTestInfo) =>
     EventlogSocket ->
-    ((HasProgramInfo) => ProcessT IO Event x) ->
+    (ProcessT IO Event x) ->
     Assertion
 assertEventlogWith eventlogSocket validateEvents =
     assertEventlogWith' eventlogSocket (const validateEvents)
 
 assertEventlogWith' ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
+    (HasLogger, HasTestInfo) =>
     EventlogSocket ->
-    ((HasProgramInfo) => Handle -> ProcessT IO Event x) ->
+    (Handle -> ProcessT IO Event x) ->
     Assertion
 assertEventlogWith' eventlogSocket validateEvents =
     runEventlogAssertion (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
 
 runEventlogAssertion ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
+    (HasLogger, HasTestInfo) =>
     EventlogAssertion x ->
     Assertion
 runEventlogAssertion EventlogAssertion{..} =
     withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket $ \handle ->
-        runT_ $ fromHandle 1000 4096 handle ~> decodeEvent ~> validateEvents handle
+        runT_ $ fromHandle 1000 4096 handle ~> decodeEvent ~> debugEvents ~> validateEvents handle
 
 withEventlogHandle ::
     (HasLogger, HasTestInfo) =>
@@ -302,7 +316,8 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
                     connectLoop (timeoutS * timeoutExponent)
                 else throwIO ioe
       where
-        tryConnect =
+        tryConnect = do
+            let timeoutMSec = round $ timeoutS * 1e3
             case eventlogSocket of
                 EventlogUnixSocket{..} -> do
                     bracket (S.socket S.AF_UNIX S.Stream S.defaultProtocol) S.close $ \socket -> do
@@ -328,8 +343,6 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
                         bracket (S.socketToHandle socket ReadWriteMode) IO.hClose $ \handle -> do
                             hSetBuffering handle NoBuffering
                             action handle
-          where
-            timeoutMSec = round $ timeoutS * 1e3
 
 fromHandle ::
     (HasCallStack) =>
@@ -422,22 +435,25 @@ Evaluate the first machine until it stops, then continue as the second machine.
             Await onNext k onStop ->
                 pure $ Await (\t -> onNext t &> n) k (onStop &> n)
 
+times :: (Monad m) => Int -> MachineT m k o -> MachineT m k o
+times count m = foldr (&>) stopped (replicate count m)
+
 {- |
 Consume inputs until the predicate holds, then stop.
 Throw an exception if the input stream stops.
 -}
-anyOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a x
+anyOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a a
 anyOf p onSuccess onFailure = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where
-        onNext a = if p a then debugging (onSuccess count) else go (count + 1)
+        onNext a = if p a then debugging (onSuccess count) else MachineT $ pure $ Yield a (go (count + 1))
         onStop = failing (onFailure count)
 
 {- |
 Evaluate `anyOf` for the given number of seconds, then fail.
 -}
-anyFor :: (HasLogger, HasTestInfo) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a x
+anyFor :: (HasLogger, HasTestInfo) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a a
 anyFor timeoutSec p onSuccess onFailure =
     afterTimeoutSec timeoutSec (anyOf p (const onSuccess) (const onFailure)) (failing onFailure)
 
@@ -445,18 +461,18 @@ anyFor timeoutSec p onSuccess onFailure =
 Consume inputs forever.
 Throw an exception if the predicate fails to hold for any input.
 -}
-allOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a x
+allOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a a
 allOf p onSuccess onFailure = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where
-        onNext a = if p a then go (count + 1) else failing (onFailure count)
+        onNext a = if p a then MachineT $ pure $ Yield a (go (count + 1)) else failing (onFailure count)
         onStop = debugging (onSuccess count)
 
 {- |
 Evaluate `allFor` for the given number of seconds, then fail.
 -}
-allFor :: (HasLogger, HasTestInfo) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a x
+allFor :: (HasLogger, HasTestInfo) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a a
 allFor timeoutSec p onSuccess onFailure =
     withTimeoutSec timeoutSec (allOf p (const onSuccess) (const onFailure))
 
@@ -497,7 +513,7 @@ isHeapProfSampleBegin ev
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
 -}
-hasHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
+hasHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasHeapProfSampleBeginWithinSec timeoutSec =
     anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
   where
@@ -507,9 +523,15 @@ hasHeapProfSampleBeginWithinSec timeoutSec =
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
 -}
-hasHeapProfSampleBeginWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
-hasHeapProfSampleBeginWithin count =
-    taking count ~> anyOf isHeapProfSampleBegin onSuccess onFailure
+hasHeapProfSampleBeginWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
+hasHeapProfSampleBeginWithin count = taking count ~> hasHeapProfSampleBegin
+
+{- |
+Assert that the input stream contains a `HeapProfSampleString` event.
+-}
+hasHeapProfSampleBegin :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasHeapProfSampleBegin =
+    anyOf isHeapProfSampleBegin onSuccess onFailure
   where
     onSuccess = printf "Found HeapProfSampleBegin after %d events."
     onFailure = printf "Did not find HeapProfSampleBegin after %d events."
@@ -517,7 +539,7 @@ hasHeapProfSampleBeginWithin count =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given timeout.
 -}
-hasNoHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
+hasNoHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasNoHeapProfSampleBeginWithinSec timeoutSec =
     anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
   where
@@ -527,9 +549,15 @@ hasNoHeapProfSampleBeginWithinSec timeoutSec =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given number of events.
 -}
-hasNoHeapProfSampleBeginWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
-hasNoHeapProfSampleBeginWithin count =
-    taking count ~> anyOf isHeapProfSampleBegin onSuccess onFailure
+hasNoHeapProfSampleBeginWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
+hasNoHeapProfSampleBeginWithin count = taking count ~> hasNoHeapProfSampleBegin
+
+{- |
+Assert that the input stream does not contain a `HeapProfSampleString` event.
+-}
+hasNoHeapProfSampleBegin :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoHeapProfSampleBegin =
+    anyOf isHeapProfSampleBegin onSuccess onFailure
   where
     onSuccess = printf "Did not find HeapProfSampleBegin after %d events."
     onFailure = printf "Found HeapProfSampleBegin after %d events."
@@ -545,7 +573,7 @@ isHeapProfSampleEnd ev
 {- |
 Assert that the input stream contains a `HeapProfSampleEnd` event within the given timeout.
 -}
-hasHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
+hasHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasHeapProfSampleEndWithinSec timeoutSec =
     anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
   where
@@ -555,9 +583,15 @@ hasHeapProfSampleEndWithinSec timeoutSec =
 {- |
 Assert that the input stream contains a `HeapProfSampleEnd` event within the given number of events.
 -}
-hasHeapProfSampleEndWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
-hasHeapProfSampleEndWithin count =
-    taking count ~> anyOf isHeapProfSampleEnd onSuccess onFailure
+hasHeapProfSampleEndWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
+hasHeapProfSampleEndWithin count = taking count ~> hasHeapProfSampleEnd
+
+{- |
+Assert that the input stream contains a `HeapProfSampleEnd` event.
+-}
+hasHeapProfSampleEnd :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasHeapProfSampleEnd =
+    anyOf isHeapProfSampleEnd onSuccess onFailure
   where
     onSuccess = printf "Found HeapProfSampleEnd after %d events."
     onFailure = printf "Did not find HeapProfSampleEnd after %d events."
@@ -565,7 +599,7 @@ hasHeapProfSampleEndWithin count =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleEnd` event within the given timeout.
 -}
-hasNoHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
+hasNoHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasNoHeapProfSampleEndWithinSec timeoutSec =
     anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
   where
@@ -575,9 +609,15 @@ hasNoHeapProfSampleEndWithinSec timeoutSec =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleEnd` event within the given number of events.
 -}
-hasNoHeapProfSampleEndWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
-hasNoHeapProfSampleEndWithin count =
-    taking count ~> anyOf isHeapProfSampleEnd onSuccess onFailure
+hasNoHeapProfSampleEndWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
+hasNoHeapProfSampleEndWithin count = taking count ~> hasNoHeapProfSampleEnd
+
+{- |
+Assert that the input stream does not contain a `HeapProfSampleEnd` event.
+-}
+hasNoHeapProfSampleEnd :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoHeapProfSampleEnd =
+    anyOf isHeapProfSampleEnd onSuccess onFailure
   where
     onSuccess = printf "Did not find HeapProfSampleEnd after %d events."
     onFailure = printf "Found HeapProfSampleEnd after %d events."
@@ -593,7 +633,7 @@ isHeapProfSampleString ev
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
 -}
-hasHeapProfSampleStringWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
+hasHeapProfSampleStringWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasHeapProfSampleStringWithinSec timeoutSec =
     anyFor timeoutSec isHeapProfSampleString onSuccess onFailure
   where
@@ -603,9 +643,15 @@ hasHeapProfSampleStringWithinSec timeoutSec =
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
 -}
-hasHeapProfSampleStringWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
-hasHeapProfSampleStringWithin count =
-    taking count ~> anyOf isHeapProfSampleString onSuccess onFailure
+hasHeapProfSampleStringWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
+hasHeapProfSampleStringWithin count = taking count ~> hasHeapProfSampleString
+
+{- |
+Assert that the input stream contains a `HeapProfSampleString` event.
+-}
+hasHeapProfSampleString :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasHeapProfSampleString =
+    anyOf isHeapProfSampleString onSuccess onFailure
   where
     onSuccess = printf "Found HeapProfSampleString after %d events."
     onFailure = printf "Did not find HeapProfSampleString after %d events."
@@ -613,7 +659,7 @@ hasHeapProfSampleStringWithin count =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given timeout.
 -}
-hasNoHeapProfSampleStringWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
+hasNoHeapProfSampleStringWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasNoHeapProfSampleStringWithinSec timeoutSec =
     allFor timeoutSec (not . isHeapProfSampleString) onSuccess onFailure
   where
@@ -623,9 +669,16 @@ hasNoHeapProfSampleStringWithinSec timeoutSec =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given number of events.
 -}
-hasNoHeapProfSampleStringWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
+hasNoHeapProfSampleStringWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
 hasNoHeapProfSampleStringWithin count =
-    taking count ~> allOf (not . isHeapProfSampleString) onSuccess onFailure
+    taking count ~> hasNoHeapProfSampleString
+
+{- |
+Assert that the input stream does not contain a `HeapProfSampleString` event.
+-}
+hasNoHeapProfSampleString :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoHeapProfSampleString =
+    allOf (not . isHeapProfSampleString) onSuccess onFailure
   where
     onSuccess = printf "Did not find HeapProfSampleString after %d events."
     onFailure = printf "Found HeapProfSampleString after %d events."
@@ -641,7 +694,7 @@ isMatchingUserMarker p ev
 {- |
 Assert that the input stream contains a matching `UserMarker` event within the given timeout.
 -}
-hasMatchingUserMarkerWithinSec :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Double -> ProcessT IO Event x
+hasMatchingUserMarkerWithinSec :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Double -> ProcessT IO Event Event
 hasMatchingUserMarkerWithinSec p timeoutSec =
     anyFor timeoutSec (isMatchingUserMarker p) onSuccess onFailure
   where
@@ -651,17 +704,13 @@ hasMatchingUserMarkerWithinSec p timeoutSec =
 {- |
 Assert that the input stream contains a matching `UserMarker` event within the given number of events.
 -}
-hasMatchingUserMarkerWithin :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Int -> ProcessT IO Event x
-hasMatchingUserMarkerWithin p count =
-    taking count ~> anyOf (isMatchingUserMarker p) onSuccess onFailure
-  where
-    onSuccess = printf "Found matching UserMarker after %d events."
-    onFailure = printf "Did not find matching UserMarker after %d events."
+hasMatchingUserMarkerWithin :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Int -> ProcessT IO Event Event
+hasMatchingUserMarkerWithin p count = taking count ~> hasMatchingUserMarker p
 
 {- |
 Assert that the input stream contains a matching `UserMarker` event.
 -}
-hasMatchingUserMarker :: (HasLogger, HasTestInfo) => (Text -> Bool) -> ProcessT IO Event x
+hasMatchingUserMarker :: (HasLogger, HasTestInfo) => (Text -> Bool) -> ProcessT IO Event Event
 hasMatchingUserMarker p =
     anyOf (isMatchingUserMarker p) onSuccess onFailure
   where
@@ -682,6 +731,14 @@ Send junk over the `Handle`.
 sendJunk :: Handle -> BSL.ByteString -> IO ()
 sendJunk handle junk = do
     BSL.hPutStr handle junk
+    IO.hFlush handle
+
+{- |
+Send the given `Command` over the `Handle`.
+-}
+sendCommandWithJunk :: Handle -> BSL.ByteString -> Command -> BSL.ByteString -> IO ()
+sendCommandWithJunk handle junkBefore command junkAfter = do
+    BSL.hPutStr handle (junkBefore <> B.encode command <> junkAfter)
     IO.hFlush handle
 
 --------------------------------------------------------------------------------
@@ -756,7 +813,7 @@ data Message
     | Footer
     | ProgramOut ProgramInfo String
     | ProgramErr ProgramInfo String
-    | Event ProgramInfo Event
+    | Event Event
     | Info String
     | Fail String
 
@@ -800,8 +857,8 @@ withLogger action = do
             "[" <> testName <> ", " <> prettyProgramInfo info <> "] stdout: " <> message
         ProgramErr info message ->
             "[" <> testName <> ", " <> prettyProgramInfo info <> "] stderr: " <> message
-        Event info event ->
-            "[" <> testName <> ", " <> prettyProgramInfo info <> "] event: " <> ppEvent PrettyTime mempty event
+        Event event ->
+            "[" <> testName <> "] event: " <> ppEvent PrettyTime mempty event
         Info message ->
             "[" <> testName <> "] info: " <> message
         Fail message ->
@@ -822,7 +879,7 @@ withLogger action = do
 debugHandle :: (HasLogger, HasTestInfo) => (String -> Message) -> Handle -> IO (IO ())
 debugHandle wrapper handle = do
     let runner = do
-            threadDelay 1_000 -- Wait 100ms.
+            threadDelay 30 -- Wait 30mcg.
             isReady 1_000 handle >>= \case
                 Just ready
                     | ready -> do
@@ -834,15 +891,15 @@ debugHandle wrapper handle = do
     threadId <- forkIO runner
     pure $ killThread threadId
 
-debugEvents :: (HasLogger, HasTestInfo, HasProgramInfo) => ProcessT IO Event Event
+debugEvents :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 debugEvents =
     repeatedly $
         await >>= \event -> do
-            liftIO (debug $ Event ?programInfo event)
+            liftIO (debug $ Event event)
             yield event
 
 debugEventCounter :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
-debugEventCounter limit = go (0 :: Int)
+debugEventCounter limit = go (1 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where

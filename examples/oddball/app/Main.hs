@@ -7,6 +7,7 @@ import Debug.Trace
 import GHC.Eventlog.Socket
 import System.Environment
 import System.Random
+import System.Mem (performMajorGC)
 
 main :: IO ()
 main = do
@@ -24,4 +25,5 @@ doRandom = do
   let stream = randomRs @Integer (-1000, 1000) g
       result = foldr (+) 00 $ take n stream
   putStrLn $ "Sum: " ++ show result
+  performMajorGC
   threadDelay 30
