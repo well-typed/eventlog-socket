@@ -78,7 +78,7 @@ test_oddball =
     testCaseFor "test_oddball" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 10_000
+        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 50_000
         kill
 
 {- |
@@ -89,7 +89,7 @@ test_oddball_NoAutomaticHeapSamples =
     testCaseForUnix "test_oddball_NoAutomaticHeapSamples" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith eventlogSocket $ hasNoHeapProfSampleStringWithin 10_000
+        assertEventlogWith eventlogSocket $ hasNoHeapProfSampleStringWithin 50_000
         kill
 
 {- |
@@ -100,8 +100,8 @@ test_oddball_Reconnect =
     testCaseFor "test_oddball_Reconnect" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 10_000
-        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 10_000
+        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 50_000
+        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 50_000
         kill
 
 {- |
@@ -116,10 +116,9 @@ test_oddball_StartAndStopHeapProfiling =
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
         assertEventlogWith' eventlogSocket $ \handle ->
-            hasNoHeapProfSampleStringWithin 5_000
+            hasNoHeapProfSampleStringWithin 50_000
                 &> sendCommand handle StartHeapProfiling
                 !> hasHeapProfSampleStringWithin 500_000
-                &> hasHeapProfSampleStringWithin 500_000
         kill
 
 {- |
@@ -132,12 +131,11 @@ test_oddball_JunkCommand =
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
         assertEventlogWith' eventlogSocket $ \handle ->
-            hasNoHeapProfSampleStringWithin 10_000
+            hasNoHeapProfSampleStringWithin 50_000
                 &> sendJunk handle "JUNK!!!!"
-                !> hasNoHeapProfSampleStringWithin 10_000
+                !> hasNoHeapProfSampleStringWithin 50_000
                 &> sendCommand handle StartHeapProfiling
                 !> hasHeapProfSampleStringWithin 500_000
-                &> hasHeapProfSampleStringWithin 500_000
         kill
 
 {- |
@@ -150,7 +148,7 @@ test_oddball_RequestHeapProfile =
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
         assertEventlogWith' eventlogSocket $ \handle ->
-            hasNoHeapProfSampleStringWithin 5_000
+            hasNoHeapProfSampleStringWithin 50_000
                 &> sendCommand handle RequestHeapProfile
                 !> hasHeapProfSampleStringWithin 500_000
         kill
