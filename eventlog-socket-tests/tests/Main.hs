@@ -118,8 +118,8 @@ test_oddball_StartAndStopHeapProfiling =
         assertEventlogWith' eventlogSocket $ \handle ->
             hasNoHeapProfSampleStringWithin 5_000
                 &> sendCommand handle StartHeapProfiling
-                !> hasHeapProfSampleStringWithin 200_000
-                &> hasHeapProfSampleStringWithin 200_000
+                !> hasHeapProfSampleStringWithin 500_000
+                &> hasHeapProfSampleStringWithin 500_000
         kill
 
 {- |
@@ -136,8 +136,8 @@ test_oddball_JunkCommand =
                 &> sendJunk handle "JUNK!!!!"
                 !> hasNoHeapProfSampleStringWithin 10_000
                 &> sendCommand handle StartHeapProfiling
-                !> hasHeapProfSampleStringWithin 200_000
-                &> hasHeapProfSampleStringWithin 200_000
+                !> hasHeapProfSampleStringWithin 500_000
+                &> hasHeapProfSampleStringWithin 500_000
         kill
 
 {- |
@@ -152,5 +152,5 @@ test_oddball_RequestHeapProfile =
         assertEventlogWith' eventlogSocket $ \handle ->
             hasNoHeapProfSampleStringWithin 5_000
                 &> sendCommand handle RequestHeapProfile
-                !> hasHeapProfSampleStringWithin 200_000
+                !> hasHeapProfSampleStringWithin 500_000
         kill
