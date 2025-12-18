@@ -3,9 +3,10 @@
 module Test.Common (
     -- * Example Programs
     Program (..),
+    HasProgramInfo,
     ProgramInfo,
     ProgramHandle (..),
-    start,
+    withProgram,
 
     -- * Eventlog Validation
     EventlogSocket (..),
@@ -24,6 +25,11 @@ module Test.Common (
     hasHeapProfSampleBeginWithin,
     hasNoHeapProfSampleBeginWithinSec,
     hasNoHeapProfSampleBeginWithin,
+    isHeapProfSampleEnd,
+    hasHeapProfSampleEndWithinSec,
+    hasHeapProfSampleEndWithin,
+    hasNoHeapProfSampleEndWithinSec,
+    hasNoHeapProfSampleEndWithin,
     hasHeapProfSampleStringWithinSec,
     hasHeapProfSampleStringWithin,
     hasNoHeapProfSampleStringWithinSec,
@@ -36,6 +42,8 @@ module Test.Common (
     sendJunk,
 
     -- * Debug
+    HasTestInfo,
+    TestInfo,
     testCaseFor,
     testCaseForUnix,
     HasLogger,
@@ -76,7 +84,6 @@ import System.IO
 import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError, isResourceVanishedError)
 import System.IO.Unsafe (unsafePerformIO)
-import System.Posix.Types (CPid (..))
 import System.Process (CreateProcess (..), Pid, ProcessHandle, StdStream (..), createProcess_, getPid, getProcessExitCode, proc, showCommandForUser, terminateProcess, waitForProcess)
 import System.Process.Internals (ignoreSigPipe)
 import Test.Tasty (TestName, TestTree)
@@ -86,6 +93,7 @@ import Text.Printf (printf)
 #if defined(DEBUG)
 import qualified Control.Concurrent.STM as T
 import GHC.RTS.Events (TimeFormat (..), ppEvent)
+import System.Posix.Types (CPid (..))
 #endif
 
 --------------------------------------------------------------------------------
@@ -99,9 +107,11 @@ data Program = Program
     , eventlogSocket :: EventlogSocket
     }
 
+type HasProgramInfo = (?programInfo :: ProgramInfo)
+
 data ProgramInfo = ProgramInfo
     { program :: Program
-    , maybePid :: Maybe Pid
+    , pidInfo :: Maybe Pid
     }
 
 data ProgramHandle = ProgramHandle
@@ -110,22 +120,28 @@ data ProgramHandle = ProgramHandle
     , info :: ProgramInfo
     }
 
-start :: (HasLogger) => Program -> IO ProgramHandle
+withProgram :: (HasLogger, HasTestInfo) => Program -> ((HasProgramInfo) => IO ()) -> IO ()
+withProgram program action =
+    bracket (start program) kill $ \ProgramHandle{..} ->
+        let ?programInfo = info in action
+
+start :: (HasLogger, HasTestInfo) => Program -> IO ProgramHandle
 start program = do
-    debug . Info $ "Starting program " <> program.name
+    debugInfo $ "Starting program " <> program.name
     let runner = do
             ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
-            debug . Info $ "Building program " <> program.name <> " with " <> ghc
+            debugInfo $ "Building program " <> program.name <> " with " <> ghc
             inheritedEnv <- filter shouldInherit <$> getEnvironment
             let name = "cabal"
             let args = ["run", program.name, "-w" <> ghc, "--", "+RTS"] <> program.rtsopts <> ["-RTS"] <> program.args
             let extraEnv = eventlogSocketEnv program.eventlogSocket
-            debug . Info . unlines . concat $
-                [ ["Launching " <> showCommandForUser name args]
-                , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
-                  | (i, (k, v)) <- zip [(0 :: Int) ..] extraEnv
-                  ]
-                ]
+            debugInfo $
+                unlines . concat $
+                    [ ["Launching " <> showCommandForUser name args]
+                    , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
+                      | (i, (k, v)) <- zip [(0 :: Int) ..] extraEnv
+                      ]
+                    ]
             -- Create the process:
             let createProcess =
                     (proc name args)
@@ -136,23 +152,24 @@ start program = do
                         }
             (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
             -- Create the ProgramInfo:
-            maybePid <- getPid processHandle
+            pidInfo <- getPid processHandle
             let info = ProgramInfo{..}
-            debug . Info $ "Launched " <> prettyProgramInfo info
+            let ?programInfo = info
+            debugInfo $ "Launched"
             -- Start loggers for stderr and stdout:
             maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
             maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
             let kill = mask_ $ do
-                    debug . Info $ "Cleaning up stdout reader for " <> program.name <> "."
+                    debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
                     sequence_ maybeKillDebugOut
-                    debug . Info $ "Cleaning up stderr reader for " <> program.name <> "."
+                    debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
                     sequence_ maybeKillDebugErr
-                    debug . Info $ "Cleaning up process for " <> program.name <> "."
+                    debugInfo $ "Cleaning up process for " <> program.name <> "."
                     exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
-                    debug . Info $ "Process was killed with exit code " <> show exitCode
+                    debugInfo $ "Process was killed with exit code " <> show exitCode
                     pure ()
             let wait = do
-                    debug . Info $ "Waiting for " <> program.name <> " to finish."
+                    debugInfo $ "Waiting for " <> program.name <> " to finish."
                     bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
                         when (exitCode /= ExitSuccess) . assertFailure $
                             "Program " <> program.name <> " failed with exit code " <> show exitCode
@@ -164,14 +181,14 @@ Kill the process harder than `terminateProcess`.
 
 This function also hides the evidence by closing the handles.
 -}
-murderProcess :: (HasLogger) => String -> (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO ExitCode
+murderProcess :: (HasLogger, HasTestInfo) => String -> (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO ExitCode
 murderProcess programName (maybeStdIn, maybeStdOut, maybeStdErr, processHandle) = do
     -- Murder the process until it's dead:
     let murderLoop :: IO ExitCode
         murderLoop =
             getProcessExitCode processHandle >>= \case
                 Nothing -> do
-                    debug . Info $ "Trying to kill the process for " <> programName
+                    debugInfo $ "Trying to kill the process for " <> programName
                     terminateProcess processHandle
                     threadDelay 100_000 -- 100ms
                     murderLoop
@@ -215,7 +232,7 @@ data EventlogAssertion x
     { initialTimeoutS :: Double
     , timeoutExponent :: Double
     , eventlogSocket :: EventlogSocket
-    , validateEvents :: Handle -> ProcessT IO Event x
+    , validateEvents :: (HasProgramInfo) => Handle -> ProcessT IO Event x
     }
 
 defaultEventlogAssertion :: EventlogSocket -> EventlogAssertion Event
@@ -227,25 +244,39 @@ defaultEventlogAssertion eventlogSocket =
         , validateEvents = const echo
         }
 
-assertEventlogOk :: (HasLogger) => ProgramInfo -> EventlogSocket -> Assertion
-assertEventlogOk info eventlogSocket =
-    assertEventlogWith info eventlogSocket (debugEventCounter 1_000)
+assertEventlogOk ::
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
+    EventlogSocket ->
+    Assertion
+assertEventlogOk eventlogSocket =
+    assertEventlogWith eventlogSocket (debugEventCounter 1_000)
 
-assertEventlogWith :: (HasLogger) => ProgramInfo -> EventlogSocket -> ProcessT IO Event x -> Assertion
-assertEventlogWith info eventlogSocket validateEvents =
-    assertEventlogWith' info eventlogSocket (const validateEvents)
+assertEventlogWith ::
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
+    EventlogSocket ->
+    ((HasProgramInfo) => ProcessT IO Event x) ->
+    Assertion
+assertEventlogWith eventlogSocket validateEvents =
+    assertEventlogWith' eventlogSocket (const validateEvents)
 
-assertEventlogWith' :: (HasLogger) => ProgramInfo -> EventlogSocket -> (Handle -> ProcessT IO Event x) -> Assertion
-assertEventlogWith' info eventlogSocket validateEvents =
-    runEventlogAssertion info (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
+assertEventlogWith' ::
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
+    EventlogSocket ->
+    ((HasProgramInfo) => Handle -> ProcessT IO Event x) ->
+    Assertion
+assertEventlogWith' eventlogSocket validateEvents =
+    runEventlogAssertion (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
 
-runEventlogAssertion :: (HasLogger) => ProgramInfo -> EventlogAssertion x -> Assertion
-runEventlogAssertion info EventlogAssertion{..} = do
+runEventlogAssertion ::
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
+    EventlogAssertion x ->
+    Assertion
+runEventlogAssertion EventlogAssertion{..} =
     withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket $ \handle ->
-        runT_ $ fromHandle 1000 4096 handle ~> decodeEvent ~> debugEvents info ~> validateEvents handle
+        runT_ $ fromHandle 1000 4096 handle ~> decodeEvent ~> validateEvents handle
 
 withEventlogHandle ::
-    (HasLogger) =>
+    (HasLogger, HasTestInfo) =>
     Double ->
     Double ->
     EventlogSocket ->
@@ -275,9 +306,9 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
             case eventlogSocket of
                 EventlogUnixSocket{..} -> do
                     bracket (S.socket S.AF_UNIX S.Stream S.defaultProtocol) S.close $ \socket -> do
-                        debug . Info $ "Trying to connect to Unix socket at " <> unixSocketPath
+                        debugInfo $ "Trying to connect to Unix socket at " <> unixSocketPath
                         S.connect socket (S.SockAddrUnix unixSocketPath)
-                        debug . Info $ "Connected to Unix socket at " <> unixSocketPath
+                        debugInfo $ "Connected to Unix socket at " <> unixSocketPath
                         bracket (S.socketToHandle socket ReadWriteMode) IO.hClose $ \handle -> do
                             hSetBuffering handle NoBuffering
                             action handle
@@ -291,9 +322,9 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
                     let newSocket = S.socket (S.addrFamily addr) (S.addrSocketType addr) (S.addrProtocol addr)
                     let closeSocket socket = S.gracefulClose socket timeoutMSec
                     bracket newSocket closeSocket $ \socket -> do
-                        debug . Info $ "Trying to connect to TCP socket at " <> show (S.addrAddress addr)
+                        debugInfo $ "Trying to connect to TCP socket at " <> show (S.addrAddress addr)
                         S.connect socket (S.addrAddress addr)
-                        debug . Info $ "Connected to TCP socket at " <> show (S.addrAddress addr)
+                        debugInfo $ "Connected to TCP socket at " <> show (S.addrAddress addr)
                         bracket (S.socketToHandle socket ReadWriteMode) IO.hClose $ \handle -> do
                             hSetBuffering handle NoBuffering
                             action handle
@@ -395,18 +426,18 @@ Evaluate the first machine until it stops, then continue as the second machine.
 Consume inputs until the predicate holds, then stop.
 Throw an exception if the input stream stops.
 -}
-anyOf :: (HasLogger) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a x
+anyOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a x
 anyOf p onSuccess onFailure = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where
-        onNext a = if p a then debugging (Info $ onSuccess count) else go (count + 1)
+        onNext a = if p a then debugging (onSuccess count) else go (count + 1)
         onStop = failing (onFailure count)
 
 {- |
 Evaluate `anyOf` for the given number of seconds, then fail.
 -}
-anyFor :: (HasLogger) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a x
+anyFor :: (HasLogger, HasTestInfo) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a x
 anyFor timeoutSec p onSuccess onFailure =
     afterTimeoutSec timeoutSec (anyOf p (const onSuccess) (const onFailure)) (failing onFailure)
 
@@ -414,34 +445,34 @@ anyFor timeoutSec p onSuccess onFailure =
 Consume inputs forever.
 Throw an exception if the predicate fails to hold for any input.
 -}
-allOf :: (HasLogger) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a x
+allOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a x
 allOf p onSuccess onFailure = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where
         onNext a = if p a then go (count + 1) else failing (onFailure count)
-        onStop = debugging $ Info (onSuccess count)
+        onStop = debugging (onSuccess count)
 
 {- |
 Evaluate `allFor` for the given number of seconds, then fail.
 -}
-allFor :: (HasLogger) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a x
+allFor :: (HasLogger, HasTestInfo) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a x
 allFor timeoutSec p onSuccess onFailure =
     withTimeoutSec timeoutSec (allOf p (const onSuccess) (const onFailure))
 
 {- |
 Immediately `assertFailure`.
 -}
-failing :: (HasLogger) => String -> MachineT IO k o
+failing :: (HasLogger, HasTestInfo) => String -> MachineT IO k o
 failing msg = MachineT $ do
-    debug . Fail $ msg
+    debugFail $ msg
     assertFailure msg
 
 {- |
 Write a debug messages and stop.
 -}
-debugging :: (HasLogger) => Message -> MachineT IO k o
-debugging message = MachineT $ debug message >> pure Stop
+debugging :: (HasLogger, HasTestInfo) => String -> MachineT IO k o
+debugging message = MachineT $ debugInfo message >> pure Stop
 
 {- |
 Drop all inputs.
@@ -466,7 +497,7 @@ isHeapProfSampleBegin ev
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
 -}
-hasHeapProfSampleBeginWithinSec :: (HasLogger) => Double -> ProcessT IO Event x
+hasHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
 hasHeapProfSampleBeginWithinSec timeoutSec =
     anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
   where
@@ -476,7 +507,7 @@ hasHeapProfSampleBeginWithinSec timeoutSec =
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
 -}
-hasHeapProfSampleBeginWithin :: (HasLogger) => Int -> ProcessT IO Event x
+hasHeapProfSampleBeginWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
 hasHeapProfSampleBeginWithin count =
     taking count ~> anyOf isHeapProfSampleBegin onSuccess onFailure
   where
@@ -486,7 +517,7 @@ hasHeapProfSampleBeginWithin count =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given timeout.
 -}
-hasNoHeapProfSampleBeginWithinSec :: (HasLogger) => Double -> ProcessT IO Event x
+hasNoHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
 hasNoHeapProfSampleBeginWithinSec timeoutSec =
     anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
   where
@@ -496,12 +527,60 @@ hasNoHeapProfSampleBeginWithinSec timeoutSec =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given number of events.
 -}
-hasNoHeapProfSampleBeginWithin :: (HasLogger) => Int -> ProcessT IO Event x
+hasNoHeapProfSampleBeginWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
 hasNoHeapProfSampleBeginWithin count =
     taking count ~> anyOf isHeapProfSampleBegin onSuccess onFailure
   where
     onSuccess = printf "Did not find HeapProfSampleBegin after %d events."
     onFailure = printf "Found HeapProfSampleBegin after %d events."
+
+{- |
+Test if an `Event` is a `HeapProfSampleEnd` event.
+-}
+isHeapProfSampleEnd :: Event -> Bool
+isHeapProfSampleEnd ev
+    | E.HeapProfSampleEnd{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a `HeapProfSampleEnd` event within the given timeout.
+-}
+hasHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
+hasHeapProfSampleEndWithinSec timeoutSec =
+    anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
+  where
+    onSuccess = printf "Found HeapProfSampleEnd within %0.2f seconds." timeoutSec
+    onFailure = printf "Did not find HeapProfSampleEnd within %0.2f seconds." timeoutSec
+
+{- |
+Assert that the input stream contains a `HeapProfSampleEnd` event within the given number of events.
+-}
+hasHeapProfSampleEndWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
+hasHeapProfSampleEndWithin count =
+    taking count ~> anyOf isHeapProfSampleEnd onSuccess onFailure
+  where
+    onSuccess = printf "Found HeapProfSampleEnd after %d events."
+    onFailure = printf "Did not find HeapProfSampleEnd after %d events."
+
+{- |
+Assert that the input stream does not contain a `HeapProfSampleEnd` event within the given timeout.
+-}
+hasNoHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
+hasNoHeapProfSampleEndWithinSec timeoutSec =
+    anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
+  where
+    onSuccess = printf "Did not find HeapProfSampleEnd within %0.2f seconds." timeoutSec
+    onFailure = printf "Found HeapProfSampleEnd within %0.2f seconds." timeoutSec
+
+{- |
+Assert that the input stream does not contain a `HeapProfSampleEnd` event within the given number of events.
+-}
+hasNoHeapProfSampleEndWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
+hasNoHeapProfSampleEndWithin count =
+    taking count ~> anyOf isHeapProfSampleEnd onSuccess onFailure
+  where
+    onSuccess = printf "Did not find HeapProfSampleEnd after %d events."
+    onFailure = printf "Found HeapProfSampleEnd after %d events."
 
 {- |
 Test if an `Event` is a `HeapProfSampleString` event.
@@ -514,7 +593,7 @@ isHeapProfSampleString ev
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
 -}
-hasHeapProfSampleStringWithinSec :: (HasLogger) => Double -> ProcessT IO Event x
+hasHeapProfSampleStringWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
 hasHeapProfSampleStringWithinSec timeoutSec =
     anyFor timeoutSec isHeapProfSampleString onSuccess onFailure
   where
@@ -524,7 +603,7 @@ hasHeapProfSampleStringWithinSec timeoutSec =
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
 -}
-hasHeapProfSampleStringWithin :: (HasLogger) => Int -> ProcessT IO Event x
+hasHeapProfSampleStringWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
 hasHeapProfSampleStringWithin count =
     taking count ~> anyOf isHeapProfSampleString onSuccess onFailure
   where
@@ -534,7 +613,7 @@ hasHeapProfSampleStringWithin count =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given timeout.
 -}
-hasNoHeapProfSampleStringWithinSec :: (HasLogger) => Double -> ProcessT IO Event x
+hasNoHeapProfSampleStringWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event x
 hasNoHeapProfSampleStringWithinSec timeoutSec =
     allFor timeoutSec (not . isHeapProfSampleString) onSuccess onFailure
   where
@@ -544,7 +623,7 @@ hasNoHeapProfSampleStringWithinSec timeoutSec =
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given number of events.
 -}
-hasNoHeapProfSampleStringWithin :: (HasLogger) => Int -> ProcessT IO Event x
+hasNoHeapProfSampleStringWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event x
 hasNoHeapProfSampleStringWithin count =
     taking count ~> allOf (not . isHeapProfSampleString) onSuccess onFailure
   where
@@ -562,7 +641,7 @@ isMatchingUserMarker p ev
 {- |
 Assert that the input stream contains a matching `UserMarker` event within the given timeout.
 -}
-hasMatchingUserMarkerWithinSec :: (HasLogger) => (Text -> Bool) -> Double -> ProcessT IO Event x
+hasMatchingUserMarkerWithinSec :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Double -> ProcessT IO Event x
 hasMatchingUserMarkerWithinSec p timeoutSec =
     anyFor timeoutSec (isMatchingUserMarker p) onSuccess onFailure
   where
@@ -572,7 +651,7 @@ hasMatchingUserMarkerWithinSec p timeoutSec =
 {- |
 Assert that the input stream contains a matching `UserMarker` event within the given number of events.
 -}
-hasMatchingUserMarkerWithin :: (HasLogger) => (Text -> Bool) -> Int -> ProcessT IO Event x
+hasMatchingUserMarkerWithin :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Int -> ProcessT IO Event x
 hasMatchingUserMarkerWithin p count =
     taking count ~> anyOf (isMatchingUserMarker p) onSuccess onFailure
   where
@@ -582,7 +661,7 @@ hasMatchingUserMarkerWithin p count =
 {- |
 Assert that the input stream contains a matching `UserMarker` event.
 -}
-hasMatchingUserMarker :: (HasLogger) => (Text -> Bool) -> ProcessT IO Event x
+hasMatchingUserMarker :: (HasLogger, HasTestInfo) => (Text -> Bool) -> ProcessT IO Event x
 hasMatchingUserMarker p =
     anyOf (isMatchingUserMarker p) onSuccess onFailure
   where
@@ -609,40 +688,58 @@ sendJunk handle junk = do
 -- Print Debug Message
 --------------------------------------------------------------------------------
 
+type HasTestInfo = (?testInfo :: TestInfo)
+
+data TestInfo = TestInfo
+    { testName :: TestName
+    }
+
 tcpPortCounter :: MVar Word16
 tcpPortCounter = unsafePerformIO (newMVar 0)
 
-testCaseForUnix :: (HasLogger) => TestName -> (EventlogSocket -> Assertion) -> EventlogSocket -> Maybe TestTree
+testCaseForUnix ::
+    (HasLogger) =>
+    TestName ->
+    ((HasTestInfo) => EventlogSocket -> Assertion) ->
+    EventlogSocket ->
+    Maybe TestTree
 testCaseForUnix testName test eventlogSocket
     | isEventlogUnixSocket eventlogSocket = testCaseFor testName test eventlogSocket
     | otherwise = Nothing
 
-testCaseFor :: (HasLogger) => TestName -> (EventlogSocket -> Assertion) -> EventlogSocket -> Maybe TestTree
+testCaseFor ::
+    (HasLogger) =>
+    TestName ->
+    ((HasTestInfo) => EventlogSocket -> Assertion) ->
+    EventlogSocket ->
+    Maybe TestTree
 testCaseFor testName test = \case
     EventlogUnixSocket{..} ->
         let testName' = testName <> "_Unix"
-         in Just $ testCase testName' $ do
-                debug $ Header testName'
-                let (directory, fileName) = splitFileName unixSocketPath
-                let unixSocketPath' = directory </> testName <> "_" <> fileName
-                debug . Info $ "Using Unix socket: " <> unixSocketPath'
-                test $ EventlogUnixSocket unixSocketPath'
-                debug $ Footer testName'
+         in let ?testInfo = TestInfo{testName = testName'}
+             in Just $ testCase testName' $ do
+                    debug Header
+                    let (directory, fileName) = splitFileName unixSocketPath
+                    let unixSocketPath' = directory </> testName <> "_" <> fileName
+                    debugInfo $ "Using Unix socket: " <> unixSocketPath'
+                    test $ EventlogUnixSocket unixSocketPath'
+                    debug Footer
     EventlogTcpSocket{..} ->
         let testName' = testName <> "_Tcp"
-         in Just $ testCase testName' $ do
-                debug $ Header testName'
-                tcpPortOffset <- modifyMVar tcpPortCounter $ \currentTcpPortOffset -> do
-                    let nextTcpPortOffset = currentTcpPortOffset + 1
-                    pure (nextTcpPortOffset, currentTcpPortOffset)
-                let tcpPort' = tcpPort + tcpPortOffset
-                test $ EventlogTcpSocket tcpHost tcpPort'
-                debug $ Footer testName'
+         in let ?testInfo = TestInfo{testName = testName'}
+             in Just $ testCase testName' $ do
+                    debug Header
+                    tcpPortOffset <- modifyMVar tcpPortCounter $ \currentTcpPortOffset -> do
+                        let nextTcpPortOffset = currentTcpPortOffset + 1
+                        pure (nextTcpPortOffset, currentTcpPortOffset)
+                    let tcpPort' = tcpPort + tcpPortOffset
+                    test $ EventlogTcpSocket tcpHost tcpPort'
+                    debug Footer
 
 type HasLogger = (?logger :: Logger, HasCallStack)
 
 #if defined(DEBUG)
-data Logger = Logger {logChan :: T.TChan Message}
+data Logger = Logger {logChan :: T.TChan (TestInfo, Message)}
 #else
 data Logger = Logger
 #endif
@@ -655,24 +752,30 @@ newLogger = pure Logger
 #endif
 
 data Message
-    = Header TestName
-    | Footer TestName
+    = Header
+    | Footer
     | ProgramOut ProgramInfo String
     | ProgramErr ProgramInfo String
     | Event ProgramInfo Event
     | Info String
     | Fail String
 
-debug :: (HasLogger) => Message -> IO ()
+debug :: (HasLogger, HasTestInfo) => Message -> IO ()
 #if defined(DEBUG)
 debug message = do
-    let logger = ?logger
-    T.atomically (T.writeTChan (logChan logger) message)
+    T.atomically (T.writeTChan (logChan ?logger) (?testInfo, message))
 #else
 debug _message = do
     let _logger = ?logger
+    let _testInfo = ?testInfo
     pure ()
 #endif
+
+debugInfo :: (HasLogger, HasTestInfo) => String -> IO ()
+debugInfo message = debug (Info message)
+
+debugFail :: (HasLogger, HasTestInfo) => String -> IO ()
+debugFail message = debug (Fail message)
 
 withLogger :: ((HasLogger) => IO ()) -> IO ()
 #if defined(DEBUG)
@@ -680,29 +783,35 @@ withLogger action = do
     logger <- newLogger
     let ?logger = logger
     let runner = do
-            message <- T.atomically (T.readTChan . logChan $ logger)
-            IO.hPutStrLn stderr (renderMessage message)
-            IO.hFlush stderr
+            (testInfo, message) <- T.atomically (T.readTChan . logChan $ logger)
+            IO.hPutStrLn stderr (renderMessage testInfo message)
+            -- IO.hFlush stderr
             runner
     bracket (forkIO runner) killThread $ \_threadId -> do
         action
   where
-    renderMessage :: Message -> String
-    renderMessage = \case
-        Header testName ->
+    renderMessage :: TestInfo -> Message -> String
+    renderMessage TestInfo{..} = \case
+        Header ->
             "-- HEADER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-'
-        Footer testName ->
+        Footer ->
             "-- FOOTER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-'
         ProgramOut info message ->
-            "[ProgramOut] " <> prettyProgramInfo info <> " " <> message
+            "[" <> testName <> ", " <> prettyProgramInfo info <> "] stdout: " <> message
         ProgramErr info message ->
-            "[ProgramErr] " <> prettyProgramInfo info <> " " <> message
+            "[" <> testName <> ", " <> prettyProgramInfo info <> "] stderr: " <> message
         Event info event ->
-            "[Event] " <> prettyProgramInfo info <> " " <> ppEvent PrettyTime mempty event
+            "[" <> testName <> ", " <> prettyProgramInfo info <> "] event: " <> ppEvent PrettyTime mempty event
         Info message ->
-            "[Info] " <> message
+            "[" <> testName <> "] info: " <> message
         Fail message ->
-            "[Fail] " <> message
+            "[" <> testName <> "] fail: " <> message
+
+    prettyProgramInfo :: ProgramInfo -> String
+    prettyProgramInfo ProgramInfo{..} = program.name <> " (" <> prettyPidInfo pidInfo <> ")"
+
+    prettyPidInfo :: Maybe Pid -> String
+    prettyPidInfo = maybe "terminated" (\(CPid pid) -> "pid=" <> show pid)
 #else
 withLogger action = do
     logger <- newLogger
@@ -710,7 +819,7 @@ withLogger action = do
     action
 #endif
 
-debugHandle :: (HasLogger) => (String -> Message) -> Handle -> IO (IO ())
+debugHandle :: (HasLogger, HasTestInfo) => (String -> Message) -> Handle -> IO (IO ())
 debugHandle wrapper handle = do
     let runner = do
             threadDelay 1_000 -- Wait 100ms.
@@ -725,14 +834,14 @@ debugHandle wrapper handle = do
     threadId <- forkIO runner
     pure $ killThread threadId
 
-debugEvents :: (HasLogger) => ProgramInfo -> ProcessT IO Event Event
-debugEvents info =
+debugEvents :: (HasLogger, HasTestInfo, HasProgramInfo) => ProcessT IO Event Event
+debugEvents =
     repeatedly $
         await >>= \event -> do
-            liftIO (debug $ Event info event)
+            liftIO (debug $ Event ?programInfo event)
             yield event
 
-debugEventCounter :: (HasLogger) => Int -> ProcessT IO Event Event
+debugEventCounter :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
 debugEventCounter limit = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
@@ -742,17 +851,11 @@ debugEventCounter limit = go (0 :: Int)
                 let count' = count + 1
                 if (count' >= limit)
                     then do
-                        liftIO (debug . Info $ "Saw " <> show count' <> " events.")
+                        liftIO (debugInfo $ "Saw " <> show count' <> " events.")
                         pure $ Yield event (go 0)
                     else do
                         pure $ Yield event (go count')
         onStop =
             MachineT $ do
-                liftIO (debug . Info $ "Saw " <> show count <> " events.")
+                liftIO (debugInfo $ "Saw " <> show count <> " events.")
                 pure Stop
-
-prettyProgramInfo :: ProgramInfo -> String
-prettyProgramInfo ProgramInfo{..} = program.name <> " (" <> prettyMaybePid maybePid <> ")"
-  where
-    prettyMaybePid :: Maybe Pid -> String
-    prettyMaybePid = maybe "terminated" (\(CPid pid) -> "pid=" <> show pid)
