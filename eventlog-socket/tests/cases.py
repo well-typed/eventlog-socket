@@ -83,10 +83,6 @@ def request_heap_eventlog_assertions() -> EventlogAssertions:
         grep_excludes=[HEAP_PROF_SAMPLE_1_PATTERN],
     )
 
-
-one_shot_num = "35"
-
-
 @dataclass(frozen=True)
 class ProgramScenario:
     target: str
@@ -112,17 +108,17 @@ PROGRAM_SCENARIOS: list[ProgramScenario] = [
     ProgramScenario(
         target="fibber",
         socket_type="unix",
-        args=[one_shot_num],
+        args=["35", "36", "37", "38"],
     ),
     ProgramScenario(
         target="fibber",
         socket_type="tcp",
-        args=[one_shot_num],
+        args=["35", "36", "37", "38"],
     ),
     ProgramScenario(
         target="fibber-c-main",
         socket_type="unix",
-        args=[one_shot_num],
+        args=["35", "36", "37", "38"],
     ),
 ]
 
