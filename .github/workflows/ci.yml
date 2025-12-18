@@ -58,7 +58,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: eventlog-socket-tests-${{ runner.os }}-ghc-${{ matrix.ghc-version }}.log
+          name: eventlog-socket-tests-${{ runner.os }}-${{ runner.arch }}-ghc-${{ matrix.ghc-version }}.log
           path: eventlog-socket-tests.log
 
     strategy:
