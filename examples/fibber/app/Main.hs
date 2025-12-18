@@ -3,7 +3,7 @@ module Main where
 import Control.Monad (forever)
 import Data.Foldable (for_, traverse_)
 import Data.Maybe (fromMaybe)
-import Debug.Trace (traceMarkerIO)
+import Debug.Trace (flushEventLog, traceMarkerIO)
 import GHC.Eventlog.Socket (startFromEnv)
 import System.Environment (getArgs, lookupEnv)
 
@@ -26,6 +26,7 @@ main = do
         (_, []) -> putStrLn "Provide at least one integer argument."
         (Finite, _) -> workload
         (Infinite, _) -> forever workload
+    flushEventLog
 
 fib :: Integer -> Integer
 fib 0 = 0
