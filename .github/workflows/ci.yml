@@ -46,7 +46,6 @@ jobs:
           ghc-version: ${{ matrix.ghc-version }}
 
       - name: 🚀 Testing
-        if: ${{ runner.os == 'Linux' }}
         run: ./ci.sh
 
     strategy:
