@@ -41,7 +41,7 @@ main = do
         , test_oddball
         , test_oddball_NoAutomaticHeapSamples
         , test_oddball_Reconnect
-        , test_oddball_StartAndStopHeapProfiling
+        , test_oddball_StartHeapProfiling
         , test_oddball_RequestHeapProfile
         , test_oddball_JunkCommand
         ]
@@ -55,7 +55,7 @@ test_fibber =
         let fibber = Program "fibber" ["35"] ["-l"] eventlogSocket
         ProgramHandle{..} <- start fibber
         assertEventlogWith eventlogSocket $ hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
-        wait
+        kill
 
 {- |
 Test that @fibber-c-main 35@ produces a parseable eventlog.
@@ -68,7 +68,7 @@ test_fibberCMain =
         let fibber = Program "fibber-c-main" ["35"] ["-l"] eventlogSocket
         ProgramHandle{..} <- start fibber
         assertEventlogWith eventlogSocket $ hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
-        wait
+        kill
 
 {- |
 Test that @oddball@ produces heap profile samples.
@@ -110,9 +110,9 @@ respected, i.e., that once the `StartHeapProfiling` control signal is sent,
 multiple heap profiles are received, and that once the `StopHeapProfiling`
 control signal is sent, no further heap profiles are received.
 -}
-test_oddball_StartAndStopHeapProfiling :: (HasLogger) => EventlogSocket -> Maybe TestTree
-test_oddball_StartAndStopHeapProfiling =
-    testCaseFor "test_oddball_StartAndStopHeapProfiling" $ \eventlogSocket -> do
+test_oddball_StartHeapProfiling :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_StartHeapProfiling =
+    testCaseFor "test_oddball_StartHeapProfiling" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
         assertEventlogWith' eventlogSocket $ \handle ->
@@ -122,7 +122,7 @@ test_oddball_StartAndStopHeapProfiling =
         kill
 
 {- |
-Test that the eventlog validation in `test_oddball_StartAndStopHeapProfiling`
+Test that the eventlog validation in `test_oddball_StartHeapProfiling`
 still works if junk control signals are sent beforehand.
 -}
 test_oddball_JunkCommand :: (HasLogger) => EventlogSocket -> Maybe TestTree
