@@ -75,11 +75,12 @@ import System.IO
 import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError, isResourceVanishedError)
 import System.IO.Unsafe (unsafePerformIO)
-import System.Process (CreateProcess (..), ProcessHandle, StdStream (..), createProcess_, getProcessExitCode, proc, showCommandForUser, terminateProcess, waitForProcess)
+import System.Process (CreateProcess (..), ProcessHandle, StdStream (..), createProcess_, getProcessExitCode, proc, showCommandForUser, terminateProcess, waitForProcess, getPid, Pid)
 import System.Process.Internals (ignoreSigPipe)
 import Test.Tasty (TestName, TestTree)
 import Test.Tasty.HUnit (Assertion, HasCallStack, assertFailure, testCase)
 import Text.Printf (printf)
+import System.Posix.Types (CPid(..))
 
 #if defined(DEBUG)
 import qualified Control.Concurrent.STM as T
@@ -113,11 +114,12 @@ start program = do
             let args = ["run", program.name, "-w" <> ghc, "--", "+RTS"] <> program.rtsopts <> ["-RTS"] <> program.args
             let extraEnv = eventlogSocketEnv program.eventlogSocket
             debug . Info . unlines . concat $
-                [ ["Running " <> showCommandForUser name args]
+                [ ["Launching " <> showCommandForUser name args]
                 , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
                   | (i, (k, v)) <- zip [(0 :: Int) ..] extraEnv
                   ]
                 ]
+            -- Create the process:
             let createProcess =
                     (proc name args)
                         { env = Just (inheritedEnv <> extraEnv)
@@ -126,8 +128,12 @@ start program = do
                         , std_err = CreatePipe
                         }
             (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
-            maybeKillDebugOut <- traverse (debugHandle ProgramOut) maybeHandleOut
-            maybeKillDebugErr <- traverse (debugHandle ProgramErr) maybeHandleErr
+            -- Log the pid:
+            maybePid <- getPid processHandle
+            debug . Info $ "Launched " <> program.name <> " (" <> showMaybePid maybePid <> ")"
+            -- Start loggers for stderr and stdout:
+            maybeKillDebugOut <- traverse (debugHandle $ ProgramOut maybePid) maybeHandleOut
+            maybeKillDebugErr <- traverse (debugHandle $ ProgramErr maybePid) maybeHandleErr
             let kill = mask_ $ do
                     debug . Info $ "Cleaning up stdout reader for " <> program.name <> "."
                     sequence_ maybeKillDebugOut
@@ -643,8 +649,8 @@ newLogger = pure Logger
 data Message
     = Header TestName
     | Footer TestName
-    | ProgramOut String
-    | ProgramErr String
+    | ProgramOut (Maybe Pid) String
+    | ProgramErr (Maybe Pid) String
     | Event Event
     | Info String
     | Fail String
@@ -679,10 +685,10 @@ withLogger action = do
             "-- HEADER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-'
         Footer testName ->
             "-- FOOTER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-'
-        ProgramOut message ->
-            "[ProgramOut] " <> message
-        ProgramErr message ->
-            "[ProgramErr] " <> message
+        ProgramOut maybePid message ->
+            "[ProgramOut] (" <> showMaybePid maybePid <> ") " <> message
+        ProgramErr maybePid message ->
+            "[ProgramErr] (" <> showMaybePid maybePid <> ") " <> message
         Event event ->
             "[Event] " <> ppEvent PrettyTime mempty event
         Info message ->
@@ -736,3 +742,6 @@ debugEventCounter limit = go (0 :: Int)
             MachineT $ do
                 liftIO (debug . Info $ "Saw " <> show count <> " events.")
                 pure Stop
+
+showMaybePid :: Maybe Pid -> String
+showMaybePid = maybe "terminated" (\(CPid pid) -> "pid=" <> show pid)
