@@ -1,8 +1,14 @@
 """Test case definitions for the Python harness."""
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
-from .scripts import ControlScript, start_heap_profiling, request_heap_profile, script_junk_then_sample
+from .scripts import (
+    ControlScript,
+    start_heap_profiling,
+    request_heap_profile,
+    script_junk_then_sample,
+)
 
 
 @dataclass
@@ -27,10 +33,14 @@ class EventlogAssertions:
             )
         for pattern in self.grep_includes:
             if not any(pattern in line for line in lines):
-                raise AssertionError(f"{path}: missing pattern '{pattern}' in eventlog output")
+                raise AssertionError(
+                    f"{path}: missing pattern '{pattern}' in eventlog output"
+                )
         for pattern in self.grep_excludes:
             if any(pattern in line for line in lines):
-                raise AssertionError(f"{path}: forbidden pattern '{pattern}' present in eventlog output")
+                raise AssertionError(
+                    f"{path}: forbidden pattern '{pattern}' present in eventlog output"
+                )
 
 
 @dataclass
@@ -43,7 +53,9 @@ class TestCase:
     control_script: ControlScript | None = None
     eventlog_assertions: EventlogAssertions | None = None
 
-    def verify_eventlog(self, eventlog_path: Path, ghc_events_output: str | None) -> None:
+    def verify_eventlog(
+        self, eventlog_path: Path, ghc_events_output: str | None
+    ) -> None:
         if self.eventlog_assertions is None:
             return
         if ghc_events_output is None:
@@ -83,6 +95,7 @@ def request_heap_eventlog_assertions() -> EventlogAssertions:
         grep_excludes=[HEAP_PROF_SAMPLE_1_PATTERN],
     )
 
+
 @dataclass(frozen=True)
 class ProgramScenario:
     target: str
@@ -93,7 +106,7 @@ class ProgramScenario:
         if mode == "normal":
             return self.args
         if mode == "reconnect":
-            return [ "--forever", *self.args]
+            return ["--forever", *self.args]
         raise ValueError(f"unknown mode: {mode}")
 
 
@@ -126,9 +139,10 @@ CONTROL_SCENARIOS: list[ControlScenario] = [
     ControlScenario(
         "",
         None,
-        lambda _mode: eventlog_assertions_no_start(
-            grep_includes=["marker: Finished"],
-        )),
+        lambda mode: eventlog_assertions_no_start(
+            grep_includes=["marker: Finished"] if mode == "finite" else [],
+        ),
+    ),
     ControlScenario(
         ", start heap profiling",
         start_heap_profiling,
