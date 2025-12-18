@@ -54,7 +54,7 @@ test_fibber =
     testCaseFor "test_fibber" $ \eventlogSocket -> do
         let fibber = Program "fibber" ["35"] ["-l"] eventlogSocket
         ProgramHandle{..} <- start fibber
-        assertEventlogWith eventlogSocket $ hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
+        assertEventlogWith info eventlogSocket $ hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
         kill
 
 {- |
@@ -67,7 +67,7 @@ test_fibberCMain =
     testCaseForUnix "test_fibberCMain" $ \eventlogSocket -> do
         let fibber = Program "fibber-c-main" ["35"] ["-l"] eventlogSocket
         ProgramHandle{..} <- start fibber
-        assertEventlogWith eventlogSocket $ hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
+        assertEventlogWith info eventlogSocket $ hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
         kill
 
 {- |
@@ -78,7 +78,7 @@ test_oddball =
     testCaseFor "test_oddball" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 50_000
+        assertEventlogWith info eventlogSocket $ hasHeapProfSampleStringWithin 50_000
         kill
 
 {- |
@@ -89,7 +89,7 @@ test_oddball_NoAutomaticHeapSamples =
     testCaseForUnix "test_oddball_NoAutomaticHeapSamples" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith eventlogSocket $ hasNoHeapProfSampleStringWithin 50_000
+        assertEventlogWith info eventlogSocket $ hasNoHeapProfSampleStringWithin 50_000
         kill
 
 {- |
@@ -100,8 +100,8 @@ test_oddball_Reconnect =
     testCaseFor "test_oddball_Reconnect" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 50_000
-        assertEventlogWith eventlogSocket $ hasHeapProfSampleStringWithin 50_000
+        assertEventlogWith info eventlogSocket $ hasHeapProfSampleStringWithin 50_000
+        assertEventlogWith info eventlogSocket $ hasHeapProfSampleStringWithin 50_000
         kill
 
 {- |
@@ -115,7 +115,7 @@ test_oddball_StartHeapProfiling =
     testCaseFor "test_oddball_StartHeapProfiling" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith' eventlogSocket $ \handle ->
+        assertEventlogWith' info eventlogSocket $ \handle ->
             hasNoHeapProfSampleStringWithin 50_000
                 &> sendCommand handle StartHeapProfiling
                 !> hasHeapProfSampleStringWithin 500_000
@@ -130,7 +130,7 @@ test_oddball_JunkCommand =
     testCaseFor "test_oddball_JunkCommand" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith' eventlogSocket $ \handle ->
+        assertEventlogWith' info eventlogSocket $ \handle ->
             hasNoHeapProfSampleStringWithin 50_000
                 &> sendJunk handle "JUNK!!!!"
                 !> hasNoHeapProfSampleStringWithin 50_000
@@ -147,7 +147,7 @@ test_oddball_RequestHeapProfile =
     testCaseFor "test_oddball_RequestHeapProfile" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         ProgramHandle{..} <- start oddball
-        assertEventlogWith' eventlogSocket $ \handle ->
+        assertEventlogWith' info eventlogSocket $ \handle ->
             hasNoHeapProfSampleStringWithin 50_000
                 &> sendCommand handle RequestHeapProfile
                 !> hasHeapProfSampleStringWithin 500_000
