@@ -85,7 +85,7 @@ Test that @--no-automatic-heap-samples@ is respected.
 -}
 test_oddball_NoAutomaticHeapSamples :: (HasLogger) => EventlogSocket -> Maybe TestTree
 test_oddball_NoAutomaticHeapSamples =
-    testCaseForUnix "test_oddball_NoAutomaticHeapSamples" $ \eventlogSocket -> do
+    testCaseFor "test_oddball_NoAutomaticHeapSamples" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--no-automatic-heap-samples"] eventlogSocket
         withProgram oddball $
             assertEventlogWith eventlogSocket $
