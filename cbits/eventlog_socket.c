@@ -97,6 +97,7 @@ struct write_buffer {
 static bool initialized = false;
 static int listen_fd = -1;
 static const char *g_sock_path = NULL;
+static int wake_pipe[2] = { -1, -1 };
 
 enum listener_kind {
   LISTENER_UNIX,
@@ -127,6 +128,49 @@ static bool listener_config_valid(const struct listener_config *config) {
 
 static void cleanup_socket(void) {
     if (g_sock_path) unlink(g_sock_path);
+    if (wake_pipe[0] != -1) {
+      close(wake_pipe[0]);
+      wake_pipe[0] = -1;
+    }
+    if (wake_pipe[1] != -1) {
+      close(wake_pipe[1]);
+      wake_pipe[1] = -1;
+    }
+}
+
+static void drain_worker_wake(void)
+{
+  if (wake_pipe[0] == -1)
+    return;
+
+  uint8_t buf[32];
+  while (true) {
+    ssize_t ret = read(wake_pipe[0], buf, sizeof(buf));
+    if (ret > 0) {
+      continue;
+    } else if (ret == 0) {
+      break;
+    } else if (errno == EINTR) {
+      continue;
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      break;
+    } else {
+      PRINT_ERR("failed to drain wake pipe: %s\n", strerror(errno));
+      break;
+    }
+  }
+}
+
+static void wake_worker(void)
+{
+  if (wake_pipe[1] == -1)
+    return;
+
+  uint8_t byte = 1;
+  ssize_t ret = write(wake_pipe[1], &byte, sizeof(byte));
+  if (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+    PRINT_ERR("failed to wake worker: %s\n", strerror(errno));
+  }
 }
 
 
@@ -191,7 +235,7 @@ static enum control_recv_status control_read_exact(int fd, uint8_t *buf, size_t 
   size_t have = 0;
   while (have < len) {
     ssize_t got = recv(fd, buf + have, len - have, 0);
-    DEBUG_ERR("control_read_exact %d/%d\n", got, len);
+    DEBUG_ERR("control_read_exact %zd/%zu\n", got, len);
     if (got == 0)
       return CONTROL_RECV_DISCONNECTED;
     if (got < 0) {
@@ -395,6 +439,7 @@ static void writer_init(void)
 
 static void writer_enqueue(uint8_t *data, size_t size) {
   DEBUG_ERR("size: %p %lu\n", data, size);
+  bool was_empty = wt.head == NULL;
 
   // TODO: check the size of the queue
   // if it's too big, we can start dropping blocks.
@@ -403,6 +448,9 @@ static void writer_enqueue(uint8_t *data, size_t size) {
   write_buffer_push(&wt, data, size);
 
   DEBUG_ERR("wt.head = %p\n", wt.head);
+  if (was_empty) {
+    wake_worker();
+  }
 }
 
 static bool writer_write(void *eventlog, size_t size)
@@ -503,6 +551,8 @@ static void listen_iteration(void) {
     .revents = 0,
   };
 
+  DEBUG_ERR("listen_iteration: waiting for accept on fd %d\n", listen_fd);
+
   // poll until we can accept
   while (true) {
     int ret = poll(&pfd_accept, 1, POLL_LISTEN_TIMEOUT);
@@ -513,6 +563,7 @@ static void listen_iteration(void) {
       DEBUG0_ERR("accept poll timed out\n");
     } else {
       // got connection
+      DEBUG0_ERR("accept poll ready\n");
       break;
     }
   }
@@ -521,7 +572,9 @@ static void listen_iteration(void) {
   int fd = accept(listen_fd, (struct sockaddr *) &remote, &len);
   if (fd == -1) {
     PRINT_ERR("accept failed: %s\n", strerror(errno));
+    return;
   }
+  DEBUG_ERR("accepted new connection fd=%d\n", fd);
 
   // set socket into non-blocking mode
   int flags = fcntl(fd, F_GETFL);
@@ -541,10 +594,12 @@ static void listen_iteration(void) {
 
   // we got client_id now.
   // Publish new fd under mutex so RTS writers either see the connection along
-  // with an empty queue or not at all.
+  // with an empty queue or not at all. Keep the lock held through the condition
+  // broadcast so the predicate update stays atomic on every platform.
   pthread_mutex_lock(&mutex);
+  DEBUG_ERR("publishing client_fd=%d (previous=%d)\n", fd, client_fd);
   client_fd = fd;
-  // Drop lock to allow initial batch of events to be written.
+  pthread_cond_broadcast(&new_conn_cond);
   pthread_mutex_unlock(&mutex);
 
   start_control_receiver(fd);
@@ -553,9 +608,6 @@ static void listen_iteration(void) {
     // start writing
     startEventLogging(&SocketEventLogWriter);
   }
-
-  // Announce new connection
-  pthread_cond_broadcast(&new_conn_cond);
 
   // we are done.
 }
@@ -566,44 +618,42 @@ static void listen_iteration(void) {
 static void nonwrite_iteration(int fd) {
   DEBUG_ERR("(%d)\n", fd);
 
-  // Wait for socket to disconnect
-  struct pollfd pfd = {
-    .fd = fd,
-    .events = POLLRDHUP,
-    .revents = 0,
-  };
+  // Wait for socket to disconnect or for pending data.
+  struct pollfd pfds[2];
+  pfds[0].fd = fd;
+  pfds[0].events = POLLRDHUP;
+  pfds[0].revents = 0;
+  int nfds = 1;
+  if (wake_pipe[0] != -1) {
+    pfds[1].fd = wake_pipe[0];
+    pfds[1].events = POLLIN;
+    pfds[1].revents = 0;
+    nfds = 2;
+  }
 
-  int ret = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
-  if (ret == -1 && errno != EAGAIN) {
-    // error
+  int ret = poll(pfds, nfds, -1);
+  if (ret == -1) {
+    if (errno == EINTR) {
+      return;
+    }
     PRINT_ERR("poll() failed: %s\n", strerror(errno));
-    return;
-  } else if (ret == 0) {
-    // timeout
     return;
   }
 
-  // reset client_fd on RDHUP.
-  if (pfd.revents | POLLRDHUP) {
+  if (nfds == 2 && (pfds[1].revents & POLLIN)) {
+    drain_worker_wake();
+    return;
+  }
+
+  if (pfds[0].revents & POLLHUP) {
     DEBUG_ERR("(%d) POLLRDHUP\n", fd);
 
-    // reset client_fd
-    // Take lock to ensure we don't race with writer threads still referencing
-    // the old fd when clearing shared state.
     pthread_mutex_lock(&mutex);
-    // note: writer_stop may close the connection as well.
     client_fd = -1;
     write_buffer_free(&wt);
     pthread_mutex_unlock(&mutex);
     return;
   }
-
-  // we don't stop logging,
-  // write function will be no-op with negative client_fd
-  //
-  // Before setting new client_fd we will stop the logging,
-  // and restart if afterwards, so the header is written
-  // to the new connection.
 }
 
 // write iteration.
@@ -837,6 +887,17 @@ static void ensure_initialized(void)
     pthread_cond_init(&new_conn_cond, NULL);
     pthread_cond_init(&control_ready_cond, NULL);
     control_ready = false;
+    if (pipe(wake_pipe) == -1) {
+      PRINT_ERR("failed to create wake pipe: %s\n", strerror(errno));
+      abort();
+    }
+    for (int i = 0; i < 2; i++) {
+      int flags = fcntl(wake_pipe[i], F_GETFL, 0);
+      if (flags == -1 || fcntl(wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
+        PRINT_ERR("failed to set wake pipe nonblocking: %s\n", strerror(errno));
+        abort();
+      }
+    }
     atexit(cleanup_socket);
     initialized = true;
   }
@@ -914,12 +975,16 @@ void eventlog_socket_wait(void)
   // Condition variable pairs with the mutex so reader threads can wait for the
   // worker to publish a connected client_fd atomically.
   pthread_mutex_lock(&mutex);
+  DEBUG_ERR("eventlog_socket_wait: initial client_fd=%d\n", client_fd);
   while (client_fd == -1) {
+    DEBUG0_ERR("eventlog_socket_wait: blocking for connection\n");
     int ret = pthread_cond_wait(&new_conn_cond, &mutex);
     if (ret != 0) {
       PRINT_ERR("failed to wait on condition variable: %s\n", strerror(ret));
     }
+    DEBUG_ERR("eventlog_socket_wait: woke up, client_fd=%d\n", client_fd);
   }
+  DEBUG_ERR("eventlog_socket_wait: proceeding with client_fd=%d\n", client_fd);
   pthread_mutex_unlock(&mutex);
 }
 
