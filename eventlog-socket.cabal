@@ -44,4 +44,4 @@ library
 
   -- comment me out while debugging
   -- https://github.com/haskell/cabal/issues/7635
-  cc-options:      -DNDEBUG=1
+  --cc-options:      -DNDEBUG=1

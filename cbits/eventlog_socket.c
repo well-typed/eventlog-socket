@@ -467,35 +467,30 @@ static bool writer_write(void *eventlog, size_t size)
   DEBUG_ERR("client_fd = %d; wt.head = %p\n", fd, wt.head);
 
   if (wt.head != NULL) {
-    // if there is stuff in queue already, we enqueue the current block.
     writer_enqueue(eventlog, size);
   } else {
-
-    // and if there isn't, we can write immediately.
-    int ret = write(fd, eventlog, size);
-    DEBUG_ERR("write return %d\n", ret);
-
-    if (ret == -1) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        // couldn't write anything, enqueue whole block
-        writer_enqueue(eventlog, size);
-        goto exit;
-      } else if (errno == EPIPE) {
-        // connection closed, simply exit
-        goto exit;
-
+    uint8_t *ptr = eventlog;
+    size_t remaining = size;
+    while (remaining > 0) {
+      ssize_t ret = send(fd, ptr, remaining, 0);
+      DEBUG_ERR("send return %zd\n", ret);
+      if (ret == -1) {
+        if (errno == EINTR) {
+          continue;
+        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          writer_enqueue(ptr, remaining);
+        } else if (errno == EPIPE) {
+          // connection closed
+        } else {
+          PRINT_ERR("failed to send: %s\n", strerror(errno));
+        }
+        break;
+      } else if (ret == 0) {
+        // peer closed connection
+        break;
       } else {
-        PRINT_ERR("failed to write: %s\n", strerror(errno));
-        goto exit;
-      }
-    } else {
-      // we wrote something
-      if (ret >= size) {
-        // we wrote everything, nothing to do
-        goto exit;
-      } else {
-        // we wrote only part of the buffer
-        writer_enqueue(eventlog + ret, size - ret);
+        ptr += ret;
+        remaining -= (size_t)ret;
       }
     }
   }
@@ -585,6 +580,21 @@ static void listen_iteration(void) {
     PRINT_ERR("fnctl F_SETFL failed: %s\n", strerror(errno));
   }
 
+  int sndbuf = 0;
+  socklen_t optlen = sizeof(sndbuf);
+  if (getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, &optlen) == -1) {
+    PRINT_ERR("getsockopt(SO_SNDBUF) failed: %s\n", strerror(errno));
+  } else {
+    DEBUG_ERR("accepted fd=%d SO_SNDBUF=%d\n", fd, sndbuf);
+  }
+
+  int sndbuf2 = 0;
+  socklen_t optlen2 = sizeof(sndbuf);
+  if (getsockopt(fd, SOL_SOCKET, SO_SNDLOWAT, &sndbuf2, &optlen2) == -1) {
+    PRINT_ERR("getsockopt(SO_SNDBUF) failed: %s\n", strerror(errno));
+  } else {
+    DEBUG_ERR("accepted fd=%d SO_SNDLOWAT=%d\n", fd, sndbuf2);
+  }
 
   // we stop existing logging so we can replay header on the new connection
   if (eventLogStatus() == EVENTLOG_RUNNING) {
