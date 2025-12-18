@@ -790,6 +790,16 @@ static void init_unix_listener(const char *sock_path)
 
   listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
+  // Set the send buffer size (SO_SNDBUF):
+  //
+  // TODO: add SO_SNDBUF and SO_SNDLOWAT as parameters to eventlog-socket.
+  if (setsockopt(listen_fd, SOL_SOCKET, SO_SNDBUF, &(int){212992}, sizeof(int)) == -1) {
+    PRINT_ERR("setsockopt(SO_SNDBUF) failed: %s\n", strerror(errno));
+  }
+  if (setsockopt(listen_fd, SOL_SOCKET, SO_SNDLOWAT, &(int){1}, sizeof(int)) == -1) {
+    PRINT_ERR("setsockopt(SO_SNDLOWAT) failed: %s\n", strerror(errno));
+  }
+
   // Record the sock_path so it can be unlinked at exit
   g_sock_path = strdup(sock_path);
 
