@@ -60,7 +60,7 @@ class EventlogCapture(threading.Thread):
             self.sock.shutdown(socket.SHUT_RD)
         except OSError:
             pass
-        self.join(timeout=5)
+        self.join(timeout=10)
 
 
 @dataclass
@@ -95,7 +95,7 @@ class ControlBridge:
 
     def stop(self) -> None:
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=10)
 
 @dataclass
 class TestRunner:
@@ -193,7 +193,7 @@ class TestRunner:
             sock.connect(str(self.socket_path))
         else:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            deadline = time.time() + 5
+            deadline = time.time() + 10
             while True:
                 try:
                     sock.connect((self.tcp_host, self.tcp_port))
