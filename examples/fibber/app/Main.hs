@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Main where
 
 import Control.Monad (forever)
@@ -6,6 +8,12 @@ import Data.Maybe (fromMaybe)
 import Debug.Trace (flushEventLog, traceMarkerIO)
 import GHC.Eventlog.Socket (startFromEnv)
 import System.Environment (getArgs, lookupEnv)
+
+#if MIN_VERSION_base(4,20,0)
+import System.Mem (performBlockingMajorGC)
+#else
+import System.Mem (performMajorGC)
+#endif
 
 data Mode = Finite | Infinite
 
@@ -22,6 +30,11 @@ main = do
             traceMarkerIO $ "Starting fib " <> arg
             print $ fib (read arg)
             traceMarkerIO $ "Finished fib " <> arg
+#if MIN_VERSION_base(4,20,0)
+            performBlockingMajorGC
+#else
+            performMajorGC
+#endif
     case (mode, fibArgs) of
         (_, []) -> putStrLn "Provide at least one integer argument."
         (Finite, _) -> workload
