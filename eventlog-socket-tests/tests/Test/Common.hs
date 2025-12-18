@@ -3,6 +3,7 @@
 module Test.Common (
     -- * Example Programs
     Program (..),
+    ProgramInfo,
     ProgramHandle (..),
     start,
 
@@ -75,12 +76,12 @@ import System.IO
 import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError, isResourceVanishedError)
 import System.IO.Unsafe (unsafePerformIO)
-import System.Process (CreateProcess (..), ProcessHandle, StdStream (..), createProcess_, getProcessExitCode, proc, showCommandForUser, terminateProcess, waitForProcess, getPid, Pid)
+import System.Posix.Types (CPid (..))
+import System.Process (CreateProcess (..), Pid, ProcessHandle, StdStream (..), createProcess_, getPid, getProcessExitCode, proc, showCommandForUser, terminateProcess, waitForProcess)
 import System.Process.Internals (ignoreSigPipe)
 import Test.Tasty (TestName, TestTree)
 import Test.Tasty.HUnit (Assertion, HasCallStack, assertFailure, testCase)
 import Text.Printf (printf)
-import System.Posix.Types (CPid(..))
 
 #if defined(DEBUG)
 import qualified Control.Concurrent.STM as T
@@ -98,9 +99,15 @@ data Program = Program
     , eventlogSocket :: EventlogSocket
     }
 
+data ProgramInfo = ProgramInfo
+    { program :: Program
+    , maybePid :: Maybe Pid
+    }
+
 data ProgramHandle = ProgramHandle
     { wait :: IO ()
     , kill :: IO ()
+    , info :: ProgramInfo
     }
 
 start :: (HasLogger) => Program -> IO ProgramHandle
@@ -128,12 +135,13 @@ start program = do
                         , std_err = CreatePipe
                         }
             (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
-            -- Log the pid:
+            -- Create the ProgramInfo:
             maybePid <- getPid processHandle
-            debug . Info $ "Launched " <> program.name <> " (" <> showMaybePid maybePid <> ")"
+            let info = ProgramInfo{..}
+            debug . Info $ "Launched " <> prettyProgramInfo info
             -- Start loggers for stderr and stdout:
-            maybeKillDebugOut <- traverse (debugHandle $ ProgramOut maybePid) maybeHandleOut
-            maybeKillDebugErr <- traverse (debugHandle $ ProgramErr maybePid) maybeHandleErr
+            maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
+            maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
             let kill = mask_ $ do
                     debug . Info $ "Cleaning up stdout reader for " <> program.name <> "."
                     sequence_ maybeKillDebugOut
@@ -219,22 +227,22 @@ defaultEventlogAssertion eventlogSocket =
         , validateEvents = const echo
         }
 
-assertEventlogOk :: (HasLogger) => EventlogSocket -> Assertion
-assertEventlogOk eventlogSocket =
-    assertEventlogWith eventlogSocket (debugEventCounter 1_000)
+assertEventlogOk :: (HasLogger) => ProgramInfo -> EventlogSocket -> Assertion
+assertEventlogOk info eventlogSocket =
+    assertEventlogWith info eventlogSocket (debugEventCounter 1_000)
 
-assertEventlogWith :: (HasLogger) => EventlogSocket -> ProcessT IO Event x -> Assertion
-assertEventlogWith eventlogSocket validateEvents =
-    assertEventlogWith' eventlogSocket (const validateEvents)
+assertEventlogWith :: (HasLogger) => ProgramInfo -> EventlogSocket -> ProcessT IO Event x -> Assertion
+assertEventlogWith info eventlogSocket validateEvents =
+    assertEventlogWith' info eventlogSocket (const validateEvents)
 
-assertEventlogWith' :: (HasLogger) => EventlogSocket -> (Handle -> ProcessT IO Event x) -> Assertion
-assertEventlogWith' eventlogSocket validateEvents =
-    runEventlogAssertion (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
+assertEventlogWith' :: (HasLogger) => ProgramInfo -> EventlogSocket -> (Handle -> ProcessT IO Event x) -> Assertion
+assertEventlogWith' info eventlogSocket validateEvents =
+    runEventlogAssertion info (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
 
-runEventlogAssertion :: (HasLogger) => EventlogAssertion x -> Assertion
-runEventlogAssertion EventlogAssertion{..} = do
+runEventlogAssertion :: (HasLogger) => ProgramInfo -> EventlogAssertion x -> Assertion
+runEventlogAssertion info EventlogAssertion{..} = do
     withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket $ \handle ->
-        runT_ $ fromHandle 1000 4096 handle ~> decodeEvent ~> debugEvents ~> validateEvents handle
+        runT_ $ fromHandle 1000 4096 handle ~> decodeEvent ~> debugEvents info ~> validateEvents handle
 
 withEventlogHandle ::
     (HasLogger) =>
@@ -649,9 +657,9 @@ newLogger = pure Logger
 data Message
     = Header TestName
     | Footer TestName
-    | ProgramOut (Maybe Pid) String
-    | ProgramErr (Maybe Pid) String
-    | Event Event
+    | ProgramOut ProgramInfo String
+    | ProgramErr ProgramInfo String
+    | Event ProgramInfo Event
     | Info String
     | Fail String
 
@@ -685,12 +693,12 @@ withLogger action = do
             "-- HEADER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-'
         Footer testName ->
             "-- FOOTER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-'
-        ProgramOut maybePid message ->
-            "[ProgramOut] (" <> showMaybePid maybePid <> ") " <> message
-        ProgramErr maybePid message ->
-            "[ProgramErr] (" <> showMaybePid maybePid <> ") " <> message
-        Event event ->
-            "[Event] " <> ppEvent PrettyTime mempty event
+        ProgramOut info message ->
+            "[ProgramOut] " <> prettyProgramInfo info <> " " <> message
+        ProgramErr info message ->
+            "[ProgramErr] " <> prettyProgramInfo info <> " " <> message
+        Event info event ->
+            "[Event] " <> prettyProgramInfo info <> " " <> ppEvent PrettyTime mempty event
         Info message ->
             "[Info] " <> message
         Fail message ->
@@ -717,11 +725,11 @@ debugHandle wrapper handle = do
     threadId <- forkIO runner
     pure $ killThread threadId
 
-debugEvents :: (HasLogger) => ProcessT IO Event Event
-debugEvents =
+debugEvents :: (HasLogger) => ProgramInfo -> ProcessT IO Event Event
+debugEvents info =
     repeatedly $
         await >>= \event -> do
-            liftIO (debug $ Event event)
+            liftIO (debug $ Event info event)
             yield event
 
 debugEventCounter :: (HasLogger) => Int -> ProcessT IO Event Event
@@ -743,5 +751,8 @@ debugEventCounter limit = go (0 :: Int)
                 liftIO (debug . Info $ "Saw " <> show count <> " events.")
                 pure Stop
 
-showMaybePid :: Maybe Pid -> String
-showMaybePid = maybe "terminated" (\(CPid pid) -> "pid=" <> show pid)
+prettyProgramInfo :: ProgramInfo -> String
+prettyProgramInfo ProgramInfo{..} = program.name <> " (" <> prettyMaybePid maybePid <> ")"
+  where
+    prettyMaybePid :: Maybe Pid -> String
+    prettyMaybePid = maybe "terminated" (\(CPid pid) -> "pid=" <> show pid)
