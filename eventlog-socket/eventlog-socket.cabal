@@ -36,6 +36,11 @@ flag debug
   default: False
   manual: True
 
+flag optimise-heavily
+  description: Pass @-O2@ to the C compiler.
+  default: False
+  manual: True
+
 library
   exposed-modules:    GHC.Eventlog.Socket
   other-extensions:   CApiFFI
@@ -53,4 +58,7 @@ library
     -- 2025-12-17:
     -- cpp-options are not passed to C code, see:
     -- https://github.com/haskell/cabal/issues/7635
-    cc-options:         -DDEBUG=1
+    cc-options:       -DDEBUG=1
+
+  if flag(optimise-heavily)
+    cc-options:       -O2
