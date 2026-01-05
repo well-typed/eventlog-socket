@@ -250,7 +250,7 @@ static void start_control_receiver(int fd);
 static void *control_receiver(void *arg);
 static void control_connection_closed(int fd);
 static enum control_recv_status control_receive_command(int fd, enum control_command *cmd_out);
-static void handle_control_command(enum control_command cmd);
+static void control_handle_command(enum control_command cmd);
 
 /*********************************************************************************
  * Implementations
@@ -1148,7 +1148,7 @@ static enum control_recv_status control_receive_command(int fd, enum control_com
   return CONTROL_RECV_OK;
 }
 
-static void handle_control_command(enum control_command cmd)
+static void control_handle_command(enum control_command cmd)
 {
   switch (cmd) {
     case CONTROL_CMD_START_HEAP_PROFILING:
@@ -1225,7 +1225,7 @@ static void *control_receiver(void *arg)
       continue;
     }
 
-    handle_control_command(cmd);
+    control_handle_command(cmd);
   }
 
   return NULL;
