@@ -90,28 +90,29 @@ const EventLogWriter SocketEventLogWriter = {
 // Used in `worker_write_iteration` and `control_wait_for_data`.
 #define POLL_WRITE_TIMEOUT 1000
 
-/* listener configuration
+/* eventlog socket configuration
  *********************************************************************************/
 
-// The eventlog writer supports two socket types: Unix domain sockets and TCP
-// sockets. These are represented by the values of the `listened_kind` enum.
+// The eventlog writer is tested with two socket address families: Unix domain
+// sockets and TCP sockets. These are represented by the values of the
+// `eventlog_socket_family` enum.
 
-enum listener_kind {
-  LISTENER_UNIX,
-  LISTENER_TCP,
+enum eventlog_socket_family {
+  EVENTLOG_UNIX,
+  EVENTLOG_INET,
 };
 
 // The configuration of the eventlog writer is represented as the tagged union
 // of a Unix domain socket path and a TCP host and port.
 
-struct listener_config {
-  enum listener_kind kind;
-  const char *sock_path;
+struct eventlog_socket {
+  enum eventlog_socket_family family;
+  const char *unix_socket_path;
   const char *tcp_host;
   const char *tcp_port;
 };
 
-static bool listener_config_valid(const struct listener_config *config);
+static bool eventlog_socket_valid(const struct eventlog_socket *eventlog_socket);
 
 /* write buffer
  *********************************************************************************/
@@ -183,13 +184,13 @@ static struct write_buffer g_write_buffer = {
 
 // See: eventlog-socket/include/eventlog_socket.h
 
-static void init_unix_listener(const char *sock_path);
+static void init_unix_listener(const char *unix_socket_path);
 static void init_tcp_listener(const char *host, const char *port);
-static void start_worker(const struct listener_config *config);
+static void start_worker(const struct eventlog_socket *eventlog_socket);
 static void cleanup_socket(void);
 static void ensure_initialized(void);
 static void signal_control_ready(void);
-static void eventlog_socket_init(const struct listener_config *config);
+static void eventlog_socket_init(const struct eventlog_socket *eventlog_socket);
 
 /* worker
  *********************************************************************************/
@@ -198,7 +199,7 @@ static void eventlog_socket_init(const struct listener_config *config);
 
 static bool g_initialized = false;
 static int g_sock_fd = -1;
-static const char *g_sock_path = NULL;
+static const char *g_unix_socket_path = NULL;
 static int g_wake_pipe[2] = { -1, -1 };
 
 // functions
@@ -361,19 +362,19 @@ static void writer_wake_worker(void)
   }
 }
 
-/* listener configuration
+/* eventlog socket configuration
  *********************************************************************************/
 
-static bool listener_config_valid(const struct listener_config *config) {
-  if (config == NULL) {
+static bool eventlog_socket_valid(const struct eventlog_socket *eventlog_socket) {
+  if (eventlog_socket == NULL) {
     return false;
   }
 
-  switch (config->kind) {
-    case LISTENER_UNIX:
-      return config->sock_path != NULL;
-    case LISTENER_TCP:
-      return config->tcp_port != NULL;
+  switch (eventlog_socket->family) {
+    case EVENTLOG_UNIX:
+      return eventlog_socket->unix_socket_path != NULL;
+    case EVENTLOG_INET:
+      return eventlog_socket->tcp_port != NULL;
     default:
       return false;
   }
@@ -442,9 +443,9 @@ void write_buffer_free(struct write_buffer *buf) {
 
 // Initialize the Unix-domain listener socket and bind it to the provided path.
 // This function does not start any threads; start_worker() completes the setup.
-static void init_unix_listener(const char *sock_path)
+static void init_unix_listener(const char *unix_socket_path)
 {
-  DEBUG_ERR("init Unix listener: %s\n", sock_path);
+  DEBUG_ERR("init Unix listener: %s\n", unix_socket_path);
 
   g_sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -458,17 +459,18 @@ static void init_unix_listener(const char *sock_path)
     PRINT_ERR("setsockopt(SO_SNDLOWAT) failed: %s\n", strerror(errno));
   }
 
-  // Record the sock_path so it can be unlinked at exit
-  g_sock_path = strdup(sock_path);
+  // Record the unix_socket_path so it can be unlinked at exit
+  g_unix_socket_path = strdup(unix_socket_path);
 
   struct sockaddr_un local;
   memset(&local, 0, sizeof(local));
   local.sun_family = AF_UNIX;
-  strncpy(local.sun_path, sock_path, sizeof(local.sun_path) - 1);
-  unlink(sock_path);
+  strncpy(local.sun_path, unix_socket_path, sizeof(local.sun_path) - 1);
+  // TODO: only unlink the file if this is specified in the options and the existing file is a socket
+  unlink(unix_socket_path);
   if (bind(g_sock_fd, (struct sockaddr *) &local,
            sizeof(struct sockaddr_un)) == -1) {
-    PRINT_ERR("failed to bind socket %s: %s\n", sock_path, strerror(errno));
+    PRINT_ERR("failed to bind socket %s: %s\n", unix_socket_path, strerror(errno));
     abort();
   }
 }
@@ -531,14 +533,14 @@ static void init_tcp_listener(const char *host, const char *port)
   }
 }
 
-static void start_worker(const struct listener_config *config)
+static void start_worker(const struct eventlog_socket *eventlog_socket)
 {
-  switch (config->kind) {
-    case LISTENER_UNIX:
-      init_unix_listener(config->sock_path);
+  switch (eventlog_socket->family) {
+    case EVENTLOG_UNIX:
+      init_unix_listener(eventlog_socket->unix_socket_path);
       break;
-    case LISTENER_TCP:
-      init_tcp_listener(config->tcp_host, config->tcp_port);
+    case EVENTLOG_INET:
+      init_tcp_listener(eventlog_socket->tcp_host, eventlog_socket->tcp_port);
       break;
     default:
       PRINT_ERR("unknown listener kind\n");
@@ -554,7 +556,7 @@ static void start_worker(const struct listener_config *config)
 
 static void cleanup_socket(void)
 {
-    if (g_sock_path) unlink(g_sock_path);
+    if (g_unix_socket_path) unlink(g_unix_socket_path);
     if (g_wake_pipe[0] != -1) {
       close(g_wake_pipe[0]);
       g_wake_pipe[0] = -1;
@@ -601,11 +603,11 @@ static void signal_control_ready(void)
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
 // It spawns the worker immediately but defers handling of control messages
 // until eventlog_socket_ready() is invoked after RTS initialization.
-static void eventlog_socket_init(const struct listener_config *config)
+static void eventlog_socket_init(const struct eventlog_socket *eventlog_socket)
 {
   ensure_initialized();
 
-  if (!listener_config_valid(config))
+  if (!eventlog_socket_valid(eventlog_socket))
     return;
 
   pthread_mutex_lock(&g_mutex);
@@ -613,7 +615,7 @@ static void eventlog_socket_init(const struct listener_config *config)
   g_control_ready_armed = true;
   pthread_mutex_unlock(&g_mutex);
 
-  start_worker(config);
+  start_worker(eventlog_socket);
 }
 
 void eventlog_socket_ready(void)
@@ -632,26 +634,26 @@ void eventlog_socket_ready(void)
   }
 }
 
-void eventlog_socket_init_unix(const char *sock_path)
+void eventlog_socket_init_unix(const char *unix_socket_path)
 {
-  struct listener_config config = {
-    .kind = LISTENER_UNIX,
-    .sock_path = sock_path,
+  struct eventlog_socket eventlog_socket = {
+    .family = EVENTLOG_UNIX,
+    .unix_socket_path = unix_socket_path,
     .tcp_host = NULL,
     .tcp_port = NULL,
   };
-  eventlog_socket_init(&config);
+  eventlog_socket_init(&eventlog_socket);
 }
 
-void eventlog_socket_init_tcp(const char *host, const char *port)
+void eventlog_socket_init_tcp(const char *tcp_host, const char *tcp_port)
 {
-  struct listener_config config = {
-    .kind = LISTENER_TCP,
-    .sock_path = NULL,
-    .tcp_host = host,
-    .tcp_port = port,
+  struct eventlog_socket eventlog_socket = {
+    .family = EVENTLOG_INET,
+    .unix_socket_path = NULL,
+    .tcp_host = tcp_host,
+    .tcp_port = tcp_port,
   };
-  eventlog_socket_init(&config);
+  eventlog_socket_init(&eventlog_socket);
 }
 
 void eventlog_socket_wait(void)
@@ -713,11 +715,11 @@ int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf, StgClosure *
 
 // Use this from an already-running RTS: it reconfigures eventlogging to use
 // SocketEventLogWriter and restarts the log when a client connects.
-static void eventlog_socket_start(const struct listener_config *config, bool wait)
+static void eventlog_socket_start(const struct eventlog_socket *eventlog_socket, bool wait)
 {
   ensure_initialized();
 
-  if (!listener_config_valid(config))
+  if (!eventlog_socket_valid(eventlog_socket))
     return;
 
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
@@ -740,18 +742,18 @@ static void eventlog_socket_start(const struct listener_config *config, bool wai
   // warning messages from showing up in stderr.
   startEventLogging(&SocketEventLogWriter);
 
-  start_worker(config);
+  start_worker(eventlog_socket);
   // Presume that the RTS is already running and we're ready if you're directly using this
   // function.
   signal_control_ready();
   if (wait) {
-    switch (config->kind) {
-      case LISTENER_UNIX:
-        DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", config->sock_path);
+    switch (eventlog_socket->family) {
+      case EVENTLOG_UNIX:
+        DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", eventlog_socket->unix_socket_path);
         break;
-      case LISTENER_TCP: {
-        const char *host = config->tcp_host ? config->tcp_host : "*";
-        DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", host, config->tcp_port);
+      case EVENTLOG_INET: {
+        const char *host = eventlog_socket->tcp_host ? eventlog_socket->tcp_host : "*";
+        DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", host, eventlog_socket->tcp_port);
         break;
       }
       default:
@@ -761,26 +763,26 @@ static void eventlog_socket_start(const struct listener_config *config, bool wai
   }
 }
 
-void eventlog_socket_start_unix(const char *sock_path, bool wait)
+void eventlog_socket_start_unix(const char *unix_socket_path, bool wait)
 {
-  struct listener_config config = {
-    .kind = LISTENER_UNIX,
-    .sock_path = sock_path,
+  struct eventlog_socket eventlog_socket = {
+    .family = EVENTLOG_UNIX,
+    .unix_socket_path = unix_socket_path,
     .tcp_host = NULL,
     .tcp_port = NULL,
   };
-  eventlog_socket_start(&config, wait);
+  eventlog_socket_start(&eventlog_socket, wait);
 }
 
 void eventlog_socket_start_tcp(const char *host, const char *port, bool wait)
 {
-  struct listener_config config = {
-    .kind = LISTENER_TCP,
-    .sock_path = NULL,
+  struct eventlog_socket eventlog_socket = {
+    .family = EVENTLOG_INET,
+    .unix_socket_path = NULL,
     .tcp_host = host,
     .tcp_port = port,
   };
-  eventlog_socket_start(&config, wait);
+  eventlog_socket_start(&eventlog_socket, wait);
 }
 
 /* worker
