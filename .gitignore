@@ -5,6 +5,9 @@ cabal.project.local
 *.o
 *.hp
 
+# C
+/.clangd
+
 # VSCode
 /.vscode
 
