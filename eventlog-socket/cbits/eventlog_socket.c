@@ -98,9 +98,9 @@ const EventLogWriter SocketEventLogWriter = {
 
 // The eventlog writer is tested with two socket address families: Unix domain
 // sockets and TCP sockets. These are represented by the values of the
-// `eventlog_socket_family` enum.
+// `eventlog_socket_addr_family` enum.
 
-enum eventlog_socket_family {
+enum eventlog_socket_addr_family {
   EVENTLOG_UNIX,
   EVENTLOG_INET,
 };
@@ -108,11 +108,23 @@ enum eventlog_socket_family {
 // The configuration of the eventlog writer is represented as the tagged union
 // of a Unix domain socket path and a TCP host and port.
 
+struct eventlog_unix_socket {
+  const char *path;
+};
+
+struct eventlog_tcp_socket {
+  const char *host;
+  const char *port;
+};
+
+union eventlog_socket_addr {
+  const struct eventlog_unix_socket unix_socket;
+  const struct eventlog_tcp_socket tcp;
+};
+
 struct eventlog_socket {
-  enum eventlog_socket_family family;
-  const char *unix_socket_path;
-  const char *tcp_host;
-  const char *tcp_port;
+  const enum eventlog_socket_addr_family addr_family;
+  const union eventlog_socket_addr addr;
 };
 
 static bool eventlog_socket_valid(const struct eventlog_socket *eventlog_socket);
@@ -373,11 +385,11 @@ static bool eventlog_socket_valid(const struct eventlog_socket *eventlog_socket)
     return false;
   }
 
-  switch (eventlog_socket->family) {
+  switch (eventlog_socket->addr_family) {
     case EVENTLOG_UNIX:
-      return eventlog_socket->unix_socket_path != NULL;
+      return eventlog_socket->addr.unix_socket.path != NULL;
     case EVENTLOG_INET:
-      return eventlog_socket->tcp_port != NULL;
+      return eventlog_socket->addr.tcp.port != NULL;
     default:
       return false;
   }
@@ -538,12 +550,12 @@ static void init_tcp_listener(const char *host, const char *port)
 
 static void start_worker(const struct eventlog_socket *eventlog_socket)
 {
-  switch (eventlog_socket->family) {
+  switch (eventlog_socket->addr_family) {
     case EVENTLOG_UNIX:
-      init_unix_listener(eventlog_socket->unix_socket_path);
+      init_unix_listener(eventlog_socket->addr.unix_socket.path);
       break;
     case EVENTLOG_INET:
-      init_tcp_listener(eventlog_socket->tcp_host, eventlog_socket->tcp_port);
+      init_tcp_listener(eventlog_socket->addr.tcp.host, eventlog_socket->addr.tcp.port);
       break;
     default:
       PRINT_ERR("unknown listener kind\n");
@@ -640,10 +652,8 @@ void eventlog_socket_ready(void)
 void eventlog_socket_init_unix(const char *unix_socket_path)
 {
   struct eventlog_socket eventlog_socket = {
-    .family = EVENTLOG_UNIX,
-    .unix_socket_path = unix_socket_path,
-    .tcp_host = NULL,
-    .tcp_port = NULL,
+    .addr_family = EVENTLOG_UNIX,
+    .addr.unix_socket.path = unix_socket_path,
   };
   eventlog_socket_init(&eventlog_socket);
 }
@@ -651,10 +661,11 @@ void eventlog_socket_init_unix(const char *unix_socket_path)
 void eventlog_socket_init_tcp(const char *tcp_host, const char *tcp_port)
 {
   struct eventlog_socket eventlog_socket = {
-    .family = EVENTLOG_INET,
-    .unix_socket_path = NULL,
-    .tcp_host = tcp_host,
-    .tcp_port = tcp_port,
+    .addr_family = EVENTLOG_INET,
+    .addr.tcp = {
+      .host = tcp_host,
+      .port = tcp_port,
+    }
   };
   eventlog_socket_init(&eventlog_socket);
 }
@@ -750,13 +761,13 @@ static void eventlog_socket_start(const struct eventlog_socket *eventlog_socket,
   // function.
   signal_control_ready();
   if (wait) {
-    switch (eventlog_socket->family) {
+    switch (eventlog_socket->addr_family) {
       case EVENTLOG_UNIX:
-        DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", eventlog_socket->unix_socket_path);
+        DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", eventlog_socket->addr.unix_socket.path);
         break;
       case EVENTLOG_INET: {
-        const char *host = eventlog_socket->tcp_host ? eventlog_socket->tcp_host : "*";
-        DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", host, eventlog_socket->tcp_port);
+        const char *host = eventlog_socket->addr.tcp.host ? eventlog_socket->addr.tcp.host : "*";
+        DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", host, eventlog_socket->addr.tcp.port);
         break;
       }
       default:
@@ -769,21 +780,20 @@ static void eventlog_socket_start(const struct eventlog_socket *eventlog_socket,
 void eventlog_socket_start_unix(const char *unix_socket_path, bool wait)
 {
   struct eventlog_socket eventlog_socket = {
-    .family = EVENTLOG_UNIX,
-    .unix_socket_path = unix_socket_path,
-    .tcp_host = NULL,
-    .tcp_port = NULL,
+    .addr_family = EVENTLOG_UNIX,
+    .addr.unix_socket.path = unix_socket_path,
   };
   eventlog_socket_start(&eventlog_socket, wait);
 }
 
-void eventlog_socket_start_tcp(const char *host, const char *port, bool wait)
+void eventlog_socket_start_tcp(const char *tcp_host, const char *tcp_port, bool wait)
 {
   struct eventlog_socket eventlog_socket = {
-    .family = EVENTLOG_INET,
-    .unix_socket_path = NULL,
-    .tcp_host = host,
-    .tcp_port = port,
+    .addr_family = EVENTLOG_INET,
+    .addr = {
+      .tcp.host = tcp_host,
+      .tcp.port = tcp_port,
+    }
   };
   eventlog_socket_start(&eventlog_socket, wait);
 }
