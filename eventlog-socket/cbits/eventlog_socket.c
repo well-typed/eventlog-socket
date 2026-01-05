@@ -29,11 +29,14 @@
 // The functions in this file run concurrently.
 // There are three concurrent thread groups:
 //
-// 1. The GHC RTS.
-// 2. The worker spawned by `start_worker`.
-//    This writes to the eventlog socket.
-// 3. The worker spawned by `start_control_receiver`.
-//    This reads control commands from the eventlog socket.
+// 1. The GHC RTS threads.
+//    Functions that are called from these threads are prefixed with "writer_".
+// 2. The worker thread spawned by the `start_worker` function.
+//    This thread reads from g_write_buffer and writes to the eventlog socket.
+//    Functions that are called from this thread are prefixed with "worker_".
+// 3. The control_receiver thread spawned by `start_control_receiver`.
+//    This thread reads control commands from the eventlog socket and handles them.
+//    Functions that are called from this thread are prefixed with "control_".
 
 /*********************************************************************************
  * Logging Macros
