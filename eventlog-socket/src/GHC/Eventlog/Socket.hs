@@ -13,6 +13,10 @@ module GHC.Eventlog.Socket (
     lookupEventlogTcpSocket,
     lookupWaitMode,
 
+    -- * Low-level API
+    EventlogSocketOpts (soDebug, soBroadcast, soReuseAddr, soKeepAlive, soLinger, soOoBInline, soSndBuf, soRcvBug, soDontRoute, soSndLoWat, soSndTimeO, soRcvLoWat, soRcvTimeO),
+    defaultEventlogSocketOpts,
+
     -- * Legacy API
     startWait,
     start,
@@ -22,11 +26,16 @@ module GHC.Eventlog.Socket (
 import Control.Exception (Exception (..), throwIO)
 import Control.Monad (when)
 import Data.Foldable (traverse_)
+import Data.Int (Int64)
 import Data.Maybe (isJust)
 import Data.Word (Word16)
 import Foreign.C (CString, withCString)
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
+
+--------------------------------------------------------------------------------
+-- High-level API
+--------------------------------------------------------------------------------
 
 {- |
 A type representing the supported eventlog socket modes.
@@ -47,6 +56,9 @@ data EventlogSocket
         }
     deriving (Show)
 
+{- |
+Error thrown when the Unix socket path exceeds 107 characters.
+-}
 newtype UnixSocketPathTooLong = UnixSocketPathTooLong FilePath
     deriving (Show)
 
@@ -136,6 +148,86 @@ startWith eventlogSocket shouldWait =
                 withCString (show tcpPort) $ \portPtr ->
                     c_start_tcp hostPtr portPtr shouldWait
 
+--------------------------------------------------------------------------------
+-- Low-level API
+--------------------------------------------------------------------------------
+
+{- |
+Options for Unix sockets.
+
+Construct using `defaultEvenlogSocketOpts` and set options using field update:
+
+- @`soDebug` :: `Maybe` `Bool`@
+- @`soReuseAddr` :: `Maybe` `Bool`@
+- @`soKeepAlive` :: `Maybe` `Bool`@
+- @`soLinger` :: `Maybe` `Int`@
+- @`soOoBInline` :: `Maybe` `Bool`@
+- @`soSndBuf` :: `Maybe` `Int`@
+- @`soRcvBug` :: `Maybe` `Int`@
+- @`soDontRoute` :: `Maybe` `Bool`@
+- @`soSndLoWat` :: `Maybe` `Int`@
+- @`soSndTimeO` :: `Maybe` `Int64`@
+- @`soRcvLoWat` :: `Maybe` `Int`@
+- @`soRcvTimeO` :: `Maybe` `Int64`@
+
+For a detailed description of the socket options, see [Use of Options](https://pubs.opengroup.org/onlinepubs/9699919799/).
+-}
+data EventlogSocketOpts = EventlogSocketOpts
+    { soDebug :: !(Maybe Bool)
+    -- ^ Enable recording of debugging information.
+    , soBroadcast :: !(Maybe Bool)
+    -- ^ Enable broadcast.
+    , soReuseAddr :: !(Maybe Bool)
+    -- ^ Reuse local addresses, if supported by the protocol.
+    , soKeepAlive :: !(Maybe Bool)
+    -- ^ Keep connections active, if supported by the protocol.
+    , soLinger :: !(Maybe Int)
+    -- ^ Linger time, in seconds.
+    , soOoBInline :: !(Maybe Bool)
+    -- ^ Leave received out-of-band data inline.
+    , soSndBuf :: !(Maybe Int)
+    -- ^ Send buffer size in bytes.
+    , soRcvBug :: !(Maybe Int)
+    -- ^ Receive buffer size in bytes.
+    , soDontRoute :: !(Maybe Bool)
+    {- ^ Request that outgoing messages bypass the standard routing facilities.
+    The effect, if any, depends on the protocol.
+    -}
+    , soSndLoWat :: !(Maybe Int)
+    -- ^ Send buffer "low water mark" in bytes.
+    , soSndTimeO :: !(Maybe Int64)
+    -- ^ Send buffer timeout in microseconds.
+    , soRcvLoWat :: !(Maybe Int)
+    -- ^ Receive buffer "low water mark" in bytes.
+    , soRcvTimeO :: !(Maybe Int64)
+    -- ^ Send buffer timeout in microseconds.
+    }
+
+{- |
+Default options for Unix sockets.
+-}
+defaultEventlogSocketOpts :: EventlogSocketOpts
+defaultEventlogSocketOpts =
+    EventlogSocketOpts
+        { soDebug = Nothing
+        , soBroadcast = Nothing
+        , soReuseAddr = Nothing
+        , soKeepAlive = Nothing
+        , soLinger = Nothing
+        , soOoBInline = Nothing
+        , soSndBuf = Nothing
+        , soRcvBug = Nothing
+        , soDontRoute = Nothing
+        , soSndLoWat = Nothing
+        , soSndTimeO = Nothing
+        , soRcvLoWat = Nothing
+        , soRcvTimeO = Nothing
+        }
+
+--------------------------------------------------------------------------------
+-- Legacy API
+--------------------------------------------------------------------------------
+
 {- |
 Start an @eventlog-socket@ writer on a Unix domain socket and wait.
 
@@ -161,6 +253,10 @@ Wait for another process to connect to the eventlog socket.
 -}
 wait :: IO ()
 wait = c_wait
+
+--------------------------------------------------------------------------------
+-- Foreign functions
+--------------------------------------------------------------------------------
 
 foreign import capi safe "eventlog_socket.h eventlog_socket_start_unix"
     c_start_unix :: CString -> Bool -> IO ()
