@@ -64,13 +64,12 @@
 // is intended to be passed to the GHC RTS using `startEventLogging`.
 const EventLogWriter SocketEventLogWriter;
 
-static void wake_worker(void);
-static void writer_enqueue(uint8_t *data, size_t size);
-
 static void writer_init(void);
 static bool writer_write(void *eventlog, size_t size);
 static void writer_flush(void);
 static void writer_stop(void);
+static void writer_wake_worker(void);
+static void writer_enqueue(uint8_t *data, size_t size);
 
 const EventLogWriter SocketEventLogWriter = {
   .initEventLogWriter = writer_init,
@@ -82,13 +81,13 @@ const EventLogWriter SocketEventLogWriter = {
 /* global constants
  *********************************************************************************/
 
-// Used in `listen_iteration`.
+// Used in `worker_listen_iteration`.
 #define LISTEN_BACKLOG 5
 
-// Used in `listen_iteration`.
+// Used in `worker_listen_iteration`.
 #define POLL_LISTEN_TIMEOUT 10000
 
-// Used in `write_iteration` and `control_wait_for_data`.
+// Used in `worker_write_iteration` and `control_wait_for_data`.
 #define POLL_WRITE_TIMEOUT 1000
 
 /* listener configuration
@@ -204,11 +203,11 @@ static int wake_pipe[2] = { -1, -1 };
 // functions
 
 static void *worker(void *arg);
-static void iteration(void);
-static void write_iteration(int fd);
-static void nonwrite_iteration(int fd);
-static void listen_iteration(void);
-static void drain_worker_wake(void);
+static void worker_iteration(void);
+static void worker_listen_iteration(void);
+static void worker_write_iteration(int fd);
+static void worker_nonwrite_iteration(int fd);
+static void worker_wake_drain(void);
 
 /* control receiver
  *********************************************************************************/
@@ -343,11 +342,11 @@ static void writer_enqueue(uint8_t *data, size_t size)
 
   DEBUG_ERR("wt.head = %p\n", wt.head);
   if (was_empty) {
-    wake_worker();
+    writer_wake_worker();
   }
 }
 
-static void wake_worker(void)
+static void writer_wake_worker(void)
 {
   if (wake_pipe[1] == -1)
     return;
@@ -381,7 +380,7 @@ static bool listener_config_valid(const struct listener_config *config) {
  *********************************************************************************/
 
 // push to the back.
-// Caller must serialize externally (writer_write/write_iteration hold mutex)
+// Caller must serialize externally (writer_write/worker_write_iteration hold mutex)
 // so that head/last invariants stay intact.
 void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
   DEBUG_ERR("%p, %lu\n", data, size);
@@ -803,13 +802,13 @@ static void *worker(void *arg)
 {
   (void)arg;
   while (true) {
-    iteration();
+    worker_iteration();
   }
 
   return NULL; // unreachable
 }
 
-static void iteration(void) {
+static void worker_iteration(void) {
   // Snapshot shared state under lock so worker decisions (listen vs write)
   // align with the current connection/queue state.
   pthread_mutex_lock(&mutex);
@@ -820,16 +819,16 @@ static void iteration(void) {
 
   if (fd != -1) {
     if (empty) {
-      nonwrite_iteration(fd);
+      worker_nonwrite_iteration(fd);
     } else {
-      write_iteration(fd);
+      worker_write_iteration(fd);
     }
   } else {
-    listen_iteration();
+    worker_listen_iteration();
   }
 }
 
-static void listen_iteration(void) {
+static void worker_listen_iteration(void) {
   bool start_eventlog = false;
 
   if (listen(listen_fd, LISTEN_BACKLOG) == -1) {
@@ -846,7 +845,7 @@ static void listen_iteration(void) {
     .revents = 0,
   };
 
-  DEBUG_ERR("listen_iteration: waiting for accept on fd %d\n", listen_fd);
+  DEBUG_ERR("worker_listen_iteration: waiting for accept on fd %d\n", listen_fd);
 
   // poll until we can accept
   while (true) {
@@ -925,7 +924,7 @@ static void listen_iteration(void) {
 // nothing to write iteration.
 //
 // we poll only for whether the connection is closed.
-static void nonwrite_iteration(int fd) {
+static void worker_nonwrite_iteration(int fd) {
   DEBUG_ERR("(%d)\n", fd);
 
   // Wait for socket to disconnect or for pending data.
@@ -951,7 +950,7 @@ static void nonwrite_iteration(int fd) {
   }
 
   if (nfds == 2 && (pfds[1].revents & POLLIN)) {
-    drain_worker_wake();
+    worker_wake_drain();
     return;
   }
 
@@ -969,7 +968,7 @@ static void nonwrite_iteration(int fd) {
 // write iteration.
 //
 // we poll for both: can we write, and whether the connection is closed.
-static void write_iteration(int fd) {
+static void worker_write_iteration(int fd) {
   DEBUG_ERR("(%d)\n", fd);
 
   // Wait for socket to disconnect
@@ -1043,7 +1042,7 @@ static void write_iteration(int fd) {
   }
 }
 
-static void drain_worker_wake(void)
+static void worker_wake_drain(void)
 {
   if (wake_pipe[0] == -1)
     return;
