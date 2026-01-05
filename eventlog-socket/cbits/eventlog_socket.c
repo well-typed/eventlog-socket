@@ -199,6 +199,9 @@ static struct write_buffer g_write_buffer = {
 
 // See: eventlog-socket/include/eventlog_socket.h
 
+// TODO: replace `inix_X_listener` with generic `eventlog_socket_init_listener`
+//       which accepts `eventlog_socket` and `eventlog_socket_opts`.
+
 static void init_unix_listener(const char *unix_socket_path);
 static void init_tcp_listener(const char *host, const char *port);
 static void start_worker(const struct eventlog_socket *eventlog_socket);
