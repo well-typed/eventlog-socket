@@ -30,7 +30,7 @@
 // There are three concurrent thread groups:
 //
 // 1. The GHC RTS.
-// 2. The worker spawned by `open_socket`.
+// 2. The worker spawned by `start_worker`.
 //    This writes to the eventlog socket.
 // 3. The worker spawned by `start_control_receiver`.
 //    This reads control commands from the eventlog socket.
@@ -184,7 +184,7 @@ static struct write_buffer wt = {
 
 static void init_unix_listener(const char *sock_path);
 static void init_tcp_listener(const char *host, const char *port);
-static void open_socket(const struct listener_config *config);
+static void start_worker(const struct listener_config *config);
 static void cleanup_socket(void);
 static void ensure_initialized(void);
 static void signal_control_ready(void);
@@ -438,7 +438,7 @@ void write_buffer_free(struct write_buffer *buf) {
  *********************************************************************************/
 
 // Initialize the Unix-domain listener socket and bind it to the provided path.
-// This function does not start any threads; open_socket() completes the setup.
+// This function does not start any threads; start_worker() completes the setup.
 static void init_unix_listener(const char *sock_path)
 {
   DEBUG_ERR("init Unix listener: %s\n", sock_path);
@@ -528,7 +528,7 @@ static void init_tcp_listener(const char *host, const char *port)
   }
 }
 
-static void open_socket(const struct listener_config *config)
+static void start_worker(const struct listener_config *config)
 {
   switch (config->kind) {
     case LISTENER_UNIX:
@@ -610,7 +610,7 @@ static void eventlog_socket_init(const struct listener_config *config)
   control_ready_armed = true;
   pthread_mutex_unlock(&mutex);
 
-  open_socket(config);
+  start_worker(config);
 }
 
 void eventlog_socket_ready(void)
@@ -737,7 +737,7 @@ static void eventlog_socket_start(const struct listener_config *config, bool wai
   // warning messages from showing up in stderr.
   startEventLogging(&SocketEventLogWriter);
 
-  open_socket(config);
+  start_worker(config);
   // Presume that the RTS is already running and we're ready if you're directly using this
   // function.
   signal_control_ready();
