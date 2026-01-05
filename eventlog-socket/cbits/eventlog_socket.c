@@ -152,27 +152,28 @@ void write_buffer_free(struct write_buffer *buf);
 /* concurrent global variables
  *********************************************************************************/
 
-static pthread_t worker_thread;
-static pthread_cond_t new_conn_cond;
+static pthread_t g_worker_thread;
+static pthread_cond_t g_new_conn_cond;
 
 // Global mutex guarding all shared state between RTS threads, the worker
-// thread, and the detached control receiver. Both `client_fd` and `wt` need
-// protection, but a single mutex ensures we keep their updates consistent.
-static pthread_mutex_t mutex;
+// thread, and the detached control receiver. Both `g_client_fd` and
+// `g_write_buffer` need protection, but a single mutex ensures we keep their
+// updates consistent.
+static pthread_mutex_t g_mutex;
 
 // This variable holds the client file descriptor. It is written by worker in
 // `writer_stop` and written by the control receiver in ??? to signal when a
 // client connects or disconnects.
 //
-// This variable is guarded by the mutex `mutex`.
-static volatile int client_fd = -1;
+// This variable is guarded by the mutex `g_mutex`.
+static volatile int g_client_fd = -1;
 
 // This is the write buffer, which is queue of pending eventlog chunks. The RTS
 // thread pushes to the write buffer, while the worker thread pops from the
 // write buffer.
 //
-// This variable is guarded by the mutex `mutex`.
-static struct write_buffer wt = {
+// This variable is guarded by the mutex `g_mutex`.
+static struct write_buffer g_write_buffer = {
   .head = NULL,
   .last = NULL,
 };
@@ -195,10 +196,10 @@ static void eventlog_socket_init(const struct listener_config *config);
 
 // global variables
 
-static bool initialized = false;
-static int listen_fd = -1;
+static bool g_initialized = false;
+static int g_sock_fd = -1;
 static const char *g_sock_path = NULL;
-static int wake_pipe[2] = { -1, -1 };
+static int g_wake_pipe[2] = { -1, -1 };
 
 // functions
 
@@ -215,13 +216,13 @@ static void worker_wake_drain(void);
 // global variables
 
 // Signal to the control thread to start.
-static pthread_cond_t control_ready_cond;
+static pthread_cond_t g_control_ready_cond;
 
 // Whether we have started the control thread.
-static volatile bool control_ready = false;
+static volatile bool g_control_ready = false;
 
 // Whether the controller thread is ready to start.
-static bool control_ready_armed = false;
+static bool g_control_ready_armed = false;
 
 // The control receiver accepts control signals encoded as byte strings, where
 // control signal is preceded by the sequence `CONTROL_MAGIC` followed by a
@@ -267,17 +268,18 @@ static void writer_init(void)
 static bool writer_write(void *eventlog, size_t size)
 {
   DEBUG_ERR("size: %lu\n", size);
-  // Serialize against worker/control threads so that client_fd and wt are read
-  // atomically with respect to connection establishment/teardown.
-  pthread_mutex_lock(&mutex);
-  int fd = client_fd;
+  // Serialize against worker/control threads so that g_client_fd and
+  // g_write_buffer are read atomically with respect to connection
+  // establishment and teardown.
+  pthread_mutex_lock(&g_mutex);
+  int fd = g_client_fd;
   if (fd < 0) {
     goto exit;
   }
 
-  DEBUG_ERR("client_fd = %d; wt.head = %p\n", fd, wt.head);
+  DEBUG_ERR("g_client_fd = %d; g_write_buffer.head = %p\n", fd, g_write_buffer.head);
 
-  if (wt.head != NULL) {
+  if (g_write_buffer.head != NULL) {
     writer_enqueue(eventlog, size);
   } else {
     uint8_t *ptr = eventlog;
@@ -307,7 +309,7 @@ static bool writer_write(void *eventlog, size_t size)
   }
 
 exit:
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_unlock(&g_mutex);
   return true;
 }
 
@@ -318,29 +320,30 @@ static void writer_flush(void)
 
 static void writer_stop(void)
 {
-  // RTS shutdown path must hold mutex so updates to client_fd/wt stay ordered
-  // with the worker thread noticing the disconnect.
-  pthread_mutex_lock(&mutex);
-  if (client_fd >= 0) {
-    close(client_fd);
-    client_fd = -1;
-    write_buffer_free(&wt);
+  // RTS shutdown path must hold mutex so updates to g_client_fd and
+  // g_write_buffer stay ordered with the worker thread noticing the
+  // disconnect.
+  pthread_mutex_lock(&g_mutex);
+  if (g_client_fd >= 0) {
+    close(g_client_fd);
+    g_client_fd = -1;
+    write_buffer_free(&g_write_buffer);
   }
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_unlock(&g_mutex);
 }
 
 static void writer_enqueue(uint8_t *data, size_t size)
 {
   DEBUG_ERR("size: %p %lu\n", data, size);
-  bool was_empty = wt.head == NULL;
+  bool was_empty = g_write_buffer.head == NULL;
 
   // TODO: check the size of the queue
   // if it's too big, we can start dropping blocks.
 
   // for now, we just push everythinb to the back of the buffer.
-  write_buffer_push(&wt, data, size);
+  write_buffer_push(&g_write_buffer, data, size);
 
-  DEBUG_ERR("wt.head = %p\n", wt.head);
+  DEBUG_ERR("g_write_buffer.head = %p\n", g_write_buffer.head);
   if (was_empty) {
     writer_wake_worker();
   }
@@ -348,11 +351,11 @@ static void writer_enqueue(uint8_t *data, size_t size)
 
 static void writer_wake_worker(void)
 {
-  if (wake_pipe[1] == -1)
+  if (g_wake_pipe[1] == -1)
     return;
 
   uint8_t byte = 1;
-  ssize_t ret = write(wake_pipe[1], &byte, sizeof(byte));
+  ssize_t ret = write(g_wake_pipe[1], &byte, sizeof(byte));
   if (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
     PRINT_ERR("failed to wake worker: %s\n", strerror(errno));
   }
@@ -404,7 +407,7 @@ void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
     buf->last = item;
   }
 
-  DEBUG_ERR("%p %p %p\n", buf, &wt, buf->head);
+  DEBUG_ERR("%p %p %p\n", buf, &g_write_buffer, buf->head);
 };
 
 // pop from the front.
@@ -443,15 +446,15 @@ static void init_unix_listener(const char *sock_path)
 {
   DEBUG_ERR("init Unix listener: %s\n", sock_path);
 
-  listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  g_sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
   // Set the send buffer size (SO_SNDBUF):
   //
   // TODO: add SO_SNDBUF and SO_SNDLOWAT as parameters to eventlog-socket.
-  if (setsockopt(listen_fd, SOL_SOCKET, SO_SNDBUF, &(int){212992}, sizeof(int)) == -1) {
+  if (setsockopt(g_sock_fd, SOL_SOCKET, SO_SNDBUF, &(int){212992}, sizeof(int)) == -1) {
     PRINT_ERR("setsockopt(SO_SNDBUF) failed: %s\n", strerror(errno));
   }
-  if (setsockopt(listen_fd, SOL_SOCKET, SO_SNDLOWAT, &(int){1}, sizeof(int)) == -1) {
+  if (setsockopt(g_sock_fd, SOL_SOCKET, SO_SNDLOWAT, &(int){1}, sizeof(int)) == -1) {
     PRINT_ERR("setsockopt(SO_SNDLOWAT) failed: %s\n", strerror(errno));
   }
 
@@ -463,7 +466,7 @@ static void init_unix_listener(const char *sock_path)
   local.sun_family = AF_UNIX;
   strncpy(local.sun_path, sock_path, sizeof(local.sun_path) - 1);
   unlink(sock_path);
-  if (bind(listen_fd, (struct sockaddr *) &local,
+  if (bind(g_sock_fd, (struct sockaddr *) &local,
            sizeof(struct sockaddr_un)) == -1) {
     PRINT_ERR("failed to bind socket %s: %s\n", sock_path, strerror(errno));
     abort();
@@ -490,20 +493,20 @@ static void init_tcp_listener(const char *host, const char *port)
 
   struct addrinfo *rp;
   for (rp = res; rp != NULL; rp = rp->ai_next) {
-    listen_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-    if (listen_fd == -1) {
+    g_sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (g_sock_fd == -1) {
       continue;
     }
 
     int reuse = 1;
-    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
+    if (setsockopt(g_sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
       PRINT_ERR("setsockopt(SO_REUSEADDR) failed: %s\n", strerror(errno));
-      close(listen_fd);
-      listen_fd = -1;
+      close(g_sock_fd);
+      g_sock_fd = -1;
       continue;
     }
 
-    if (bind(listen_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+    if (bind(g_sock_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
       char hostbuf[NI_MAXHOST];
       char servbuf[NI_MAXSERV];
       if (getnameinfo(rp->ai_addr, rp->ai_addrlen,
@@ -516,13 +519,13 @@ static void init_tcp_listener(const char *host, const char *port)
     }
 
     PRINT_ERR("failed to bind TCP socket: %s\n", strerror(errno));
-    close(listen_fd);
-    listen_fd = -1;
+    close(g_sock_fd);
+    g_sock_fd = -1;
   }
 
   freeaddrinfo(res);
 
-  if (listen_fd == -1) {
+  if (g_sock_fd == -1) {
     PRINT_ERR("unable to bind TCP listener\n");
     abort();
   }
@@ -542,7 +545,7 @@ static void start_worker(const struct listener_config *config)
       abort();
   }
 
-  int ret = pthread_create(&worker_thread, NULL, worker, NULL);
+  int ret = pthread_create(&g_worker_thread, NULL, worker, NULL);
   if (ret != 0) {
     PRINT_ERR("failed to spawn thread: %s\n", strerror(ret));
     abort();
@@ -552,47 +555,47 @@ static void start_worker(const struct listener_config *config)
 static void cleanup_socket(void)
 {
     if (g_sock_path) unlink(g_sock_path);
-    if (wake_pipe[0] != -1) {
-      close(wake_pipe[0]);
-      wake_pipe[0] = -1;
+    if (g_wake_pipe[0] != -1) {
+      close(g_wake_pipe[0]);
+      g_wake_pipe[0] = -1;
     }
-    if (wake_pipe[1] != -1) {
-      close(wake_pipe[1]);
-      wake_pipe[1] = -1;
+    if (g_wake_pipe[1] != -1) {
+      close(g_wake_pipe[1]);
+      g_wake_pipe[1] = -1;
     }
 }
 
 static void ensure_initialized(void)
 {
-  if (!initialized) {
-    pthread_mutex_init(&mutex, NULL);
-    pthread_cond_init(&new_conn_cond, NULL);
-    pthread_cond_init(&control_ready_cond, NULL);
-    control_ready = false;
-    if (pipe(wake_pipe) == -1) {
+  if (!g_initialized) {
+    pthread_mutex_init(&g_mutex, NULL);
+    pthread_cond_init(&g_new_conn_cond, NULL);
+    pthread_cond_init(&g_control_ready_cond, NULL);
+    g_control_ready = false;
+    if (pipe(g_wake_pipe) == -1) {
       PRINT_ERR("failed to create wake pipe: %s\n", strerror(errno));
       abort();
     }
     for (int i = 0; i < 2; i++) {
-      int flags = fcntl(wake_pipe[i], F_GETFL, 0);
-      if (flags == -1 || fcntl(wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
+      int flags = fcntl(g_wake_pipe[i], F_GETFL, 0);
+      if (flags == -1 || fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
         PRINT_ERR("failed to set wake pipe nonblocking: %s\n", strerror(errno));
         abort();
       }
     }
     atexit(cleanup_socket);
-    initialized = true;
+    g_initialized = true;
   }
 }
 
 static void signal_control_ready(void)
 {
-  pthread_mutex_lock(&mutex);
-  if (!control_ready) {
-    control_ready = true;
-    pthread_cond_broadcast(&control_ready_cond);
+  pthread_mutex_lock(&g_mutex);
+  if (!g_control_ready) {
+    g_control_ready = true;
+    pthread_cond_broadcast(&g_control_ready_cond);
   }
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_unlock(&g_mutex);
 }
 
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
@@ -605,10 +608,10 @@ static void eventlog_socket_init(const struct listener_config *config)
   if (!listener_config_valid(config))
     return;
 
-  pthread_mutex_lock(&mutex);
-  control_ready = false;
-  control_ready_armed = true;
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_lock(&g_mutex);
+  g_control_ready = false;
+  g_control_ready_armed = true;
+  pthread_mutex_unlock(&g_mutex);
 
   start_worker(config);
 }
@@ -617,12 +620,12 @@ void eventlog_socket_ready(void)
 {
   bool armed = false;
 
-  pthread_mutex_lock(&mutex);
-  if (control_ready_armed) {
-    control_ready_armed = false;
+  pthread_mutex_lock(&g_mutex);
+  if (g_control_ready_armed) {
+    g_control_ready_armed = false;
     armed = true;
   }
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_unlock(&g_mutex);
 
   if (armed) {
     signal_control_ready();
@@ -654,19 +657,19 @@ void eventlog_socket_init_tcp(const char *host, const char *port)
 void eventlog_socket_wait(void)
 {
   // Condition variable pairs with the mutex so reader threads can wait for the
-  // worker to publish a connected client_fd atomically.
-  pthread_mutex_lock(&mutex);
-  DEBUG_ERR("eventlog_socket_wait: initial client_fd=%d\n", client_fd);
-  while (client_fd == -1) {
+  // worker to publish a connected g_client_fd atomically.
+  pthread_mutex_lock(&g_mutex);
+  DEBUG_ERR("eventlog_socket_wait: initial g_client_fd=%d\n", g_client_fd);
+  while (g_client_fd == -1) {
     DEBUG0_ERR("eventlog_socket_wait: blocking for connection\n");
-    int ret = pthread_cond_wait(&new_conn_cond, &mutex);
+    int ret = pthread_cond_wait(&g_new_conn_cond, &g_mutex);
     if (ret != 0) {
       PRINT_ERR("failed to wait on condition variable: %s\n", strerror(ret));
     }
-    DEBUG_ERR("eventlog_socket_wait: woke up, client_fd=%d\n", client_fd);
+    DEBUG_ERR("eventlog_socket_wait: woke up, g_client_fd=%d\n", g_client_fd);
   }
-  DEBUG_ERR("eventlog_socket_wait: proceeding with client_fd=%d\n", client_fd);
-  pthread_mutex_unlock(&mutex);
+  DEBUG_ERR("eventlog_socket_wait: proceeding with g_client_fd=%d\n", g_client_fd);
+  pthread_mutex_unlock(&g_mutex);
 }
 
 int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf, StgClosure *main_closure)
@@ -811,11 +814,11 @@ static void *worker(void *arg)
 static void worker_iteration(void) {
   // Snapshot shared state under lock so worker decisions (listen vs write)
   // align with the current connection/queue state.
-  pthread_mutex_lock(&mutex);
-  int fd = client_fd;
-  bool empty = wt.head == NULL;
-  DEBUG_ERR("fd = %d, wt.head = %p\n", fd, wt.head);
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_lock(&g_mutex);
+  int fd = g_client_fd;
+  bool empty = g_write_buffer.head == NULL;
+  DEBUG_ERR("fd = %d, g_write_buffer.head = %p\n", fd, g_write_buffer.head);
+  pthread_mutex_unlock(&g_mutex);
 
   if (fd != -1) {
     if (empty) {
@@ -831,7 +834,7 @@ static void worker_iteration(void) {
 static void worker_listen_iteration(void) {
   bool start_eventlog = false;
 
-  if (listen(listen_fd, LISTEN_BACKLOG) == -1) {
+  if (listen(g_sock_fd, LISTEN_BACKLOG) == -1) {
     PRINT_ERR("listen() failed: %s\n", strerror(errno));
     abort();
   }
@@ -840,12 +843,12 @@ static void worker_listen_iteration(void) {
   socklen_t len = sizeof(remote);
 
   struct pollfd pfd_accept = {
-    .fd = listen_fd,
+    .fd = g_sock_fd,
     .events = POLLIN,
     .revents = 0,
   };
 
-  DEBUG_ERR("worker_listen_iteration: waiting for accept on fd %d\n", listen_fd);
+  DEBUG_ERR("worker_listen_iteration: waiting for accept on fd %d\n", g_sock_fd);
 
   // poll until we can accept
   while (true) {
@@ -863,7 +866,7 @@ static void worker_listen_iteration(void) {
   }
 
   // accept
-  int fd = accept(listen_fd, (struct sockaddr *) &remote, &len);
+  int fd = accept(g_sock_fd, (struct sockaddr *) &remote, &len);
   if (fd == -1) {
     PRINT_ERR("accept failed: %s\n", strerror(errno));
     return;
@@ -905,11 +908,11 @@ static void worker_listen_iteration(void) {
   // Publish new fd under mutex so RTS writers either see the connection along
   // with an empty queue or not at all. Keep the lock held through the condition
   // broadcast so the predicate update stays atomic on every platform.
-  pthread_mutex_lock(&mutex);
-  DEBUG_ERR("publishing client_fd=%d (previous=%d)\n", fd, client_fd);
-  client_fd = fd;
-  pthread_cond_broadcast(&new_conn_cond);
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_lock(&g_mutex);
+  DEBUG_ERR("publishing g_client_fd=%d (previous=%d)\n", fd, g_client_fd);
+  g_client_fd = fd;
+  pthread_cond_broadcast(&g_new_conn_cond);
+  pthread_mutex_unlock(&g_mutex);
 
   start_control_receiver(fd);
 
@@ -933,8 +936,8 @@ static void worker_nonwrite_iteration(int fd) {
   pfds[0].events = POLLRDHUP;
   pfds[0].revents = 0;
   int nfds = 1;
-  if (wake_pipe[0] != -1) {
-    pfds[1].fd = wake_pipe[0];
+  if (g_wake_pipe[0] != -1) {
+    pfds[1].fd = g_wake_pipe[0];
     pfds[1].events = POLLIN;
     pfds[1].revents = 0;
     nfds = 2;
@@ -957,10 +960,10 @@ static void worker_nonwrite_iteration(int fd) {
   if (pfds[0].revents & POLLHUP) {
     DEBUG_ERR("(%d) POLLRDHUP\n", fd);
 
-    pthread_mutex_lock(&mutex);
-    client_fd = -1;
-    write_buffer_free(&wt);
-    pthread_mutex_unlock(&mutex);
+    pthread_mutex_lock(&g_mutex);
+    g_client_fd = -1;
+    write_buffer_free(&g_write_buffer);
+    pthread_mutex_unlock(&g_mutex);
     return;
   }
 }
@@ -988,36 +991,36 @@ static void worker_write_iteration(int fd) {
     return;
   }
 
-  // reset client_fd on RDHUP.
+  // reset g_client_fd on RDHUP.
   if (pfd.revents & POLLHUP) {
     DEBUG_ERR("(%d) POLLRDHUP\n", fd);
 
-    // reset client_fd
-    // Protect concurrent access to client_fd and wt during teardown.
-    pthread_mutex_lock(&mutex);
-    assert(fd == client_fd);
-    client_fd = -1;
-    write_buffer_free(&wt);
-    pthread_mutex_unlock(&mutex);
+    // reset g_client_fd
+    // Protect concurrent access to g_client_fd and g_write_buffer during teardown.
+    pthread_mutex_lock(&g_mutex);
+    assert(fd == g_client_fd);
+    g_client_fd = -1;
+    write_buffer_free(&g_write_buffer);
+    pthread_mutex_unlock(&g_mutex);
     return;
   }
 
   if (pfd.revents & POLLOUT) {
     DEBUG_ERR("(%d) POLLOUT\n", fd);
 
-    // RTS writers also access wt, so consume queued buffers under the mutex.
-    pthread_mutex_lock(&mutex);
-    while (wt.head) {
-      struct write_buffer_item *item = wt.head;
-      ret = write(client_fd, item->data, item->size);
+    // RTS writers also access g_write_buffer, so consume queued buffers under the mutex.
+    pthread_mutex_lock(&g_mutex);
+    while (g_write_buffer.head) {
+      struct write_buffer_item *item = g_write_buffer.head;
+      ret = write(g_client_fd, item->data, item->size);
 
       if (ret == -1) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
           // couldn't write anything, shouldn't happen.
           // do nothing.
         } else if (errno == EPIPE) {
-          client_fd = -1;
-          write_buffer_free(&wt);
+          g_client_fd = -1;
+          write_buffer_free(&g_write_buffer);
         } else {
           PRINT_ERR("failed to write: %s\n", strerror(errno));
         }
@@ -1029,7 +1032,7 @@ static void worker_write_iteration(int fd) {
         // we wrote something
         if (ret >= item->size) {
           // we wrote whole element, try to write next element too
-          write_buffer_pop(&wt);
+          write_buffer_pop(&g_write_buffer);
           continue;
         } else {
           item->size -= ret;
@@ -1038,18 +1041,18 @@ static void worker_write_iteration(int fd) {
         }
       }
     }
-    pthread_mutex_unlock(&mutex);
+    pthread_mutex_unlock(&g_mutex);
   }
 }
 
 static void worker_wake_drain(void)
 {
-  if (wake_pipe[0] == -1)
+  if (g_wake_pipe[0] == -1)
     return;
 
   uint8_t buf[32];
   while (true) {
-    ssize_t ret = read(wake_pipe[0], buf, sizeof(buf));
+    ssize_t ret = read(g_wake_pipe[0], buf, sizeof(buf));
     if (ret > 0) {
       continue;
     } else if (ret == 0) {
@@ -1186,31 +1189,31 @@ static void start_control_receiver(int fd)
 static void control_connection_closed(int fd)
 {
   // Control receiver runs concurrently with RTS writers,
-  // so clear client_fd/wt within the shared mutex.
-  pthread_mutex_lock(&mutex);
-  if (client_fd == fd) {
-    client_fd = -1;
-    write_buffer_free(&wt);
+  // so clear g_client_fd/g_write_buffer within the shared mutex.
+  pthread_mutex_lock(&g_mutex);
+  if (g_client_fd == fd) {
+    g_client_fd = -1;
+    write_buffer_free(&g_write_buffer);
   }
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_unlock(&g_mutex);
 }
 
 static void *control_receiver(void *arg)
 {
   int fd = (int)(intptr_t)arg;
 
-  pthread_mutex_lock(&mutex);
-  while (!control_ready) {
-    pthread_cond_wait(&control_ready_cond, &mutex);
+  pthread_mutex_lock(&g_mutex);
+  while (!g_control_ready) {
+    pthread_cond_wait(&g_control_ready_cond, &g_mutex);
   }
-  pthread_mutex_unlock(&mutex);
+  pthread_mutex_unlock(&g_mutex);
 
   while (true) {
-    // Grab consistent snapshot of client_fd; connection teardown may happen
+    // Grab consistent snapshot of g_client_fd; connection teardown may happen
     // at any time so we must hold the mutex while comparing.
-    pthread_mutex_lock(&mutex);
-    int current_fd = client_fd;
-    pthread_mutex_unlock(&mutex);
+    pthread_mutex_lock(&g_mutex);
+    int current_fd = g_client_fd;
+    pthread_mutex_unlock(&g_mutex);
     if (current_fd != fd)
       break;
 
