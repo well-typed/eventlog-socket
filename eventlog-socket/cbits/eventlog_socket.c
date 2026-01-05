@@ -152,7 +152,7 @@ void write_buffer_free(struct write_buffer *buf);
 /* concurrent global variables
  *********************************************************************************/
 
-static pthread_t listen_thread;
+static pthread_t worker_thread;
 static pthread_cond_t new_conn_cond;
 
 // Global mutex guarding all shared state between RTS threads, the worker
@@ -542,7 +542,7 @@ static void open_socket(const struct listener_config *config)
       abort();
   }
 
-  int ret = pthread_create(&listen_thread, NULL, worker, NULL);
+  int ret = pthread_create(&worker_thread, NULL, worker, NULL);
   if (ret != 0) {
     PRINT_ERR("failed to spawn thread: %s\n", strerror(ret));
     abort();
