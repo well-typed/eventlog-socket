@@ -26,5 +26,5 @@ int main (int argc, char *argv[])
     }
 
     // Delegate to the helper that runs hs_main and the application closure.
-    eventlog_socket_hs_main(argc, argv, conf, &ZCMain_main_closure);
+    eventlog_socket_wrap_hs_main(argc, argv, conf, &ZCMain_main_closure);
 }
