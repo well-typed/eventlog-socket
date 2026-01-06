@@ -424,7 +424,7 @@ void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
   }
 
   DEBUG_ERR("%p %p %p\n", buf, &g_write_buffer, buf->head);
-};
+}
 
 // pop from the front.
 // Requires the same external synchronization as write_buffer_push.
@@ -766,8 +766,7 @@ static void eventlog_socket_start(const struct eventlog_socket *eventlog_socket,
         DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", eventlog_socket->addr.unix_socket.path);
         break;
       case EVENTLOG_INET: {
-        const char *host = eventlog_socket->addr.tcp.host ? eventlog_socket->addr.tcp.host : "*";
-        DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", host, eventlog_socket->addr.tcp.port);
+        DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", eventlog_socket->addr.tcp.host ? eventlog_socket->addr.tcp.host : "*", eventlog_socket->addr.tcp.port);
         break;
       }
       default:
