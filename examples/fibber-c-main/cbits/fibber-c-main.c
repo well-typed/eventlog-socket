@@ -9,9 +9,6 @@ int main (int argc, char *argv[])
 {
     RtsConfig conf = defaultRtsConfig;
 
-    // Set the eventlog writer:
-    conf.eventlog_writer = &SocketEventLogWriter;
-
     // Enable RTS options:
     conf.rts_opts_enabled = RtsOptsAll;
 

@@ -65,7 +65,7 @@
 // This file defines the `SocketEventLogWriter` constant.
 // It is an instance of the `EventLogWriter` struct exposed by the GHC RTS and
 // is intended to be passed to the GHC RTS using `startEventLogging`.
-const EventLogWriter SocketEventLogWriter;
+static const EventLogWriter SocketEventLogWriter;
 
 static void writer_init(void);
 static bool writer_write(void *eventlog, size_t size);
@@ -74,7 +74,7 @@ static void writer_stop(void);
 static void writer_wake_worker(void);
 static void writer_enqueue(uint8_t *data, size_t size);
 
-const EventLogWriter SocketEventLogWriter = {
+static const EventLogWriter SocketEventLogWriter = {
   .initEventLogWriter = writer_init,
   .writeEventLog = writer_write,
   .flushEventLog = writer_flush,
@@ -178,6 +178,7 @@ static void cleanup_socket(void);
 static void ensure_initialized(void);
 static void signal_control_ready(void);
 static void eventlog_socket_init(const eventlog_socket_t *eventlog_socket);
+static void eventlog_socket_ready(void);
 
 /* worker
  *********************************************************************************/
@@ -605,7 +606,7 @@ static void eventlog_socket_init(const eventlog_socket_t *eventlog_socket)
   start_worker(eventlog_socket);
 }
 
-void eventlog_socket_ready(void)
+static void eventlog_socket_ready(void)
 {
   bool armed = false;
 
@@ -660,10 +661,13 @@ void eventlog_socket_wait(void)
   pthread_mutex_unlock(&g_mutex);
 }
 
-int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf, StgClosure *main_closure)
+int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig conf, StgClosure *main_closure)
 {
   SchedulerStatus status;
   int exit_status;
+
+  // Set the eventlog writer:
+  conf.eventlog_writer = &SocketEventLogWriter;
 
   hs_init_ghc(&argc, &argv, conf);
 

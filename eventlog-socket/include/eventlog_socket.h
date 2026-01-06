@@ -32,11 +32,8 @@ typedef struct {
   } addr;
 } eventlog_socket_t;
 
-extern const EventLogWriter SocketEventLogWriter;
-
 void eventlog_socket_init_unix(const char *sock_path);
 void eventlog_socket_init_tcp(const char *host, const char *port);
-void eventlog_socket_ready(void);
 
 void eventlog_socket_wait(void);
 
