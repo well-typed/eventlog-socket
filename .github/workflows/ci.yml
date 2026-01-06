@@ -52,8 +52,7 @@ jobs:
         run: ./scripts/test-python.sh
 
       - name: 🚀 Testing (Haskell test suite)
-        if: ${{ always() }}
-        run: cabal test eventlog-socket-tests -f+debug 2>eventlog-socket-tests.log
+        run: ./scripts/test-haskell.sh
 
       - name: 📦 Upload test logs
         if: ${{ always() }}
