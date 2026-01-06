@@ -709,8 +709,10 @@ static void eventlog_socket_start(const eventlog_socket_t *eventlog_socket, bool
 {
   ensure_initialized();
 
-  if (!eventlog_socket_valid(eventlog_socket))
+  if (!eventlog_socket_valid(eventlog_socket)) {
+    PRINT_ERR("eventlog socket configuration is not valid.\n");
     return;
+  }
 
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
     PRINT_ERR("eventlog is not supported.\n");
