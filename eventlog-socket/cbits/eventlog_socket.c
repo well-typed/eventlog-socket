@@ -161,9 +161,9 @@ struct write_buffer {
   struct write_buffer_item *last;
 };
 
-void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size);
-void write_buffer_pop(struct write_buffer *buf);
-void write_buffer_free(struct write_buffer *buf);
+static void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size);
+static void write_buffer_pop(struct write_buffer *buf);
+static void write_buffer_free(struct write_buffer *buf);
 
 /* concurrent global variables
  *********************************************************************************/
@@ -401,7 +401,7 @@ static bool eventlog_socket_valid(const struct eventlog_socket *eventlog_socket)
 // push to the back.
 // Caller must serialize externally (writer_write/worker_write_iteration hold mutex)
 // so that head/last invariants stay intact.
-void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
+static void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
   DEBUG_ERR("%p, %lu\n", data, size);
   uint8_t *copy = malloc(size);
   memcpy(copy, data, size);
@@ -428,7 +428,7 @@ void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
 
 // pop from the front.
 // Requires the same external synchronization as write_buffer_push.
-void write_buffer_pop(struct write_buffer *buf) {
+static void write_buffer_pop(struct write_buffer *buf) {
   struct write_buffer_item *head = buf->head;
   if (head == NULL) {
     // buffer is empty: nothing to do.
@@ -445,7 +445,7 @@ void write_buffer_pop(struct write_buffer *buf) {
 
 // buf itself is not freed.
 // it's safe to call write_buffer_free multiple times on the same buf.
-void write_buffer_free(struct write_buffer *buf) {
+static void write_buffer_free(struct write_buffer *buf) {
   // not the most efficient implementation,
   // but should be obviously correct.
   while (buf->head) {
