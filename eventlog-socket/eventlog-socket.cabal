@@ -41,6 +41,11 @@ flag optimise-heavily
   default: False
   manual: True
 
+flag pedantic
+  description: Pass @-pedantic@ to the C compiler.
+  default: False
+  manual: True
+
 library
   exposed-modules:    GHC.Eventlog.Socket
   other-extensions:   CApiFFI
@@ -62,3 +67,6 @@ library
 
   if flag(optimise-heavily)
     cc-options:       -O2
+
+  if flag(pedantic)
+    cc-options:       -Wall -Wextra -pedantic
