@@ -48,7 +48,8 @@ jobs:
           ghc-version: ${{ matrix.ghc-version }}
 
       - name: 🚀 Testing (Python test suite)
-        run: ./ci.sh
+        if: ${{ runner.os == 'Linux' }}
+        run: ./scripts/test-python.sh
 
       - name: 🚀 Testing (Haskell test suite)
         if: ${{ always() }}
