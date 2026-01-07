@@ -108,4 +108,4 @@ without risking the eventlog feed.
 
 # Running tests
 
-The `./ci.sh` script can be executed to run the eventlog-socket tests.
+The `./scripts/test-haskell.sh` and `./scripts/test-python.sh` scripts can be executed to run the eventlog-socket tests.
