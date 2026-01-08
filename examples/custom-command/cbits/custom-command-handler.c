@@ -19,7 +19,7 @@ static void emit_custom_user_msg(void)
     rts_unlock(cap);
 }
 
-static void demo_command_handler(uint32_t namespace_id, uint8_t cmd_id, void *user_data)
+static void demo_command_handler(control_namespace_t namespace_id, uint8_t cmd_id, void *user_data)
 {
     (void)namespace_id;
     const char *label = (const char *)user_data;
