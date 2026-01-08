@@ -1,11 +1,10 @@
 """Declarative control scripts for ghc-eventlog-socket tests."""
 from typing import Callable
 import time
-import struct
 
 CONTROL_MAGIC = b"GCTL"
 CONTROL_NAMESPACE_CORE = 0
-CUSTOM_COMMAND_NAMESPACE = 0x44454D4F
+CUSTOM_COMMAND_NAMESPACE = 0x01
 CUSTOM_COMMAND_ID = 0x01
 
 class ControlContext:
@@ -19,7 +18,7 @@ class ControlContext:
 
 
 def control_send_command(ctx: ControlContext, cmd_id: int, namespace: int = CONTROL_NAMESPACE_CORE) -> None:
-    payload = CONTROL_MAGIC + struct.pack(">I", namespace & 0xFFFFFFFF) + bytes([cmd_id & 0xFF])
+    payload = CONTROL_MAGIC + bytes([namespace & 0xFF]) + bytes([cmd_id & 0xFF])
     ctx.send(payload)
 
 
