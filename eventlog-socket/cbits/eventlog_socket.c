@@ -63,19 +63,19 @@ enum control_recv_status {
   CONTROL_RECV_PROTOCOL_ERROR,
   CONTROL_RECV_DISCONNECTED,
 };
-typedef void (*control_command_handler_fn)(uint32_t namespace_id, uint8_t cmd_id, void *user_data);
+typedef void (*control_command_handler_fn)(control_namespace_t namespace_id, uint8_t cmd_id, void *user_data);
 
 struct control_handler_entry {
-  uint32_t namespace_id;
+  control_namespace_t namespace_id;
   uint8_t cmd_id;
   control_command_handler_fn handler;
   void *user_data;
   struct control_handler_entry *next;
 };
 
-static enum control_recv_status control_receive_command(int fd, uint32_t *namespace_out, uint8_t *cmd_out);
-static void handle_control_command(uint32_t namespace_id, uint8_t cmd);
-static bool register_control_command(uint32_t namespace_id, uint8_t cmd_id, control_command_handler_fn handler, void *user_data);
+static enum control_recv_status control_receive_command(int fd, control_namespace_t *namespace_out, uint8_t *cmd_out);
+static void handle_control_command(control_namespace_t namespace_id, uint8_t cmd);
+static bool register_control_command(control_namespace_t namespace_id, uint8_t cmd_id, control_command_handler_fn handler, void *user_data);
 static void register_builtin_control_commands(void);
 
 /*********************************************************************************
@@ -271,7 +271,7 @@ static enum control_recv_status control_read_exact(int fd, uint8_t *buf, size_t 
   return CONTROL_RECV_OK;
 }
 
-static bool register_control_command(uint32_t namespace_id, uint8_t cmd_id,
+static bool register_control_command(control_namespace_t namespace_id, uint8_t cmd_id,
                                      control_command_handler_fn handler, void *user_data)
 {
   if (handler == NULL) {
@@ -308,7 +308,7 @@ out:
   return success;
 }
 
-static void control_start_heap_profiling(uint32_t namespace_id, uint8_t cmd, void *user_data)
+static void control_start_heap_profiling(control_namespace_t namespace_id, uint8_t cmd, void *user_data)
 {
   (void)cmd;
   (void)namespace_id;
@@ -317,7 +317,7 @@ static void control_start_heap_profiling(uint32_t namespace_id, uint8_t cmd, voi
   startHeapProfTimer();
 }
 
-static void control_stop_heap_profiling(uint32_t namespace_id, uint8_t cmd, void *user_data)
+static void control_stop_heap_profiling(control_namespace_t namespace_id, uint8_t cmd, void *user_data)
 {
   (void)cmd;
   (void)namespace_id;
@@ -326,7 +326,7 @@ static void control_stop_heap_profiling(uint32_t namespace_id, uint8_t cmd, void
   stopHeapProfTimer();
 }
 
-static void control_request_heap_profile(uint32_t namespace_id, uint8_t cmd, void *user_data)
+static void control_request_heap_profile(control_namespace_t namespace_id, uint8_t cmd, void *user_data)
 {
   (void)cmd;
   (void)namespace_id;
@@ -356,7 +356,7 @@ static void register_builtin_control_commands(void)
   }
 }
 
-static enum control_recv_status control_receive_command(int fd, uint32_t *namespace_out, uint8_t *cmd_out)
+static enum control_recv_status control_receive_command(int fd, control_namespace_t *namespace_out, uint8_t *cmd_out)
 {
   uint8_t header[CONTROL_MAGIC_LEN];
   enum control_recv_status status =
@@ -368,13 +368,10 @@ static enum control_recv_status control_receive_command(int fd, uint32_t *namesp
               header[0], header[1], header[2], header[3]);
     return CONTROL_RECV_PROTOCOL_ERROR;
   }
-  uint8_t namespace_buf[CONTROL_NAMESPACE_LEN];
-  status = control_read_exact(fd, namespace_buf, sizeof(namespace_buf));
+  uint8_t namespace_id;
+  status = control_read_exact(fd, &namespace_id, 1);
   if (status != CONTROL_RECV_OK)
     return status;
-  uint32_t namespace_net = 0;
-  memcpy(&namespace_net, namespace_buf, sizeof(namespace_net));
-  uint32_t namespace_id = ntohl(namespace_net);
   uint8_t cmd_id = 0;
   status = control_read_exact(fd, &cmd_id, 1);
   if (status != CONTROL_RECV_OK)
@@ -386,7 +383,7 @@ static enum control_recv_status control_receive_command(int fd, uint32_t *namesp
   return CONTROL_RECV_OK;
 }
 
-static void handle_control_command(uint32_t namespace_id, uint8_t cmd)
+static void handle_control_command(control_namespace_t namespace_id, uint8_t cmd)
 {
   control_command_handler_fn handler = NULL;
   void *user_data = NULL;
@@ -456,7 +453,7 @@ static void *control_receiver(void *arg)
     if (current_fd != fd)
       break;
 
-    uint32_t namespace_id = 0;
+    control_namespace_t namespace_id = 0;
     uint8_t cmd = 0;
     enum control_recv_status status = control_receive_command(fd, &namespace_id, &cmd);
     if (status == CONTROL_RECV_DISCONNECTED) {
@@ -1009,7 +1006,7 @@ static void ensure_initialized(void)
   register_builtin_control_commands();
 }
 
-bool eventlog_socket_register_control_command(uint32_t namespace_id,
+bool eventlog_socket_register_control_command(control_namespace_t namespace_id,
                                               uint8_t cmd_id,
                                               eventlog_control_command_handler handler,
                                               void *user_data)

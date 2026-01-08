@@ -8,9 +8,11 @@
 
 extern const EventLogWriter SocketEventLogWriter;
 
-typedef void (*eventlog_control_command_handler)(uint32_t namespace_id, uint8_t cmd_id, void *user_data);
+typedef uint8_t control_namespace_t;
 
-bool eventlog_socket_register_control_command(uint32_t namespace_id,
+typedef void (*eventlog_control_command_handler)(control_namespace_t namespace_id, uint8_t cmd_id, void *user_data);
+
+bool eventlog_socket_register_control_command(control_namespace_t namespace_id,
                                               uint8_t cmd_id,
                                               eventlog_control_command_handler handler,
                                               void *user_data);
