@@ -23,15 +23,15 @@ def control_send_command(ctx: ControlContext, cmd_id: int, namespace: int = CONT
 
 
 def start_heap_profiling(ctx: ControlContext) -> None:
-    control_send_command(ctx, 0x01)
+    control_send_command(ctx, 0x00)
 
 
 def stop_heap_profiling(ctx: ControlContext) -> None:
-    control_send_command(ctx, 0x02)
+    control_send_command(ctx, 0x01)
 
 
 def request_heap_profile(ctx: ControlContext) -> None:
-    control_send_command(ctx, 0x03)
+    control_send_command(ctx, 0x02)
 
 
 def send_custom_command(ctx: ControlContext) -> None:
