@@ -88,6 +88,28 @@ jobs:
             ghc-version: "9.10.2"
 
   #############################################################################
+  # Lint with clang-format
+  #############################################################################
+
+  lint-clang-format:
+    name: "Lint with clang-format"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: 🗄️ Read dev-dependencies
+        run: cat "./scripts/dev-dependencies.txt" >> "$GITHUB_OUTPUT"
+        id: dev-dependencies
+
+      - name: 🎗️ Lint with clang-format
+        uses: jidicula/clang-format-action@v4.16.0
+        with:
+          clang-format-version: ${{ steps.dev-dependencies.outputs.clang-format }}
+
+  #############################################################################
   # Lint with pyright
   #############################################################################
 
@@ -102,3 +124,4 @@ jobs:
 
       - name: 🎗️ Lint with pyright
         uses: jakebailey/pyright-action@v2
+
