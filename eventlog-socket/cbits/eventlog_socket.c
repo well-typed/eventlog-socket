@@ -2,19 +2,19 @@
 #define _GNU_SOURCE
 
 #include <assert.h>
-#include <stdbool.h>
-#include <poll.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <netdb.h>
-#include <pthread.h>
-#include <fcntl.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <poll.h>
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include <Rts.h>
 #include <rts/prof/Heap.h>
@@ -44,8 +44,10 @@ enum control_command {
 // - otherwise use DEBUG_ERR
 #define PRINT_ERR(...) fprintf(stderr, "ghc-eventlog-socket: " __VA_ARGS__)
 #ifdef DEBUG
-#define DEBUG_ERR(fmt, ...) fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__, __VA_ARGS__)
-#define DEBUG0_ERR(fmt) fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__)
+#define DEBUG_ERR(fmt, ...)                                                    \
+  fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__, __VA_ARGS__)
+#define DEBUG0_ERR(fmt)                                                        \
+  fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__)
 #else
 #define DEBUG_ERR(fmt, ...)
 #define DEBUG0_ERR(fmt)
@@ -63,7 +65,8 @@ enum control_recv_status {
   CONTROL_RECV_PROTOCOL_ERROR,
   CONTROL_RECV_DISCONNECTED,
 };
-typedef void (*control_command_handler_fn)(control_namespace_t namespace_id, uint8_t cmd_id, void *user_data);
+typedef void (*control_command_handler_fn)(control_namespace_t namespace_id,
+                                           uint8_t cmd_id, void *user_data);
 
 struct control_handler_entry {
   control_namespace_t namespace_id;
@@ -73,15 +76,20 @@ struct control_handler_entry {
   struct control_handler_entry *next;
 };
 
-static enum control_recv_status control_receive_command(int fd, control_namespace_t *namespace_out, uint8_t *cmd_out);
-static void handle_control_command(control_namespace_t namespace_id, uint8_t cmd);
-static bool register_control_command(control_namespace_t namespace_id, uint8_t cmd_id, control_command_handler_fn handler, void *user_data);
+static enum control_recv_status
+control_receive_command(int fd, control_namespace_t *namespace_out,
+                        uint8_t *cmd_out);
+static void handle_control_command(control_namespace_t namespace_id,
+                                   uint8_t cmd);
+static bool register_control_command(control_namespace_t namespace_id,
+                                     uint8_t cmd_id,
+                                     control_command_handler_fn handler,
+                                     void *user_data);
 static void register_builtin_control_commands(void);
 
 /*********************************************************************************
  * data definitions
  *********************************************************************************/
-
 
 struct write_buffer_item {
   uint8_t *orig; // original data pointer (which we free)
@@ -104,14 +112,15 @@ struct write_buffer {
  * There are three thread(group)s:
  * 1. RTS
  * 2. worker spawned by open_socket (this writes to the socket)
- * 3. listener spawned by start_control_receiver (this receives messages on the socket)
+ * 3. listener spawned by start_control_receiver (this receives messages on the
+ * socket)
  */
 
 // variables read and written by worker only:
 static bool g_initialized = false;
 static int g_listen_fd = -1;
 static const char *g_sock_path = NULL;
-static int g_wake_pipe[2] = { -1, -1 };
+static int g_wake_pipe[2] = {-1, -1};
 
 enum listener_kind {
   LISTENER_UNIX,
@@ -131,29 +140,29 @@ static bool listener_config_valid(const struct listener_config *config) {
   }
 
   switch (config->kind) {
-    case LISTENER_UNIX:
-      return config->sock_path != NULL;
-    case LISTENER_TCP:
-      return config->tcp_port != NULL;
-    default:
-      return false;
+  case LISTENER_UNIX:
+    return config->sock_path != NULL;
+  case LISTENER_TCP:
+    return config->tcp_port != NULL;
+  default:
+    return false;
   }
 }
 
 static void cleanup_socket(void) {
-    if (g_sock_path) unlink(g_sock_path);
-    if (g_wake_pipe[0] != -1) {
-      close(g_wake_pipe[0]);
-      g_wake_pipe[0] = -1;
-    }
-    if (g_wake_pipe[1] != -1) {
-      close(g_wake_pipe[1]);
-      g_wake_pipe[1] = -1;
-    }
+  if (g_sock_path)
+    unlink(g_sock_path);
+  if (g_wake_pipe[0] != -1) {
+    close(g_wake_pipe[0]);
+    g_wake_pipe[0] = -1;
+  }
+  if (g_wake_pipe[1] != -1) {
+    close(g_wake_pipe[1]);
+    g_wake_pipe[1] = -1;
+  }
 }
 
-static void drain_worker_wake(void)
-{
+static void drain_worker_wake(void) {
   if (g_wake_pipe[0] == -1)
     return;
 
@@ -175,8 +184,7 @@ static void drain_worker_wake(void)
   }
 }
 
-static void wake_worker(void)
-{
+static void wake_worker(void) {
   if (g_wake_pipe[1] == -1)
     return;
 
@@ -186,7 +194,6 @@ static void wake_worker(void)
     PRINT_ERR("failed to wake worker: %s\n", strerror(errno));
   }
 }
-
 
 // concurrency variables
 static pthread_t g_listen_thread;
@@ -200,9 +207,10 @@ static bool g_control_ready_armed = false;
 // Registry of control command handlers
 static struct control_handler_entry *g_control_handlers = NULL;
 static bool g_control_handlers_initialized = false;
-// Global mutex guarding all shared state between RTS threads, the worker thread,
-// and the detached control receiver. Only client_fd and wt need protection, but
-// using a single mutex ensures we keep their updates consistent.
+// Global mutex guarding all shared state between RTS threads, the worker
+// thread, and the detached control receiver. Only client_fd and wt need
+// protection, but using a single mutex ensures we keep their updates
+// consistent.
 static pthread_mutex_t g_mutex;
 
 // variables accessed by multiple threads and guarded by mutex:
@@ -215,20 +223,19 @@ static pthread_mutex_t g_mutex;
 // Note: RTS writes client_fd in writer_stop.
 static volatile int g_client_fd = -1;
 static struct write_buffer g_write_buffer = {
-  .head = NULL,
-  .last = NULL,
+    .head = NULL,
+    .last = NULL,
 };
 
 /*********************************************************************************
  * control channel helpers (minimal protocol)
  *********************************************************************************/
 
-static bool control_wait_for_data(int fd)
-{
+static bool control_wait_for_data(int fd) {
   struct pollfd pfd = {
-    .fd = fd,
-    .events = POLLIN | POLLRDHUP,
-    .revents = 0,
+      .fd = fd,
+      .events = POLLIN | POLLRDHUP,
+      .revents = 0,
   };
 
   int pret = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
@@ -247,8 +254,8 @@ static bool control_wait_for_data(int fd)
   return true;
 }
 
-static enum control_recv_status control_read_exact(int fd, uint8_t *buf, size_t len)
-{
+static enum control_recv_status control_read_exact(int fd, uint8_t *buf,
+                                                   size_t len) {
   size_t have = 0;
   while (have < len) {
     ssize_t got = recv(fd, buf + have, len - have, 0);
@@ -271,9 +278,10 @@ static enum control_recv_status control_read_exact(int fd, uint8_t *buf, size_t 
   return CONTROL_RECV_OK;
 }
 
-static bool register_control_command(control_namespace_t namespace_id, uint8_t cmd_id,
-                                     control_command_handler_fn handler, void *user_data)
-{
+static bool register_control_command(control_namespace_t namespace_id,
+                                     uint8_t cmd_id,
+                                     control_command_handler_fn handler,
+                                     void *user_data) {
   if (handler == NULL) {
     return false;
   }
@@ -283,7 +291,8 @@ static bool register_control_command(control_namespace_t namespace_id, uint8_t c
   struct control_handler_entry *entry = g_control_handlers;
   while (entry != NULL) {
     if (entry->cmd_id == cmd_id && entry->namespace_id == namespace_id) {
-      PRINT_ERR("warning: duplicate registration for namespace 0x%08x command 0x%02x; keeping existing handler\n",
+      PRINT_ERR("warning: duplicate registration for namespace 0x%08x command "
+                "0x%02x; keeping existing handler\n",
                 namespace_id, cmd_id);
       goto out;
     }
@@ -308,8 +317,8 @@ out:
   return success;
 }
 
-static void control_start_heap_profiling(control_namespace_t namespace_id, uint8_t cmd, void *user_data)
-{
+static void control_start_heap_profiling(control_namespace_t namespace_id,
+                                         uint8_t cmd, void *user_data) {
   (void)cmd;
   (void)namespace_id;
   (void)user_data;
@@ -317,8 +326,8 @@ static void control_start_heap_profiling(control_namespace_t namespace_id, uint8
   startHeapProfTimer();
 }
 
-static void control_stop_heap_profiling(control_namespace_t namespace_id, uint8_t cmd, void *user_data)
-{
+static void control_stop_heap_profiling(control_namespace_t namespace_id,
+                                        uint8_t cmd, void *user_data) {
   (void)cmd;
   (void)namespace_id;
   (void)user_data;
@@ -326,8 +335,8 @@ static void control_stop_heap_profiling(control_namespace_t namespace_id, uint8_
   stopHeapProfTimer();
 }
 
-static void control_request_heap_profile(control_namespace_t namespace_id, uint8_t cmd, void *user_data)
-{
+static void control_request_heap_profile(control_namespace_t namespace_id,
+                                         uint8_t cmd, void *user_data) {
   (void)cmd;
   (void)namespace_id;
   (void)user_data;
@@ -335,18 +344,20 @@ static void control_request_heap_profile(control_namespace_t namespace_id, uint8
   requestHeapCensus();
 }
 
-static void register_builtin_control_commands(void)
-{
+static void register_builtin_control_commands(void) {
   if (g_control_handlers_initialized) {
     return;
   }
 
   bool ok = true;
-  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE, CONTROL_CMD_START_HEAP_PROFILING,
+  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE,
+                                      CONTROL_CMD_START_HEAP_PROFILING,
                                       control_start_heap_profiling, NULL);
-  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE, CONTROL_CMD_STOP_HEAP_PROFILING,
+  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE,
+                                      CONTROL_CMD_STOP_HEAP_PROFILING,
                                       control_stop_heap_profiling, NULL);
-  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE, CONTROL_CMD_REQUEST_HEAP_PROFILE,
+  ok = ok && register_control_command(CONTROL_NAMESPACE_CORE,
+                                      CONTROL_CMD_REQUEST_HEAP_PROFILE,
                                       control_request_heap_profile, NULL);
 
   if (!ok) {
@@ -356,16 +367,17 @@ static void register_builtin_control_commands(void)
   }
 }
 
-static enum control_recv_status control_receive_command(int fd, control_namespace_t *namespace_out, uint8_t *cmd_out)
-{
+static enum control_recv_status
+control_receive_command(int fd, control_namespace_t *namespace_out,
+                        uint8_t *cmd_out) {
   uint8_t header[CONTROL_MAGIC_LEN];
   enum control_recv_status status =
       control_read_exact(fd, header, CONTROL_MAGIC_LEN);
   if (status != CONTROL_RECV_OK)
     return status;
   if (memcmp(header, CONTROL_MAGIC, CONTROL_MAGIC_LEN) != 0) {
-    DEBUG_ERR("invalid control magic: %02x %02x %02x %02x\n",
-              header[0], header[1], header[2], header[3]);
+    DEBUG_ERR("invalid control magic: %02x %02x %02x %02x\n", header[0],
+              header[1], header[2], header[3]);
     return CONTROL_RECV_PROTOCOL_ERROR;
   }
   uint8_t namespace_id;
@@ -379,12 +391,13 @@ static enum control_recv_status control_receive_command(int fd, control_namespac
 
   *namespace_out = namespace_id;
   *cmd_out = cmd_id;
-  DEBUG_ERR("control command namespace=0x%08x id=0x%02x\n", namespace_id, cmd_id);
+  DEBUG_ERR("control command namespace=0x%08x id=0x%02x\n", namespace_id,
+            cmd_id);
   return CONTROL_RECV_OK;
 }
 
-static void handle_control_command(control_namespace_t namespace_id, uint8_t cmd)
-{
+static void handle_control_command(control_namespace_t namespace_id,
+                                   uint8_t cmd) {
   control_command_handler_fn handler = NULL;
   void *user_data = NULL;
 
@@ -408,8 +421,7 @@ static void handle_control_command(control_namespace_t namespace_id, uint8_t cmd
   }
 }
 
-static void start_control_receiver(int fd)
-{
+static void start_control_receiver(int fd) {
   pthread_t tid;
   int ret = pthread_create(&tid, NULL, control_receiver, (void *)(intptr_t)fd);
   if (ret != 0) {
@@ -422,8 +434,7 @@ static void start_control_receiver(int fd)
   }
 }
 
-static void control_connection_closed(int fd)
-{
+static void control_connection_closed(int fd) {
   // Control receiver runs concurrently with RTS writers,
   // so clear client_fd/wt within the shared mutex.
   pthread_mutex_lock(&g_mutex);
@@ -434,8 +445,7 @@ static void control_connection_closed(int fd)
   pthread_mutex_unlock(&g_mutex);
 }
 
-static void *control_receiver(void *arg)
-{
+static void *control_receiver(void *arg) {
   int fd = (int)(intptr_t)arg;
 
   pthread_mutex_lock(&g_mutex);
@@ -455,7 +465,8 @@ static void *control_receiver(void *arg)
 
     control_namespace_t namespace_id = 0;
     uint8_t cmd = 0;
-    enum control_recv_status status = control_receive_command(fd, &namespace_id, &cmd);
+    enum control_recv_status status =
+        control_receive_command(fd, &namespace_id, &cmd);
     if (status == CONTROL_RECV_DISCONNECTED) {
       control_connection_closed(fd);
       break;
@@ -534,8 +545,7 @@ void write_buffer_free(struct write_buffer *buf) {
  * EventLogWriter
  *********************************************************************************/
 
-static void writer_init(void)
-{
+static void writer_init(void) {
   // nothing
 }
 
@@ -555,8 +565,7 @@ static void writer_enqueue(uint8_t *data, size_t size) {
   }
 }
 
-static bool writer_write(void *eventlog, size_t size)
-{
+static bool writer_write(void *eventlog, size_t size) {
   DEBUG_ERR("size: %lu\n", size);
   // Serialize against worker/control threads so that client_fd and wt are read
   // atomically with respect to connection establishment/teardown.
@@ -607,13 +616,11 @@ exit:
   return true;
 }
 
-static void writer_flush(void)
-{
+static void writer_flush(void) {
   // no-op
 }
 
-static void writer_stop(void)
-{
+static void writer_stop(void) {
   // RTS shutdown path must hold mutex so updates to client_fd/wt stay ordered
   // with the worker thread noticing the disconnect.
   pthread_mutex_lock(&g_mutex);
@@ -625,12 +632,10 @@ static void writer_stop(void)
   pthread_mutex_unlock(&g_mutex);
 }
 
-const EventLogWriter SocketEventLogWriter = {
-  .initEventLogWriter = writer_init,
-  .writeEventLog = writer_write,
-  .flushEventLog = writer_flush,
-  .stopEventLogWriter = writer_stop
-};
+const EventLogWriter SocketEventLogWriter = {.initEventLogWriter = writer_init,
+                                             .writeEventLog = writer_write,
+                                             .flushEventLog = writer_flush,
+                                             .stopEventLogWriter = writer_stop};
 
 /*********************************************************************************
  * Main worker (in own thread)
@@ -648,9 +653,9 @@ static void listen_iteration(void) {
   socklen_t len = sizeof(remote);
 
   struct pollfd pfd_accept = {
-    .fd = g_listen_fd,
-    .events = POLLIN,
-    .revents = 0,
+      .fd = g_listen_fd,
+      .events = POLLIN,
+      .revents = 0,
   };
 
   DEBUG_ERR("listen_iteration: waiting for accept on fd %d\n", g_listen_fd);
@@ -658,7 +663,7 @@ static void listen_iteration(void) {
   // poll until we can accept
   while (true) {
     int ret = poll(&pfd_accept, 1, POLL_LISTEN_TIMEOUT);
-    if (ret ==  -1) {
+    if (ret == -1) {
       PRINT_ERR("poll() failed: %s\n", strerror(errno));
       return;
     } else if (ret == 0) {
@@ -671,7 +676,7 @@ static void listen_iteration(void) {
   }
 
   // accept
-  int fd = accept(g_listen_fd, (struct sockaddr *) &remote, &len);
+  int fd = accept(g_listen_fd, (struct sockaddr *)&remote, &len);
   if (fd == -1) {
     PRINT_ERR("accept failed: %s\n", strerror(errno));
     return;
@@ -686,7 +691,6 @@ static void listen_iteration(void) {
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
     PRINT_ERR("fnctl F_SETFL failed: %s\n", strerror(errno));
   }
-
 
   // we stop existing logging so we can replay header on the new connection
   if (eventLogStatus() == EVENTLOG_RUNNING) {
@@ -766,9 +770,9 @@ static void write_iteration(int fd) {
 
   // Wait for socket to disconnect
   struct pollfd pfd = {
-    .fd = fd,
-    .events = POLLOUT | POLLRDHUP,
-    .revents = 0,
+      .fd = fd,
+      .events = POLLOUT | POLLRDHUP,
+      .revents = 0,
   };
 
   int ret = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
@@ -857,11 +861,11 @@ static void iteration(void) {
 
 /* Main loop of eventlog-socket own thread:
  * Currently it is two states:
- * - either we have connection, then we poll for writes (and drop of connection).
+ * - either we have connection, then we poll for writes (and drop of
+ * connection).
  * - or we don't have, then we poll for accept.
  */
-static void *worker(void *arg)
-{
+static void *worker(void *arg) {
   (void)arg;
   while (true) {
     iteration();
@@ -876,8 +880,7 @@ static void *worker(void *arg)
 
 // Initialize the Unix-domain listener socket and bind it to the provided path.
 // This function does not start any threads; open_socket() completes the setup.
-static void init_unix_listener(const char *sock_path)
-{
+static void init_unix_listener(const char *sock_path) {
   DEBUG_ERR("init Unix listener: %s\n", sock_path);
 
   g_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -890,7 +893,7 @@ static void init_unix_listener(const char *sock_path)
   local.sun_family = AF_UNIX;
   strncpy(local.sun_path, sock_path, sizeof(local.sun_path) - 1);
   unlink(sock_path);
-  if (bind(g_listen_fd, (struct sockaddr *) &local,
+  if (bind(g_listen_fd, (struct sockaddr *)&local,
            sizeof(struct sockaddr_un)) == -1) {
     PRINT_ERR("failed to bind socket %s: %s\n", sock_path, strerror(errno));
     abort();
@@ -900,8 +903,7 @@ static void init_unix_listener(const char *sock_path)
 // Initialize a TCP listener bound to the specified host/port combination.
 // Either host or port may be NULL, in which case the defaults used by
 // getaddrinfo (INADDR_ANY / unspecified port) apply.
-static void init_tcp_listener(const char *host, const char *port)
-{
+static void init_tcp_listener(const char *host, const char *port) {
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -923,7 +925,8 @@ static void init_tcp_listener(const char *host, const char *port)
     }
 
     int reuse = 1;
-    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
+    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
+                   sizeof(reuse)) == -1) {
       PRINT_ERR("setsockopt(SO_REUSEADDR) failed: %s\n", strerror(errno));
       close(g_listen_fd);
       g_listen_fd = -1;
@@ -933,8 +936,7 @@ static void init_tcp_listener(const char *host, const char *port)
     if (bind(g_listen_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
       char hostbuf[NI_MAXHOST];
       char servbuf[NI_MAXSERV];
-      if (getnameinfo(rp->ai_addr, rp->ai_addrlen,
-                      hostbuf, sizeof(hostbuf),
+      if (getnameinfo(rp->ai_addr, rp->ai_addrlen, hostbuf, sizeof(hostbuf),
                       servbuf, sizeof(servbuf),
                       NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
         DEBUG_ERR("bound TCP listener to %s:%s\n", hostbuf, servbuf);
@@ -955,18 +957,17 @@ static void init_tcp_listener(const char *host, const char *port)
   }
 }
 
-static void open_socket(const struct listener_config *config)
-{
+static void open_socket(const struct listener_config *config) {
   switch (config->kind) {
-    case LISTENER_UNIX:
-      init_unix_listener(config->sock_path);
-      break;
-    case LISTENER_TCP:
-      init_tcp_listener(config->tcp_host, config->tcp_port);
-      break;
-    default:
-      PRINT_ERR("unknown listener kind\n");
-      abort();
+  case LISTENER_UNIX:
+    init_unix_listener(config->sock_path);
+    break;
+  case LISTENER_TCP:
+    init_tcp_listener(config->tcp_host, config->tcp_port);
+    break;
+  default:
+    PRINT_ERR("unknown listener kind\n");
+    abort();
   }
 
   int ret = pthread_create(&g_listen_thread, NULL, worker, NULL);
@@ -976,14 +977,11 @@ static void open_socket(const struct listener_config *config)
   }
 }
 
-
 /*********************************************************************************
  * Public interface
  *********************************************************************************/
 
-
-static void ensure_initialized(void)
-{
+static void ensure_initialized(void) {
   if (!g_initialized) {
     pthread_mutex_init(&g_mutex, NULL);
     pthread_cond_init(&g_new_conn_cond, NULL);
@@ -995,7 +993,8 @@ static void ensure_initialized(void)
     }
     for (int i = 0; i < 2; i++) {
       int flags = fcntl(g_wake_pipe[i], F_GETFL, 0);
-      if (flags == -1 || fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
+      if (flags == -1 ||
+          fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
         PRINT_ERR("failed to set wake pipe nonblocking: %s\n", strerror(errno));
         abort();
       }
@@ -1006,17 +1005,14 @@ static void ensure_initialized(void)
   register_builtin_control_commands();
 }
 
-bool eventlog_socket_register_control_command(control_namespace_t namespace_id,
-                                              uint8_t cmd_id,
-                                              eventlog_control_command_handler handler,
-                                              void *user_data)
-{
+bool eventlog_socket_register_control_command(
+    control_namespace_t namespace_id, uint8_t cmd_id,
+    eventlog_control_command_handler handler, void *user_data) {
   ensure_initialized();
   return register_control_command(namespace_id, cmd_id, handler, user_data);
 }
 
-static void signal_control_ready(void)
-{
+static void signal_control_ready(void) {
   pthread_mutex_lock(&g_mutex);
   if (!g_control_ready) {
     g_control_ready = true;
@@ -1028,9 +1024,7 @@ static void signal_control_ready(void)
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
 // It spawns the worker immediately but defers handling of control messages
 // until eventlog_socket_ready() is invoked after RTS initialization.
-static void
-eventlog_socket_init(const struct listener_config *config)
-{
+static void eventlog_socket_init(const struct listener_config *config) {
   ensure_initialized();
 
   if (!listener_config_valid(config))
@@ -1044,8 +1038,7 @@ eventlog_socket_init(const struct listener_config *config)
   open_socket(config);
 }
 
-void eventlog_socket_ready(void)
-{
+void eventlog_socket_ready(void) {
   bool armed = false;
 
   pthread_mutex_lock(&g_mutex);
@@ -1060,30 +1053,27 @@ void eventlog_socket_ready(void)
   }
 }
 
-void eventlog_socket_init_unix(const char *sock_path)
-{
+void eventlog_socket_init_unix(const char *sock_path) {
   struct listener_config config = {
-    .kind = LISTENER_UNIX,
-    .sock_path = sock_path,
-    .tcp_host = NULL,
-    .tcp_port = NULL,
+      .kind = LISTENER_UNIX,
+      .sock_path = sock_path,
+      .tcp_host = NULL,
+      .tcp_port = NULL,
   };
   eventlog_socket_init(&config);
 }
 
-void eventlog_socket_init_tcp(const char *host, const char *port)
-{
+void eventlog_socket_init_tcp(const char *host, const char *port) {
   struct listener_config config = {
-    .kind = LISTENER_TCP,
-    .sock_path = NULL,
-    .tcp_host = host,
-    .tcp_port = port,
+      .kind = LISTENER_TCP,
+      .sock_path = NULL,
+      .tcp_host = host,
+      .tcp_port = port,
   };
   eventlog_socket_init(&config);
 }
 
-void eventlog_socket_wait(void)
-{
+void eventlog_socket_wait(void) {
   // Condition variable pairs with the mutex so reader threads can wait for the
   // worker to publish a connected client_fd atomically.
   pthread_mutex_lock(&g_mutex);
@@ -1096,18 +1086,20 @@ void eventlog_socket_wait(void)
     }
     DEBUG_ERR("eventlog_socket_wait: woke up, client_fd=%d\n", g_client_fd);
   }
-  DEBUG_ERR("eventlog_socket_wait: proceeding with client_fd=%d\n", g_client_fd);
+  DEBUG_ERR("eventlog_socket_wait: proceeding with client_fd=%d\n",
+            g_client_fd);
   pthread_mutex_unlock(&g_mutex);
 }
 
-int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf, StgClosure *main_closure)
-{
+int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf,
+                            StgClosure *main_closure) {
   SchedulerStatus status;
   int exit_status;
 
   hs_init_ghc(&argc, &argv, conf);
 
-  // Signal that the RTS is ready so the eventlog writer can accept control connections.
+  // Signal that the RTS is ready so the eventlog writer can accept control
+  // connections.
   eventlog_socket_ready();
 
   {
@@ -1141,8 +1133,8 @@ int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf, StgClosure *
 
 // Use this from an already-running RTS: it reconfigures eventlogging to use
 // SocketEventLogWriter and restarts the log when a client connects.
-static void eventlog_socket_start(const struct listener_config *config, bool wait)
-{
+static void eventlog_socket_start(const struct listener_config *config,
+                                  bool wait) {
   ensure_initialized();
 
   if (!listener_config_valid(config))
@@ -1169,44 +1161,44 @@ static void eventlog_socket_start(const struct listener_config *config, bool wai
   startEventLogging(&SocketEventLogWriter);
 
   open_socket(config);
-  // Presume that the RTS is already running and we're ready if you're directly using this
-  // function.
+  // Presume that the RTS is already running and we're ready if you're directly
+  // using this function.
   signal_control_ready();
   if (wait) {
     switch (config->kind) {
-      case LISTENER_UNIX:
-        DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n", config->sock_path);
-        break;
-      case LISTENER_TCP: {
-        const char *host = config->tcp_host ? config->tcp_host : "*";
-        DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", host, config->tcp_port);
-        break;
-      }
-      default:
-        break;
+    case LISTENER_UNIX:
+      DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n",
+                config->sock_path);
+      break;
+    case LISTENER_TCP: {
+      const char *host = config->tcp_host ? config->tcp_host : "*";
+      DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n",
+                host, config->tcp_port);
+      break;
+    }
+    default:
+      break;
     }
     eventlog_socket_wait();
   }
 }
 
-void eventlog_socket_start_unix(const char *sock_path, bool wait)
-{
+void eventlog_socket_start_unix(const char *sock_path, bool wait) {
   struct listener_config config = {
-    .kind = LISTENER_UNIX,
-    .sock_path = sock_path,
-    .tcp_host = NULL,
-    .tcp_port = NULL,
+      .kind = LISTENER_UNIX,
+      .sock_path = sock_path,
+      .tcp_host = NULL,
+      .tcp_port = NULL,
   };
   eventlog_socket_start(&config, wait);
 }
 
-void eventlog_socket_start_tcp(const char *host, const char *port, bool wait)
-{
+void eventlog_socket_start_tcp(const char *host, const char *port, bool wait) {
   struct listener_config config = {
-    .kind = LISTENER_TCP,
-    .sock_path = NULL,
-    .tcp_host = host,
-    .tcp_port = port,
+      .kind = LISTENER_TCP,
+      .sock_path = NULL,
+      .tcp_host = host,
+      .tcp_port = port,
   };
   eventlog_socket_start(&config, wait);
 }
