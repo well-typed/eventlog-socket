@@ -104,7 +104,7 @@ struct write_buffer {
  * There are three thread(group)s:
  * 1. RTS
  * 2. worker spawned by open_socket (this writes to the socket)
- * 3. listener spawned by start_control_reciever (this recieves messages on the socket)
+ * 3. listener spawned by start_control_receiver (this receives messages on the socket)
  */
 
 // variables read and written by worker only:
@@ -523,7 +523,7 @@ void write_buffer_pop(struct write_buffer *buf) {
 // buf itself is not freed.
 // it's safe to call write_buffer_free multiple times on the same buf.
 void write_buffer_free(struct write_buffer *buf) {
-  // not the most effecient implementation,
+  // not the most efficient implementation,
   // but should be obviously correct.
   while (buf->head) {
     write_buffer_pop(buf);
@@ -806,7 +806,7 @@ static void write_iteration(int fd) {
 
       if (ret == -1) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-          // couldn't write anything, shouldn't happend.
+          // couldn't write anything, shouldn't happen.
           // do nothing.
         } else if (errno == EPIPE) {
           g_client_fd = -1;
