@@ -505,10 +505,10 @@ static bool writer_write(void *eventlog, size_t size) {
   } else {
 
     // and if there isn't, we can write immediately.
-    int ret = write(fd, eventlog, size);
-    DEBUG_TRACE("write return %d\n", ret);
+    const ssize_t num_bytes_written_or_err = write(fd, eventlog, size);
+    DEBUG_TRACE("write return %zd\n", num_bytes_written_or_err);
 
-    if (ret == -1) {
+    if (num_bytes_written_or_err == -1) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         // couldn't write anything, enqueue whole block
         writer_enqueue(eventlog, size);
@@ -522,13 +522,15 @@ static bool writer_write(void *eventlog, size_t size) {
         goto exit;
       }
     } else {
+      // cast from ssize_t to size_t
+      const size_t num_bytes_written = num_bytes_written_or_err;
       // we wrote something
-      if (ret >= size) {
+      if (num_bytes_written >= size) {
         // we wrote everything, nothing to do
         goto exit;
       } else {
         // we wrote only part of the buffer
-        writer_enqueue(eventlog + ret, size - ret);
+        writer_enqueue(eventlog + num_bytes_written, size - num_bytes_written);
       }
     }
   }
