@@ -137,8 +137,9 @@ static bool listener_config_valid(const struct listener_config *config) {
 }
 
 static void cleanup_socket(void) {
-  if (g_sock_path)
+  if (g_sock_path) {
     unlink(g_sock_path);
+  }
   if (g_wake_pipe[0] != -1) {
     close(g_wake_pipe[0]);
     g_wake_pipe[0] = -1;
@@ -150,8 +151,9 @@ static void cleanup_socket(void) {
 }
 
 static void drain_worker_wake(void) {
-  if (g_wake_pipe[0] == -1)
+  if (g_wake_pipe[0] == -1) {
     return;
+  }
 
   uint8_t buf[32];
   while (true) {
@@ -172,8 +174,9 @@ static void drain_worker_wake(void) {
 }
 
 static void wake_worker(void) {
-  if (g_wake_pipe[1] == -1)
+  if (g_wake_pipe[1] == -1) {
     return;
+  }
 
   uint8_t byte = 1;
   ssize_t ret = write(g_wake_pipe[1], &byte, sizeof(byte));
@@ -227,16 +230,19 @@ static bool control_wait_for_data(int fd) {
 
   int pret = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
   if (pret == -1) {
-    if (errno == EINTR)
+    if (errno == EINTR) {
       return true;
+    }
     DEBUG_ERROR("control poll() failed: %s\n", strerror(errno));
     return false;
   }
-  if (pret == 0)
+  if (pret == 0) {
     return true; // timeout, simply retry
+  }
 
-  if (pfd.revents & POLLRDHUP)
+  if (pfd.revents & POLLRDHUP) {
     return false;
+  }
 
   return true;
 }
@@ -247,14 +253,17 @@ static enum control_recv_status control_read_exact(int fd, uint8_t *buf,
   while (have < len) {
     ssize_t got = recv(fd, buf + have, len - have, 0);
     DEBUG_TRACE("control_read_exact %zd/%zu\n", got, len);
-    if (got == 0)
+    if (got == 0) {
       return CONTROL_RECV_DISCONNECTED;
+    }
     if (got < 0) {
-      if (errno == EINTR)
+      if (errno == EINTR) {
         continue;
+      }
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        if (!control_wait_for_data(fd))
+        if (!control_wait_for_data(fd)) {
           return CONTROL_RECV_DISCONNECTED;
+        }
         continue;
       }
       DEBUG_ERROR("control recv() failed: %s\n", strerror(errno));
@@ -361,8 +370,9 @@ control_receive_command(int fd, control_namespace_t *namespace_out,
   uint8_t header[CONTROL_MAGIC_LEN];
   enum control_recv_status status =
       control_read_exact(fd, header, CONTROL_MAGIC_LEN);
-  if (status != CONTROL_RECV_OK)
+  if (status != CONTROL_RECV_OK) {
     return status;
+  }
   if (memcmp(header, CONTROL_MAGIC, CONTROL_MAGIC_LEN) != 0) {
     DEBUG_TRACE("invalid control magic: %02x %02x %02x %02x\n", header[0],
                 header[1], header[2], header[3]);
@@ -370,12 +380,14 @@ control_receive_command(int fd, control_namespace_t *namespace_out,
   }
   uint8_t namespace_id;
   status = control_read_exact(fd, &namespace_id, 1);
-  if (status != CONTROL_RECV_OK)
+  if (status != CONTROL_RECV_OK) {
     return status;
+  }
   uint8_t cmd_id = 0;
   status = control_read_exact(fd, &cmd_id, 1);
-  if (status != CONTROL_RECV_OK)
+  if (status != CONTROL_RECV_OK) {
     return status;
+  }
 
   *namespace_out = namespace_id;
   *cmd_out = cmd_id;
@@ -448,8 +460,9 @@ static void *control_receiver(void *arg) {
     pthread_mutex_lock(&g_mutex);
     int current_fd = g_client_fd;
     pthread_mutex_unlock(&g_mutex);
-    if (current_fd != fd)
+    if (current_fd != fd) {
       break;
+    }
 
     control_namespace_t namespace_id = 0;
     uint8_t cmd = 0;
@@ -1016,8 +1029,9 @@ static void signal_control_ready(void) {
 static void eventlog_socket_init(const struct listener_config *config) {
   ensure_initialized();
 
-  if (!listener_config_valid(config))
+  if (!listener_config_valid(config)) {
     return;
+  }
 
   pthread_mutex_lock(&g_mutex);
   g_control_ready = false;
@@ -1126,8 +1140,9 @@ static void eventlog_socket_start(const struct listener_config *config,
                                   bool wait) {
   ensure_initialized();
 
-  if (!listener_config_valid(config))
+  if (!listener_config_valid(config)) {
     return;
+  }
 
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
     DEBUG_ERROR("eventlog is not supported.\n");
