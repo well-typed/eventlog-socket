@@ -20,6 +20,7 @@
 #include <rts/prof/Heap.h>
 
 #include "./eventlog_socket/debug.h"
+#include "./eventlog_socket/write_buffer.h"
 #include "eventlog_socket.h"
 
 #define LISTEN_BACKLOG 5
@@ -40,8 +41,6 @@ enum control_command {
 #define POLLRDHUP POLLHUP
 #endif
 
-struct write_buffer;
-void write_buffer_free(struct write_buffer *buf);
 static void start_control_receiver(int fd);
 static void *control_receiver(void *arg);
 static void control_connection_closed(int fd);
@@ -77,19 +76,6 @@ static void register_builtin_control_commands(void);
 /*********************************************************************************
  * data definitions
  *********************************************************************************/
-
-struct write_buffer_item {
-  uint8_t *orig; // original data pointer (which we free)
-  uint8_t *data;
-  size_t size; // invariant: size is not zero
-  struct write_buffer_item *next;
-};
-
-// invariant: head and last are both NULL or both not NULL.
-struct write_buffer {
-  struct write_buffer_item *head;
-  struct write_buffer_item *last;
-};
 
 /*********************************************************************************
  * globals
@@ -212,7 +198,7 @@ static pthread_mutex_t g_mutex;
 //
 // Note: RTS writes client_fd in writer_stop.
 static volatile int g_client_fd = -1;
-static struct write_buffer g_write_buffer = {
+static write_buffer_t g_write_buffer = {
     .head = NULL,
     .last = NULL,
 };
@@ -484,65 +470,6 @@ static void *control_receiver(void *arg) {
 }
 
 /*********************************************************************************
- * write_buffer
- *********************************************************************************/
-
-// push to the back.
-// Caller must serialize externally (writer_write/write_iteration hold mutex)
-// so that head/last invariants stay intact.
-void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
-  DEBUG_TRACE("%p, %lu\n", data, size);
-  uint8_t *copy = malloc(size);
-  memcpy(copy, data, size);
-
-  struct write_buffer_item *item = malloc(sizeof(struct write_buffer_item));
-  item->orig = copy;
-  item->data = copy;
-  item->size = size;
-  item->next = NULL;
-
-  struct write_buffer_item *last = buf->last;
-  if (last == NULL) {
-    assert(buf->head == NULL);
-
-    buf->head = item;
-    buf->last = item;
-  } else {
-    last->next = item;
-    buf->last = item;
-  }
-
-  DEBUG_TRACE("%p %p %p\n", buf, &g_write_buffer, buf->head);
-};
-
-// pop from the front.
-// Requires the same external synchronization as write_buffer_push.
-void write_buffer_pop(struct write_buffer *buf) {
-  struct write_buffer_item *head = buf->head;
-  if (head == NULL) {
-    // buffer is empty: nothing to do.
-    return;
-  } else {
-    buf->head = head->next;
-    if (buf->last == head) {
-      buf->last = NULL;
-    }
-    free(head->orig);
-    free(head);
-  }
-}
-
-// buf itself is not freed.
-// it's safe to call write_buffer_free multiple times on the same buf.
-void write_buffer_free(struct write_buffer *buf) {
-  // not the most efficient implementation,
-  // but should be obviously correct.
-  while (buf->head) {
-    write_buffer_pop(buf);
-  }
-}
-
-/*********************************************************************************
  * EventLogWriter
  *********************************************************************************/
 
@@ -806,7 +733,7 @@ static void write_iteration(int fd) {
     // RTS writers also access wt, so consume queued buffers under the mutex.
     pthread_mutex_lock(&g_mutex);
     while (g_write_buffer.head) {
-      struct write_buffer_item *item = g_write_buffer.head;
+      write_buffer_item_t *item = g_write_buffer.head;
       ret = write(g_client_fd, item->data, item->size);
 
       if (ret == -1) {
