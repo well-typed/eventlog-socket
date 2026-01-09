@@ -20,6 +20,8 @@ tested-with:
 
 extra-source-files:
   cbits/eventlog_socket.c
+  cbits/eventlog_socket/control.c
+  cbits/eventlog_socket/control.h
   cbits/eventlog_socket/debug.h
   cbits/eventlog_socket/poll.h
   cbits/eventlog_socket/write_buffer.c
@@ -57,6 +59,7 @@ library
   default-extensions: LambdaCase
   c-sources:
     cbits/eventlog_socket.c
+    cbits/eventlog_socket/control.c
     cbits/eventlog_socket/write_buffer.c
   include-dirs:       include
   install-includes:   eventlog_socket.h
