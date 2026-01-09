@@ -522,7 +522,7 @@ static bool writer_write(void *eventlog, size_t size) {
         goto exit;
       }
     } else {
-      // cast from ssize_t to size_t
+      // cast from ssize_t to size_t is safe as num_bytes_written_or_err != -1
       const size_t num_bytes_written = num_bytes_written_or_err;
       // we wrote something
       if (num_bytes_written >= size) {
@@ -699,12 +699,12 @@ static void write_iteration(int fd) {
       .revents = 0,
   };
 
-  int ret = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
-  if (ret == -1 && errno != EAGAIN) {
+  const int num_ready_or_err = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
+  if (num_ready_or_err == -1 && errno != EAGAIN) {
     // error
     DEBUG_ERROR("poll() failed: %s\n", strerror(errno));
     return;
-  } else if (ret == 0) {
+  } else if (num_ready_or_err == 0) {
     // timeout
     return;
   }
@@ -730,9 +730,10 @@ static void write_iteration(int fd) {
     pthread_mutex_lock(&g_mutex);
     while (g_write_buffer.head) {
       write_buffer_item_t *item = g_write_buffer.head;
-      ret = write(g_client_fd, item->data, item->size);
+      const ssize_t num_bytes_written_or_err =
+          write(g_client_fd, item->data, item->size);
 
-      if (ret == -1) {
+      if (num_bytes_written_or_err == -1) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
           // couldn't write anything, shouldn't happen.
           // do nothing.
@@ -747,14 +748,16 @@ static void write_iteration(int fd) {
         break;
 
       } else {
+        // cast from ssize_t to size_t is safe as num_bytes_written_or_err != -1
+        const size_t num_bytes_written = num_bytes_written_or_err;
         // we wrote something
-        if (ret >= item->size) {
+        if (num_bytes_written >= item->size) {
           // we wrote whole element, try to write next element too
           write_buffer_pop(&g_write_buffer);
           continue;
         } else {
-          item->size -= ret;
-          item->data += ret;
+          item->size -= num_bytes_written;
+          item->data += num_bytes_written;
           break;
         }
       }
