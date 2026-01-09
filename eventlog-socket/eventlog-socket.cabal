@@ -21,6 +21,8 @@ tested-with:
 extra-source-files:
   cbits/eventlog_socket.c
   cbits/eventlog_socket/debug.h
+  cbits/eventlog_socket/write_buffer.c
+  cbits/eventlog_socket/write_buffer.h
   include/eventlog_socket.h
 
 extra-doc-files:
@@ -52,7 +54,9 @@ library
   cc-options:         -std=c11
   default-language:   Haskell2010
   default-extensions: LambdaCase
-  c-sources:          cbits/eventlog_socket.c
+  c-sources:
+    cbits/eventlog_socket.c
+    cbits/eventlog_socket/write_buffer.c
   include-dirs:       include
   install-includes:   eventlog_socket.h
 
