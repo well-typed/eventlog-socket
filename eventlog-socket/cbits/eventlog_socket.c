@@ -40,11 +40,6 @@ enum control_command {
 #define POLLRDHUP POLLHUP
 #endif
 
-// logging helper macros:
-// - use PRINT_ERR to unconditionally log erroneous situations
-// - otherwise use debug
-#define PRINT_ERR(...) fprintf(stderr, "ghc-eventlog-socket: " __VA_ARGS__)
-
 struct write_buffer;
 void write_buffer_free(struct write_buffer *buf);
 static void start_control_receiver(int fd);
@@ -170,7 +165,7 @@ static void drain_worker_wake(void) {
     } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
       break;
     } else {
-      PRINT_ERR("failed to drain wake pipe: %s\n", strerror(errno));
+      DEBUG_ERROR("failed to drain wake pipe: %s\n", strerror(errno));
       break;
     }
   }
@@ -183,7 +178,7 @@ static void wake_worker(void) {
   uint8_t byte = 1;
   ssize_t ret = write(g_wake_pipe[1], &byte, sizeof(byte));
   if (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
-    PRINT_ERR("failed to wake worker: %s\n", strerror(errno));
+    DEBUG_ERROR("failed to wake worker: %s\n", strerror(errno));
   }
 }
 
@@ -234,7 +229,7 @@ static bool control_wait_for_data(int fd) {
   if (pret == -1) {
     if (errno == EINTR)
       return true;
-    PRINT_ERR("control poll() failed: %s\n", strerror(errno));
+    DEBUG_ERROR("control poll() failed: %s\n", strerror(errno));
     return false;
   }
   if (pret == 0)
@@ -262,7 +257,7 @@ static enum control_recv_status control_read_exact(int fd, uint8_t *buf,
           return CONTROL_RECV_DISCONNECTED;
         continue;
       }
-      PRINT_ERR("control recv() failed: %s\n", strerror(errno));
+      DEBUG_ERROR("control recv() failed: %s\n", strerror(errno));
       return CONTROL_RECV_DISCONNECTED;
     }
     have += (size_t)got;
@@ -283,9 +278,10 @@ static bool register_control_command(control_namespace_t namespace_id,
   struct control_handler_entry *entry = g_control_handlers;
   while (entry != NULL) {
     if (entry->cmd_id == cmd_id && entry->namespace_id == namespace_id) {
-      PRINT_ERR("warning: duplicate registration for namespace 0x%08x command "
-                "0x%02x; keeping existing handler\n",
-                namespace_id, cmd_id);
+      DEBUG_ERROR(
+          "warning: duplicate registration for namespace 0x%08x command "
+          "0x%02x; keeping existing handler\n",
+          namespace_id, cmd_id);
       goto out;
     }
     entry = entry->next;
@@ -293,7 +289,7 @@ static bool register_control_command(control_namespace_t namespace_id,
 
   entry = malloc(sizeof(struct control_handler_entry));
   if (entry == NULL) {
-    PRINT_ERR("control: failed to allocate handler entry\n");
+    DEBUG_ERROR("control: failed to allocate handler entry\n");
     goto out;
   }
   entry->namespace_id = namespace_id;
@@ -353,7 +349,7 @@ static void register_builtin_control_commands(void) {
                                       control_request_heap_profile, NULL);
 
   if (!ok) {
-    PRINT_ERR("failed to register builtin control commands\n");
+    DEBUG_ERROR("failed to register builtin control commands\n");
   } else {
     g_control_handlers_initialized = true;
   }
@@ -408,8 +404,8 @@ static void handle_control_command(control_namespace_t namespace_id,
   if (handler != NULL) {
     handler(namespace_id, cmd, user_data);
   } else {
-    PRINT_ERR("control: unhandled command namespace=0x%08x id=0x%02x\n",
-              namespace_id, cmd);
+    DEBUG_ERROR("control: unhandled command namespace=0x%08x id=0x%02x\n",
+                namespace_id, cmd);
   }
 }
 
@@ -417,12 +413,12 @@ static void start_control_receiver(int fd) {
   pthread_t tid;
   int ret = pthread_create(&tid, NULL, control_receiver, (void *)(intptr_t)fd);
   if (ret != 0) {
-    PRINT_ERR("failed to start control receiver: %s\n", strerror(ret));
+    DEBUG_ERROR("failed to start control receiver: %s\n", strerror(ret));
     return;
   }
   ret = pthread_detach(tid);
   if (ret != 0) {
-    PRINT_ERR("failed to detach control receiver: %s\n", strerror(ret));
+    DEBUG_ERROR("failed to detach control receiver: %s\n", strerror(ret));
   }
 }
 
@@ -588,7 +584,7 @@ static bool writer_write(void *eventlog, size_t size) {
         goto exit;
 
       } else {
-        PRINT_ERR("failed to write: %s\n", strerror(errno));
+        DEBUG_ERROR("failed to write: %s\n", strerror(errno));
         goto exit;
       }
     } else {
@@ -637,7 +633,7 @@ static void listen_iteration(void) {
   bool start_eventlog = false;
 
   if (listen(g_listen_fd, LISTEN_BACKLOG) == -1) {
-    PRINT_ERR("listen() failed: %s\n", strerror(errno));
+    DEBUG_ERROR("listen() failed: %s\n", strerror(errno));
     abort();
   }
 
@@ -656,7 +652,7 @@ static void listen_iteration(void) {
   while (true) {
     int ret = poll(&pfd_accept, 1, POLL_LISTEN_TIMEOUT);
     if (ret == -1) {
-      PRINT_ERR("poll() failed: %s\n", strerror(errno));
+      DEBUG_ERROR("poll() failed: %s\n", strerror(errno));
       return;
     } else if (ret == 0) {
       DEBUG_TRACE("accept poll timed out\n");
@@ -670,7 +666,7 @@ static void listen_iteration(void) {
   // accept
   int fd = accept(g_listen_fd, (struct sockaddr *)&remote, &len);
   if (fd == -1) {
-    PRINT_ERR("accept failed: %s\n", strerror(errno));
+    DEBUG_ERROR("accept failed: %s\n", strerror(errno));
     return;
   }
   DEBUG_TRACE("accepted new connection fd=%d\n", fd);
@@ -678,10 +674,10 @@ static void listen_iteration(void) {
   // set socket into non-blocking mode
   int flags = fcntl(fd, F_GETFL);
   if (flags == -1) {
-    PRINT_ERR("fnctl F_GETFL failed: %s\n", strerror(errno));
+    DEBUG_ERROR("fnctl F_GETFL failed: %s\n", strerror(errno));
   }
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-    PRINT_ERR("fnctl F_SETFL failed: %s\n", strerror(errno));
+    DEBUG_ERROR("fnctl F_SETFL failed: %s\n", strerror(errno));
   }
 
   // we stop existing logging so we can replay header on the new connection
@@ -734,7 +730,7 @@ static void nonwrite_iteration(int fd) {
     if (errno == EINTR) {
       return;
     }
-    PRINT_ERR("poll() failed: %s\n", strerror(errno));
+    DEBUG_ERROR("poll() failed: %s\n", strerror(errno));
     return;
   }
 
@@ -770,7 +766,7 @@ static void write_iteration(int fd) {
   int ret = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
   if (ret == -1 && errno != EAGAIN) {
     // error
-    PRINT_ERR("poll() failed: %s\n", strerror(errno));
+    DEBUG_ERROR("poll() failed: %s\n", strerror(errno));
     return;
   } else if (ret == 0) {
     // timeout
@@ -808,7 +804,7 @@ static void write_iteration(int fd) {
           g_client_fd = -1;
           write_buffer_free(&g_write_buffer);
         } else {
-          PRINT_ERR("failed to write: %s\n", strerror(errno));
+          DEBUG_ERROR("failed to write: %s\n", strerror(errno));
         }
 
         // break out of the loop
@@ -887,7 +883,7 @@ static void init_unix_listener(const char *sock_path) {
   unlink(sock_path);
   if (bind(g_listen_fd, (struct sockaddr *)&local,
            sizeof(struct sockaddr_un)) == -1) {
-    PRINT_ERR("failed to bind socket %s: %s\n", sock_path, strerror(errno));
+    DEBUG_ERROR("failed to bind socket %s: %s\n", sock_path, strerror(errno));
     abort();
   }
 }
@@ -905,7 +901,7 @@ static void init_tcp_listener(const char *host, const char *port) {
   struct addrinfo *res = NULL;
   int ret = getaddrinfo(host, port, &hints, &res);
   if (ret != 0) {
-    PRINT_ERR("getaddrinfo failed: %s\n", gai_strerror(ret));
+    DEBUG_ERROR("getaddrinfo failed: %s\n", gai_strerror(ret));
     abort();
   }
 
@@ -919,7 +915,7 @@ static void init_tcp_listener(const char *host, const char *port) {
     int reuse = 1;
     if (setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
                    sizeof(reuse)) == -1) {
-      PRINT_ERR("setsockopt(SO_REUSEADDR) failed: %s\n", strerror(errno));
+      DEBUG_ERROR("setsockopt(SO_REUSEADDR) failed: %s\n", strerror(errno));
       close(g_listen_fd);
       g_listen_fd = -1;
       continue;
@@ -936,7 +932,7 @@ static void init_tcp_listener(const char *host, const char *port) {
       break; // success
     }
 
-    PRINT_ERR("failed to bind TCP socket: %s\n", strerror(errno));
+    DEBUG_ERROR("failed to bind TCP socket: %s\n", strerror(errno));
     close(g_listen_fd);
     g_listen_fd = -1;
   }
@@ -944,7 +940,7 @@ static void init_tcp_listener(const char *host, const char *port) {
   freeaddrinfo(res);
 
   if (g_listen_fd == -1) {
-    PRINT_ERR("unable to bind TCP listener\n");
+    DEBUG_ERROR("unable to bind TCP listener\n");
     abort();
   }
 }
@@ -958,13 +954,13 @@ static void open_socket(const struct listener_config *config) {
     init_tcp_listener(config->tcp_host, config->tcp_port);
     break;
   default:
-    PRINT_ERR("unknown listener kind\n");
+    DEBUG_ERROR("unknown listener kind\n");
     abort();
   }
 
   int ret = pthread_create(&g_listen_thread, NULL, worker, NULL);
   if (ret != 0) {
-    PRINT_ERR("failed to spawn thread: %s\n", strerror(ret));
+    DEBUG_ERROR("failed to spawn thread: %s\n", strerror(ret));
     abort();
   }
 }
@@ -980,14 +976,15 @@ static void ensure_initialized(void) {
     pthread_cond_init(&g_control_ready_cond, NULL);
     g_control_ready = false;
     if (pipe(g_wake_pipe) == -1) {
-      PRINT_ERR("failed to create wake pipe: %s\n", strerror(errno));
+      DEBUG_ERROR("failed to create wake pipe: %s\n", strerror(errno));
       abort();
     }
     for (int i = 0; i < 2; i++) {
       int flags = fcntl(g_wake_pipe[i], F_GETFL, 0);
       if (flags == -1 ||
           fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
-        PRINT_ERR("failed to set wake pipe nonblocking: %s\n", strerror(errno));
+        DEBUG_ERROR("failed to set wake pipe nonblocking: %s\n",
+                    strerror(errno));
         abort();
       }
     }
@@ -1074,7 +1071,7 @@ void eventlog_socket_wait(void) {
     DEBUG_TRACE("eventlog_socket_wait: blocking for connection\n");
     int ret = pthread_cond_wait(&g_new_conn_cond, &g_mutex);
     if (ret != 0) {
-      PRINT_ERR("failed to wait on condition variable: %s\n", strerror(ret));
+      DEBUG_ERROR("failed to wait on condition variable: %s\n", strerror(ret));
     }
     DEBUG_TRACE("eventlog_socket_wait: woke up, client_fd=%d\n", g_client_fd);
   }
@@ -1133,7 +1130,7 @@ static void eventlog_socket_start(const struct listener_config *config,
     return;
 
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
-    PRINT_ERR("eventlog is not supported.\n");
+    DEBUG_ERROR("eventlog is not supported.\n");
     return;
   }
 
