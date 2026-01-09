@@ -19,6 +19,7 @@
 #include <Rts.h>
 #include <rts/prof/Heap.h>
 
+#include "./eventlog_socket/debug.h"
 #include "eventlog_socket.h"
 
 #define LISTEN_BACKLOG 5
@@ -41,17 +42,8 @@ enum control_command {
 
 // logging helper macros:
 // - use PRINT_ERR to unconditionally log erroneous situations
-// - otherwise use DEBUG_ERR
+// - otherwise use debug
 #define PRINT_ERR(...) fprintf(stderr, "ghc-eventlog-socket: " __VA_ARGS__)
-#ifdef DEBUG
-#define DEBUG_ERR(fmt, ...)                                                    \
-  fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__, __VA_ARGS__)
-#define DEBUG0_ERR(fmt)                                                        \
-  fprintf(stderr, "ghc-eventlog-socket %s: " fmt, __func__)
-#else
-#define DEBUG_ERR(fmt, ...)
-#define DEBUG0_ERR(fmt)
-#endif
 
 struct write_buffer;
 void write_buffer_free(struct write_buffer *buf);
@@ -259,7 +251,7 @@ static enum control_recv_status control_read_exact(int fd, uint8_t *buf,
   size_t have = 0;
   while (have < len) {
     ssize_t got = recv(fd, buf + have, len - have, 0);
-    DEBUG_ERR("control_read_exact %zd/%zu\n", got, len);
+    DEBUG_TRACE("control_read_exact %zd/%zu\n", got, len);
     if (got == 0)
       return CONTROL_RECV_DISCONNECTED;
     if (got < 0) {
@@ -322,7 +314,7 @@ static void control_start_heap_profiling(control_namespace_t namespace_id,
   (void)cmd;
   (void)namespace_id;
   (void)user_data;
-  DEBUG0_ERR("control: startHeapProfiling\n");
+  DEBUG_TRACE("control: startHeapProfiling\n");
   startHeapProfTimer();
 }
 
@@ -331,7 +323,7 @@ static void control_stop_heap_profiling(control_namespace_t namespace_id,
   (void)cmd;
   (void)namespace_id;
   (void)user_data;
-  DEBUG0_ERR("control: stopHeapProfiling\n");
+  DEBUG_TRACE("control: stopHeapProfiling\n");
   stopHeapProfTimer();
 }
 
@@ -340,7 +332,7 @@ static void control_request_heap_profile(control_namespace_t namespace_id,
   (void)cmd;
   (void)namespace_id;
   (void)user_data;
-  DEBUG0_ERR("control: requestHeapProfile\n");
+  DEBUG_TRACE("control: requestHeapProfile\n");
   requestHeapCensus();
 }
 
@@ -376,8 +368,8 @@ control_receive_command(int fd, control_namespace_t *namespace_out,
   if (status != CONTROL_RECV_OK)
     return status;
   if (memcmp(header, CONTROL_MAGIC, CONTROL_MAGIC_LEN) != 0) {
-    DEBUG_ERR("invalid control magic: %02x %02x %02x %02x\n", header[0],
-              header[1], header[2], header[3]);
+    DEBUG_TRACE("invalid control magic: %02x %02x %02x %02x\n", header[0],
+                header[1], header[2], header[3]);
     return CONTROL_RECV_PROTOCOL_ERROR;
   }
   uint8_t namespace_id;
@@ -391,8 +383,8 @@ control_receive_command(int fd, control_namespace_t *namespace_out,
 
   *namespace_out = namespace_id;
   *cmd_out = cmd_id;
-  DEBUG_ERR("control command namespace=0x%08x id=0x%02x\n", namespace_id,
-            cmd_id);
+  DEBUG_TRACE("control command namespace=0x%08x id=0x%02x\n", namespace_id,
+              cmd_id);
   return CONTROL_RECV_OK;
 }
 
@@ -490,7 +482,7 @@ static void *control_receiver(void *arg) {
 // Caller must serialize externally (writer_write/write_iteration hold mutex)
 // so that head/last invariants stay intact.
 void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
-  DEBUG_ERR("%p, %lu\n", data, size);
+  DEBUG_TRACE("%p, %lu\n", data, size);
   uint8_t *copy = malloc(size);
   memcpy(copy, data, size);
 
@@ -511,7 +503,7 @@ void write_buffer_push(struct write_buffer *buf, uint8_t *data, size_t size) {
     buf->last = item;
   }
 
-  DEBUG_ERR("%p %p %p\n", buf, &g_write_buffer, buf->head);
+  DEBUG_TRACE("%p %p %p\n", buf, &g_write_buffer, buf->head);
 };
 
 // pop from the front.
@@ -550,7 +542,7 @@ static void writer_init(void) {
 }
 
 static void writer_enqueue(uint8_t *data, size_t size) {
-  DEBUG_ERR("size: %p %lu\n", data, size);
+  DEBUG_TRACE("size: %p %lu\n", data, size);
   bool was_empty = g_write_buffer.head == NULL;
 
   // TODO: check the size of the queue
@@ -559,14 +551,14 @@ static void writer_enqueue(uint8_t *data, size_t size) {
   // for now, we just push everythinb to the back of the buffer.
   write_buffer_push(&g_write_buffer, data, size);
 
-  DEBUG_ERR("wt.head = %p\n", g_write_buffer.head);
+  DEBUG_TRACE("wt.head = %p\n", g_write_buffer.head);
   if (was_empty) {
     wake_worker();
   }
 }
 
 static bool writer_write(void *eventlog, size_t size) {
-  DEBUG_ERR("size: %lu\n", size);
+  DEBUG_TRACE("size: %lu\n", size);
   // Serialize against worker/control threads so that client_fd and wt are read
   // atomically with respect to connection establishment/teardown.
   pthread_mutex_lock(&g_mutex);
@@ -575,7 +567,7 @@ static bool writer_write(void *eventlog, size_t size) {
     goto exit;
   }
 
-  DEBUG_ERR("client_fd = %d; wt.head = %p\n", fd, g_write_buffer.head);
+  DEBUG_TRACE("client_fd = %d; wt.head = %p\n", fd, g_write_buffer.head);
 
   if (g_write_buffer.head != NULL) {
     // if there is stuff in queue already, we enqueue the current block.
@@ -584,7 +576,7 @@ static bool writer_write(void *eventlog, size_t size) {
 
     // and if there isn't, we can write immediately.
     int ret = write(fd, eventlog, size);
-    DEBUG_ERR("write return %d\n", ret);
+    DEBUG_TRACE("write return %d\n", ret);
 
     if (ret == -1) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -658,7 +650,7 @@ static void listen_iteration(void) {
       .revents = 0,
   };
 
-  DEBUG_ERR("listen_iteration: waiting for accept on fd %d\n", g_listen_fd);
+  DEBUG_TRACE("listen_iteration: waiting for accept on fd %d\n", g_listen_fd);
 
   // poll until we can accept
   while (true) {
@@ -667,10 +659,10 @@ static void listen_iteration(void) {
       PRINT_ERR("poll() failed: %s\n", strerror(errno));
       return;
     } else if (ret == 0) {
-      DEBUG0_ERR("accept poll timed out\n");
+      DEBUG_TRACE("accept poll timed out\n");
     } else {
       // got connection
-      DEBUG0_ERR("accept poll ready\n");
+      DEBUG_TRACE("accept poll ready\n");
       break;
     }
   }
@@ -681,7 +673,7 @@ static void listen_iteration(void) {
     PRINT_ERR("accept failed: %s\n", strerror(errno));
     return;
   }
-  DEBUG_ERR("accepted new connection fd=%d\n", fd);
+  DEBUG_TRACE("accepted new connection fd=%d\n", fd);
 
   // set socket into non-blocking mode
   int flags = fcntl(fd, F_GETFL);
@@ -703,7 +695,7 @@ static void listen_iteration(void) {
   // with an empty queue or not at all. Keep the lock held through the condition
   // broadcast so the predicate update stays atomic on every platform.
   pthread_mutex_lock(&g_mutex);
-  DEBUG_ERR("publishing client_fd=%d (previous=%d)\n", fd, g_client_fd);
+  DEBUG_TRACE("publishing client_fd=%d (previous=%d)\n", fd, g_client_fd);
   g_client_fd = fd;
   pthread_cond_broadcast(&g_new_conn_cond);
   pthread_mutex_unlock(&g_mutex);
@@ -722,7 +714,7 @@ static void listen_iteration(void) {
 //
 // we poll only for whether the connection is closed.
 static void nonwrite_iteration(int fd) {
-  DEBUG_ERR("(%d)\n", fd);
+  DEBUG_TRACE("(%d)\n", fd);
 
   // Wait for socket to disconnect or for pending data.
   struct pollfd pfds[2];
@@ -752,7 +744,7 @@ static void nonwrite_iteration(int fd) {
   }
 
   if (pfds[0].revents & POLLHUP) {
-    DEBUG_ERR("(%d) POLLRDHUP\n", fd);
+    DEBUG_TRACE("(%d) POLLRDHUP\n", fd);
 
     pthread_mutex_lock(&g_mutex);
     g_client_fd = -1;
@@ -766,7 +758,7 @@ static void nonwrite_iteration(int fd) {
 //
 // we poll for both: can we write, and whether the connection is closed.
 static void write_iteration(int fd) {
-  DEBUG_ERR("(%d)\n", fd);
+  DEBUG_TRACE("(%d)\n", fd);
 
   // Wait for socket to disconnect
   struct pollfd pfd = {
@@ -787,7 +779,7 @@ static void write_iteration(int fd) {
 
   // reset client_fd on RDHUP.
   if (pfd.revents & POLLHUP) {
-    DEBUG_ERR("(%d) POLLRDHUP\n", fd);
+    DEBUG_TRACE("(%d) POLLRDHUP\n", fd);
 
     // reset client_fd
     // Protect concurrent access to client_fd and wt during teardown.
@@ -800,7 +792,7 @@ static void write_iteration(int fd) {
   }
 
   if (pfd.revents & POLLOUT) {
-    DEBUG_ERR("(%d) POLLOUT\n", fd);
+    DEBUG_TRACE("(%d) POLLOUT\n", fd);
 
     // RTS writers also access wt, so consume queued buffers under the mutex.
     pthread_mutex_lock(&g_mutex);
@@ -845,7 +837,7 @@ static void iteration(void) {
   pthread_mutex_lock(&g_mutex);
   int fd = g_client_fd;
   bool empty = g_write_buffer.head == NULL;
-  DEBUG_ERR("fd = %d, wt.head = %p\n", fd, g_write_buffer.head);
+  DEBUG_TRACE("fd = %d, wt.head = %p\n", fd, g_write_buffer.head);
   pthread_mutex_unlock(&g_mutex);
 
   if (fd != -1) {
@@ -881,7 +873,7 @@ static void *worker(void *arg) {
 // Initialize the Unix-domain listener socket and bind it to the provided path.
 // This function does not start any threads; open_socket() completes the setup.
 static void init_unix_listener(const char *sock_path) {
-  DEBUG_ERR("init Unix listener: %s\n", sock_path);
+  DEBUG_TRACE("init Unix listener: %s\n", sock_path);
 
   g_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -939,7 +931,7 @@ static void init_tcp_listener(const char *host, const char *port) {
       if (getnameinfo(rp->ai_addr, rp->ai_addrlen, hostbuf, sizeof(hostbuf),
                       servbuf, sizeof(servbuf),
                       NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
-        DEBUG_ERR("bound TCP listener to %s:%s\n", hostbuf, servbuf);
+        DEBUG_TRACE("bound TCP listener to %s:%s\n", hostbuf, servbuf);
       }
       break; // success
     }
@@ -1077,17 +1069,17 @@ void eventlog_socket_wait(void) {
   // Condition variable pairs with the mutex so reader threads can wait for the
   // worker to publish a connected client_fd atomically.
   pthread_mutex_lock(&g_mutex);
-  DEBUG_ERR("eventlog_socket_wait: initial client_fd=%d\n", g_client_fd);
+  DEBUG_TRACE("eventlog_socket_wait: initial client_fd=%d\n", g_client_fd);
   while (g_client_fd == -1) {
-    DEBUG0_ERR("eventlog_socket_wait: blocking for connection\n");
+    DEBUG_TRACE("eventlog_socket_wait: blocking for connection\n");
     int ret = pthread_cond_wait(&g_new_conn_cond, &g_mutex);
     if (ret != 0) {
       PRINT_ERR("failed to wait on condition variable: %s\n", strerror(ret));
     }
-    DEBUG_ERR("eventlog_socket_wait: woke up, client_fd=%d\n", g_client_fd);
+    DEBUG_TRACE("eventlog_socket_wait: woke up, client_fd=%d\n", g_client_fd);
   }
-  DEBUG_ERR("eventlog_socket_wait: proceeding with client_fd=%d\n",
-            g_client_fd);
+  DEBUG_TRACE("eventlog_socket_wait: proceeding with client_fd=%d\n",
+              g_client_fd);
   pthread_mutex_unlock(&g_mutex);
 }
 
@@ -1167,13 +1159,14 @@ static void eventlog_socket_start(const struct listener_config *config,
   if (wait) {
     switch (config->kind) {
     case LISTENER_UNIX:
-      DEBUG_ERR("ghc-eventlog-socket: Waiting for connection to %s...\n",
-                config->sock_path);
+      DEBUG_TRACE("ghc-eventlog-socket: Waiting for connection to %s...\n",
+                  config->sock_path);
       break;
     case LISTENER_TCP: {
       const char *host = config->tcp_host ? config->tcp_host : "*";
-      DEBUG_ERR("ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n",
-                host, config->tcp_port);
+      DEBUG_TRACE(
+          "ghc-eventlog-socket: Waiting for TCP connection on %s:%s...\n", host,
+          config->tcp_port);
       break;
     }
     default:
