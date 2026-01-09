@@ -31,6 +31,8 @@ echo "    - '-Wall'" >>"${CLANGD_FILE}"
 echo "    - '-Wextra'" >>"${CLANGD_FILE}"
 echo "    - '-Wpedantic'" >>"${CLANGD_FILE}"
 echo "    - '-DDEBUG=1'" >>"${CLANGD_FILE}"
+echo "    - '-xc'" >>"${CLANGD_FILE}"
+echo "    - '-std=c11'" >>"${CLANGD_FILE}"
 echo "    - '-I${EVENTLOG_SOCKET_INCLUDE_DIR}'" >>"${CLANGD_FILE}"
 for ghc_include_dir; do
 	ghc_real_include_dir="$(realpath "${ghc_include_dir}")"
