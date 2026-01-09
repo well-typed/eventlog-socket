@@ -5,6 +5,9 @@ cabal.project.local
 *.o
 *.hp
 
+# Haskell test suite
+/eventlog-socket-tests.log
+
 # C
 /.clangd
 
