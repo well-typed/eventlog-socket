@@ -1,0 +1,16 @@
+// For POLLRDHUP
+#define _GNU_SOURCE
+
+#ifndef EVENTLOG_SOCKET_POLL_H
+#define EVENTLOG_SOCKET_POLL_H
+
+#include <poll.h>
+
+#define POLL_LISTEN_TIMEOUT 10000
+#define POLL_WRITE_TIMEOUT 1000
+
+#ifndef POLLRDHUP
+#define POLLRDHUP POLLHUP
+#endif
+
+#endif /* EVENTLOG_SOCKET_POLL_H */

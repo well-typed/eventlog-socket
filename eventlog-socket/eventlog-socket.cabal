@@ -21,6 +21,7 @@ tested-with:
 extra-source-files:
   cbits/eventlog_socket.c
   cbits/eventlog_socket/debug.h
+  cbits/eventlog_socket/poll.h
   cbits/eventlog_socket/write_buffer.c
   cbits/eventlog_socket/write_buffer.h
   include/eventlog_socket.h
