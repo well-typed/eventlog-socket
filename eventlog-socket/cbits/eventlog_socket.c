@@ -530,7 +530,8 @@ static bool writer_write(void *eventlog, size_t size) {
         goto exit;
       } else {
         // we wrote only part of the buffer
-        writer_enqueue(eventlog + num_bytes_written, size - num_bytes_written);
+        writer_enqueue((uint8_t *)eventlog + num_bytes_written,
+                       size - num_bytes_written);
       }
     }
   }
