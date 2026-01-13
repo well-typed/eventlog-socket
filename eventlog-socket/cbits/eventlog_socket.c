@@ -5,7 +5,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
-#include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,12 +19,11 @@
 #include <rts/prof/Heap.h>
 
 #include "./eventlog_socket/debug.h"
+#include "./eventlog_socket/poll.h"
 #include "./eventlog_socket/write_buffer.h"
 #include "eventlog_socket.h"
 
 #define LISTEN_BACKLOG 5
-#define POLL_LISTEN_TIMEOUT 10000
-#define POLL_WRITE_TIMEOUT 1000
 #define CONTROL_MAGIC "GCTL"
 #define CONTROL_MAGIC_LEN 4
 #define CONTROL_NAMESPACE_LEN 4
@@ -36,10 +34,6 @@ enum control_command {
   CONTROL_CMD_REQUEST_HEAP_PROFILE = 0x02,
 };
 #define CONTROL_NAMESPACE_CORE 0
-
-#ifndef POLLRDHUP
-#define POLLRDHUP POLLHUP
-#endif
 
 static void start_control_receiver(int fd);
 static void *control_receiver(void *arg);
