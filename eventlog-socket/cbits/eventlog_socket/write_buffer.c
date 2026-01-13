@@ -5,8 +5,7 @@
 #include "./debug.h"
 #include "./write_buffer.h"
 
-void __attribute__((visibility("hidden")))
-write_buffer_push(write_buffer_t *wb, uint8_t *data, size_t size) {
+void HIDDEN write_buffer_push(write_buffer_t *wb, uint8_t *data, size_t size) {
   DEBUG_TRACE("%p, %lu\n", data, size);
   uint8_t *copy = malloc(size);
   memcpy(copy, data, size);
@@ -31,8 +30,7 @@ write_buffer_push(write_buffer_t *wb, uint8_t *data, size_t size) {
   DEBUG_TRACE("%p %p\n", wb, wb->head);
 }
 
-void __attribute__((visibility("hidden")))
-write_buffer_pop(write_buffer_t *wb) {
+void HIDDEN write_buffer_pop(write_buffer_t *wb) {
   write_buffer_item_t *head = wb->head;
   if (head == NULL) {
     // buffer is empty: nothing to do.
@@ -47,8 +45,7 @@ write_buffer_pop(write_buffer_t *wb) {
   }
 }
 
-void __attribute__((visibility("hidden")))
-write_buffer_free(write_buffer_t *wb) {
+void HIDDEN write_buffer_free(write_buffer_t *wb) {
   // not the most efficient implementation,
   // but should be obviously correct.
   while (wb->head) {

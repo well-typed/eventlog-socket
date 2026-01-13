@@ -23,6 +23,7 @@ extra-source-files:
   cbits/eventlog_socket/control.c
   cbits/eventlog_socket/control.h
   cbits/eventlog_socket/debug.h
+  cbits/eventlog_socket/macros.h
   cbits/eventlog_socket/poll.h
   cbits/eventlog_socket/write_buffer.c
   cbits/eventlog_socket/write_buffer.h

@@ -1,6 +1,8 @@
 #ifndef EVENTLOG_SOCKET_WRITE_BUFFER_H
 #define EVENTLOG_SOCKET_WRITE_BUFFER_H
 
+#include "./macros.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -23,16 +25,14 @@ struct write_buffer_item {
 // push to the back.
 // Caller must serialize externally (writer_write/write_iteration hold mutex)
 // so that head/last invariants stay intact.
-void __attribute__((visibility("hidden")))
-write_buffer_push(write_buffer_t *wb, uint8_t *data, size_t size);
+void HIDDEN write_buffer_push(write_buffer_t *wb, uint8_t *data, size_t size);
 
 // pop from the front.
 // Requires the same external synchronization as write_buffer_push.
-void __attribute__((visibility("hidden"))) write_buffer_pop(write_buffer_t *wb);
+void HIDDEN write_buffer_pop(write_buffer_t *wb);
 
 // buf itself is not freed.
 // it's safe to call write_buffer_free multiple times on the same buf.
-void __attribute__((visibility("hidden")))
-write_buffer_free(write_buffer_t *wb);
+void HIDDEN write_buffer_free(write_buffer_t *wb);
 
 #endif /* EVENTLOG_SOCKET_WRITE_BUFFER_H */

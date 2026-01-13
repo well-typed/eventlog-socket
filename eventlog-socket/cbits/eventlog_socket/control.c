@@ -53,15 +53,14 @@ static bool g_control_ready_armed = false;
 
 static pthread_mutex_t g_control_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void __attribute__((visibility("hidden"))) eventlog_socket_control_arm(void) {
+void HIDDEN eventlog_socket_control_arm(void) {
   pthread_mutex_lock(&g_control_ready_mutex);
   g_control_ready = false;
   g_control_ready_armed = true;
   pthread_mutex_unlock(&g_control_ready_mutex);
 }
 
-bool __attribute__((visibility("hidden")))
-eventlog_socket_control_is_armed(void) {
+bool HIDDEN eventlog_socket_control_is_armed(void) {
   bool armed = false;
   pthread_mutex_lock(&g_control_ready_mutex);
   if (g_control_ready_armed) {
@@ -134,7 +133,7 @@ static eventlog_control_handler_item_t *g_control_handlers =
 
 static pthread_mutex_t g_control_handlers_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void __attribute__((visibility("hidden"))) eventlog_socket_control_start(void) {
+void HIDDEN eventlog_socket_control_start(void) {
   pthread_mutex_lock(&g_control_ready_mutex);
   if (!g_control_ready) {
     g_control_ready = true;
@@ -331,7 +330,7 @@ static void *control_receiver(void *arg) {
   return NULL;
 }
 
-void __attribute__((visibility("hidden")))
+void HIDDEN
 eventlog_socket_control_create(const volatile int *const control_fd_ptr,
                                pthread_mutex_t *control_fd_mutex_ptr) {
   g_control_fd_ptr = control_fd_ptr;
