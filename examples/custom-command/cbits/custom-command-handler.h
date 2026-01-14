@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#define CUSTOM_COMMAND_NAMESPACE 0x01
-#define CUSTOM_COMMAND_ID_PING 0x01
+#define CUSTOM_NAMESPACE "custom-command"
+#define CUSTOM_COMMAND_ID_PING 0
 
 void custom_command_register(void);
 
