@@ -23,11 +23,85 @@
 #define CONTROL_MAGIC "GCTL"
 #define CONTROL_MAGIC_LEN 4
 
-#define CONTROL_BUILTIN_NAMESPACE_ID 0
-#define CONTROL_NAMESPACE_ID_BUILTIN 0
-#define CONTROL_COMMAND_ID_START_HEAP_PROFILING 0
-#define CONTROL_COMMAND_ID_STOP_HEAP_PROFILING 1
-#define CONTROL_COMMAND_ID_REQUEST_HEAP_PROFILE 2
+#define BUILTIN_NAMESPACE "builtin"
+#define BUILTIN_NAMESPACE_ID 0
+
+#define BUILTIN_COMMAND_ID_START_HEAP_PROFILING 0
+#define BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING 1
+#define BUILTIN_COMMAND_ID_REQUEST_HEAP_PROFILE 2
+
+/* namespace registry */
+
+typedef struct eventlog_socket_control_namespace_entry
+    eventlog_socket_control_namespace_entry_t;
+
+struct eventlog_socket_control_namespace_entry {
+  const char *namespace;
+  const size_t namespace_len;
+  const eventlog_socket_control_namespace_id_t namespace_id;
+  eventlog_socket_control_namespace_entry_t *next;
+};
+
+eventlog_socket_control_namespace_entry_t
+    g_eventlog_socket_control_namespace_list = {
+        .namespace = BUILTIN_NAMESPACE,
+        .namespace_len = strlen(BUILTIN_NAMESPACE),
+        .next = NULL,
+};
+
+bool eventlog_socket_control_register_namespace(
+    const size_t namespace_len, const char namespace[namespace_len + 1],
+    eventlog_socket_control_namespace_id_t *namespace_id_out) {
+
+  // Initialise the namespace_entry pointer.
+  eventlog_socket_control_namespace_entry_t *namespace_entry =
+      &g_eventlog_socket_control_namespace_list;
+
+  // Let's start counting namespace ids.
+  eventlog_socket_control_namespace_id_t namespace_id = 0;
+
+  // Is the requested namespace already registered?
+  do {
+    // Does the requested namespace match the current namespace_entry?
+    if (namespace_entry->namespace_len == namespace_len) {
+      const int cmp =
+          strncmp(namespace_entry->namespace, namespace, namespace_len);
+      if (cmp == 0) {
+        // Return the associated namespace_id.
+        return namespace_id;
+      }
+    }
+    // Continue with the next namespace_entry.
+    if (namespace_entry->next != NULL) {
+      namespace_entry = namespace_entry->next;
+      ++namespace_id;
+    } else {
+      break;
+    }
+  } while (true);
+
+  // Register the requested namespace.
+  assert(namespace_entry != NULL);
+  assert(namespace_entry->next == NULL);
+  char *namespace_cpy = malloc(namespace_len);
+  strncpy(namespace_cpy, namespace, namespace_len);
+  namespace_entry->next = &(eventlog_socket_control_namespace_entry_t){
+      .namespace = namespace_cpy,
+      .namespace_len = namespace_len,
+      .next = NULL,
+  };
+  ++namespace_id;
+  DEBUG_TRACE("Registered namespace '%s' under ID %d", namespace_cpy,
+              namespace_id);
+
+  // Write out the new namespace_id.
+  *namespace_id_out = namespace_id;
+
+  // Return success.
+  return true;
+}
+
+/* command registry */
 
 typedef enum eventlog_control_status {
   CONTROL_RECV_OK,
@@ -114,18 +188,18 @@ control_request_heap_profile(eventlog_socket_control_command_t command,
 // Registry of control command handlers
 static eventlog_control_handler_item_t *g_control_handlers =
     &(eventlog_control_handler_item_t){
-        .namespace_id = CONTROL_BUILTIN_NAMESPACE_ID,
-        .command_id = CONTROL_COMMAND_ID_START_HEAP_PROFILING,
+        .namespace_id = BUILTIN_NAMESPACE_ID,
+        .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
         .handler = control_start_heap_profiling,
         .user_data = NULL,
         .next = &(eventlog_control_handler_item_t){
-            .namespace_id = CONTROL_BUILTIN_NAMESPACE_ID,
-            .command_id = CONTROL_COMMAND_ID_STOP_HEAP_PROFILING,
+            .namespace_id = BUILTIN_NAMESPACE_ID,
+            .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
             .handler = control_stop_heap_profiling,
             .user_data = NULL,
             .next = &(eventlog_control_handler_item_t){
-                .namespace_id = CONTROL_BUILTIN_NAMESPACE_ID,
-                .command_id = CONTROL_COMMAND_ID_REQUEST_HEAP_PROFILE,
+                .namespace_id = BUILTIN_NAMESPACE_ID,
+                .command_id = BUILTIN_COMMAND_ID_REQUEST_HEAP_PROFILE,
                 .handler = control_request_heap_profile,
                 .user_data = NULL,
                 .next = NULL,
