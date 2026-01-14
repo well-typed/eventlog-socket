@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <Rts.h>
 #include <eventlog_socket.h>
@@ -21,7 +22,7 @@ static void emit_custom_user_msg(void) {
 static void demo_command_handler(eventlog_socket_control_command_t command,
                                  void *user_data) {
   const char *label = (const char *)user_data;
-  fprintf(stderr, "[custom-command] received namespace=0x%08x id=0x%02x (%s)\n",
+  fprintf(stderr, "[custom-command] received namespace=0x%02x id=0x%02x (%s)\n",
           command.command_id, command.namespace_id,
           label != NULL ? label : "no label");
   emit_custom_user_msg();
@@ -29,14 +30,29 @@ static void demo_command_handler(eventlog_socket_control_command_t command,
 
 void custom_command_register(void) {
   static const char *label = "demo ping";
-  eventlog_socket_control_command_t ping_command = {
-      .namespace_id = CUSTOM_COMMAND_NAMESPACE,
-      .command_id = CUSTOM_COMMAND_ID_PING};
+  // Register the namespace.
+  eventlog_socket_control_namespace_id_t *namespace_out =
+      malloc(sizeof(eventlog_socket_control_namespace_id_t));
+
+  // Register the custom namespace.
+  const bool namespace_ok = eventlog_socket_control_register_namespace(
+      strlen(CUSTOM_NAMESPACE), CUSTOM_NAMESPACE, namespace_out);
+  if (!namespace_ok) {
+    fprintf(stderr, "[custom-command] failed to register namespace=%s\n",
+            CUSTOM_NAMESPACE);
+    return;
+  }
+
+  // Register the ping command.
+  const eventlog_socket_control_command_t ping_command = {
+      .namespace_id = *namespace_out, .command_id = CUSTOM_COMMAND_ID_PING};
   bool ok = eventlog_socket_control_register_command(
       ping_command, demo_command_handler, (void *)label);
   if (!ok) {
     fprintf(stderr,
-            "[custom-command] failed to register namespace=0x%08x id=0x%02x\n",
-            CUSTOM_COMMAND_NAMESPACE, CUSTOM_COMMAND_ID_PING);
+            "[custom-command] failed to register custom command "
+            "namespace=0x%02x id=0x%02x\n",
+            ping_command.namespace_id, ping_command.command_id);
+    return;
   }
 }
