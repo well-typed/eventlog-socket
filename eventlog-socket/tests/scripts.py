@@ -4,8 +4,8 @@ import time
 
 CONTROL_MAGIC = b"GCTL"
 CONTROL_NAMESPACE_CORE = 0
-CUSTOM_COMMAND_NAMESPACE = 0x01
-CUSTOM_COMMAND_ID = 0x01
+CUSTOM_COMMAND_NAMESPACE = 1
+CUSTOM_COMMAND_ID = 0
 
 class ControlContext:
     """Simple wrapper providing helper methods to send control commands."""
