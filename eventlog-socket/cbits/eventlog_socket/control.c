@@ -30,7 +30,9 @@
 #define BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING 1
 #define BUILTIN_COMMAND_ID_REQUEST_HEAP_PROFILE 2
 
-/* namespace registry */
+/******************************************************************************
+ * namespace registry
+ ******************************************************************************/
 
 typedef struct eventlog_socket_control_namespace_entry
     eventlog_socket_control_namespace_entry_t;
@@ -101,57 +103,27 @@ bool eventlog_socket_control_register_namespace(
   return true;
 }
 
-/* command registry */
+/******************************************************************************
+ * command registry
+ ******************************************************************************/
 
-typedef enum eventlog_control_status {
-  CONTROL_RECV_OK,
-  CONTROL_RECV_PROTOCOL_ERROR,
-  CONTROL_RECV_DISCONNECTED,
-} eventlog_control_status_t;
+// todo: store commands in a nested linked list, where the outer linked list
+//       is indexed by namespace ids and the inner linked list is indexed by
+//       command ids. (perhaps both could be arrays, because namespaces and
+//       commands are added only infrequently.)
+// todo: don't store the explicit namespace and command ids with each command,
+//       but rather have those be an index into a data structure.
 
-typedef struct eventlog_control_handler_item eventlog_control_handler_item_t;
+typedef struct eventlog_socket_control_command_item
+    eventlog_socket_control_command_item_t;
 
-struct eventlog_control_handler_item {
+struct eventlog_socket_control_command_item {
   eventlog_socket_control_namespace_id_t namespace_id;
   eventlog_socket_control_command_id_t command_id;
   eventlog_socket_control_command_handler_t *handler;
   void *user_data;
-  eventlog_control_handler_item_t *next;
+  eventlog_socket_control_command_item_t *next;
 };
-
-// Whether we have started the control thread
-static volatile bool g_control_ready = false;
-
-// Whether the controller thread is ready to start
-static bool g_control_ready_armed = false;
-
-static pthread_mutex_t g_control_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void HIDDEN eventlog_socket_control_arm(void) {
-  pthread_mutex_lock(&g_control_ready_mutex);
-  g_control_ready = false;
-  g_control_ready_armed = true;
-  pthread_mutex_unlock(&g_control_ready_mutex);
-}
-
-bool HIDDEN eventlog_socket_control_is_armed(void) {
-  bool armed = false;
-  pthread_mutex_lock(&g_control_ready_mutex);
-  if (g_control_ready_armed) {
-    g_control_ready_armed = false;
-    armed = true;
-  }
-  pthread_mutex_unlock(&g_control_ready_mutex);
-  return armed;
-}
-
-// static int (*g_read_control_fd_fn)(void) = NULL;
-static const volatile int *g_control_fd_ptr = NULL;
-
-static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
-
-// Signal to the control thread to start.
-static pthread_cond_t g_control_ready_cond = PTHREAD_COND_INITIALIZER;
 
 // Builtin control command handlers
 
@@ -186,18 +158,18 @@ control_request_heap_profile(eventlog_socket_control_command_t command,
 }
 
 // Registry of control command handlers
-static eventlog_control_handler_item_t *g_control_handlers =
-    &(eventlog_control_handler_item_t){
+static eventlog_socket_control_command_item_t *g_control_handlers =
+    &(eventlog_socket_control_command_item_t){
         .namespace_id = BUILTIN_NAMESPACE_ID,
         .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
         .handler = control_start_heap_profiling,
         .user_data = NULL,
-        .next = &(eventlog_control_handler_item_t){
+        .next = &(eventlog_socket_control_command_item_t){
             .namespace_id = BUILTIN_NAMESPACE_ID,
             .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
             .handler = control_stop_heap_profiling,
             .user_data = NULL,
-            .next = &(eventlog_control_handler_item_t){
+            .next = &(eventlog_socket_control_command_item_t){
                 .namespace_id = BUILTIN_NAMESPACE_ID,
                 .command_id = BUILTIN_COMMAND_ID_REQUEST_HEAP_PROFILE,
                 .handler = control_request_heap_profile,
@@ -206,6 +178,90 @@ static eventlog_control_handler_item_t *g_control_handlers =
             }}};
 
 static pthread_mutex_t g_control_handlers_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+bool eventlog_socket_control_register_command(
+    eventlog_socket_control_command_t command,
+    eventlog_socket_control_command_handler_t handler, void *user_data) {
+  if (handler == NULL) {
+    return false;
+  }
+
+  bool success = false;
+  pthread_mutex_lock(&g_control_handlers_mutex);
+  eventlog_socket_control_command_item_t *entry = g_control_handlers;
+  while (entry != NULL) {
+    if (entry->namespace_id == command.namespace_id &&
+        entry->command_id == command.command_id) {
+      DEBUG_ERROR(
+          "warning: duplicate registration for namespace 0x%08x command "
+          "0x%02x; keeping existing handler\n",
+          command.namespace_id, command.command_id);
+      goto out;
+    }
+    entry = entry->next;
+  }
+
+  entry = malloc(sizeof(eventlog_socket_control_command_item_t));
+  if (entry == NULL) {
+    DEBUG_ERROR("control: failed to allocate handler entry");
+    goto out;
+  }
+  entry->namespace_id = command.namespace_id;
+  entry->command_id = command.command_id;
+  entry->handler = handler;
+  entry->user_data = user_data;
+  entry->next = g_control_handlers;
+  g_control_handlers = entry;
+  success = true;
+
+out:
+  pthread_mutex_unlock(&g_control_handlers_mutex);
+  return success;
+}
+
+/******************************************************************************
+ * control thread
+ ******************************************************************************/
+
+typedef enum eventlog_socket_control_status {
+  CONTROL_RECV_OK,
+  CONTROL_RECV_PROTOCOL_ERROR,
+  CONTROL_RECV_DISCONNECTED,
+} eventlog_socket_control_status_t;
+
+// Whether we have started the control thread
+static volatile bool g_control_ready = false;
+
+// Whether the controller thread is ready to start
+static bool g_control_ready_armed = false;
+
+static pthread_mutex_t g_control_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void HIDDEN eventlog_socket_control_arm(void) {
+  pthread_mutex_lock(&g_control_ready_mutex);
+  g_control_ready = false;
+  g_control_ready_armed = true;
+  pthread_mutex_unlock(&g_control_ready_mutex);
+}
+
+bool HIDDEN eventlog_socket_control_is_armed(void) {
+  bool armed = false;
+  pthread_mutex_lock(&g_control_ready_mutex);
+  if (g_control_ready_armed) {
+    g_control_ready_armed = false;
+    armed = true;
+  }
+  pthread_mutex_unlock(&g_control_ready_mutex);
+  return armed;
+}
+
+// static int (*g_read_control_fd_fn)(void) = NULL;
+static const volatile int *g_control_fd_ptr = NULL;
+
+static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
+
+// Signal to the control thread to start.
+static pthread_cond_t g_control_ready_cond = PTHREAD_COND_INITIALIZER;
 
 void HIDDEN eventlog_socket_control_start(void) {
   pthread_mutex_lock(&g_control_ready_mutex);
@@ -242,8 +298,8 @@ static bool control_wait_for_data(int fd) {
   return true;
 }
 
-static eventlog_control_status_t control_read_exact(int fd, uint8_t *buf,
-                                                    size_t len) {
+static eventlog_socket_control_status_t control_read_exact(int fd, uint8_t *buf,
+                                                           size_t len) {
   size_t have = 0;
   while (have < len) {
     ssize_t got = recv(fd, buf + have, len - have, 0);
@@ -269,51 +325,11 @@ static eventlog_control_status_t control_read_exact(int fd, uint8_t *buf,
   return CONTROL_RECV_OK;
 }
 
-bool eventlog_socket_control_register_command(
-    eventlog_socket_control_command_t command,
-    eventlog_socket_control_command_handler_t handler, void *user_data) {
-  if (handler == NULL) {
-    return false;
-  }
-
-  bool success = false;
-  pthread_mutex_lock(&g_control_handlers_mutex);
-  eventlog_control_handler_item_t *entry = g_control_handlers;
-  while (entry != NULL) {
-    if (entry->namespace_id == command.namespace_id &&
-        entry->command_id == command.command_id) {
-      DEBUG_ERROR(
-          "warning: duplicate registration for namespace 0x%08x command "
-          "0x%02x; keeping existing handler\n",
-          command.namespace_id, command.command_id);
-      goto out;
-    }
-    entry = entry->next;
-  }
-
-  entry = malloc(sizeof(eventlog_control_handler_item_t));
-  if (entry == NULL) {
-    DEBUG_ERROR("control: failed to allocate handler entry");
-    goto out;
-  }
-  entry->namespace_id = command.namespace_id;
-  entry->command_id = command.command_id;
-  entry->handler = handler;
-  entry->user_data = user_data;
-  entry->next = g_control_handlers;
-  g_control_handlers = entry;
-  success = true;
-
-out:
-  pthread_mutex_unlock(&g_control_handlers_mutex);
-  return success;
-}
-
-static eventlog_control_status_t
+static eventlog_socket_control_status_t
 control_receive_command(int fd,
                         eventlog_socket_control_command_t *command_out) {
   uint8_t header[CONTROL_MAGIC_LEN];
-  eventlog_control_status_t status =
+  eventlog_socket_control_status_t status =
       control_read_exact(fd, header, CONTROL_MAGIC_LEN);
   if (status != CONTROL_RECV_OK) {
     return status;
@@ -346,7 +362,7 @@ static void handle_control_command(eventlog_socket_control_command_t command) {
   void *user_data = NULL;
 
   pthread_mutex_lock(&g_control_handlers_mutex);
-  eventlog_control_handler_item_t *entry = g_control_handlers;
+  eventlog_socket_control_command_item_t *entry = g_control_handlers;
   while (entry != NULL) {
     if (entry->namespace_id == command.namespace_id &&
         entry->command_id == command.command_id) {
@@ -388,7 +404,7 @@ static void *control_receiver(void *arg) {
     }
 
     eventlog_socket_control_command_t command = {0};
-    eventlog_control_status_t status =
+    eventlog_socket_control_status_t status =
         control_receive_command(control_fd, &command);
     if (status == CONTROL_RECV_DISCONNECTED) {
       break;
