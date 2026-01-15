@@ -2,6 +2,7 @@
 
 module GHC.Eventlog.Socket.Control (
     Namespace,
+    userNamespace,
     CommandId (..),
     Command (StartHeapProfiling, StopHeapProfiling, RequestHeapProfile),
     userCommand,
@@ -25,6 +26,13 @@ newtype Namespace = Namespace {unNamespace :: Word8}
 
 pattern BuiltinNamespace :: Namespace
 pattern BuiltinNamespace = Namespace 0
+
+userNamespace :: Word8 -> Namespace
+userNamespace namespaceId
+    | namespace == BuiltinNamespace = throw CannotUseBuiltinNamespace
+    | otherwise = namespace
+  where
+    namespace = Namespace namespaceId
 
 data CannotUseBuiltinNamespace = CannotUseBuiltinNamespace
     deriving (Show)
