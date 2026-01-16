@@ -49,6 +49,10 @@ module Test.Common (
     hasMatchingUserMarkerWithinSec,
     hasMatchingUserMarkerWithin,
     hasMatchingUserMarker,
+    isMatchingUserMessage,
+    hasMatchingUserMessageWithinSec,
+    hasMatchingUserMessageWithin,
+    hasMatchingUserMessage,
     failing,
     debugging,
     sendCommand,
@@ -716,6 +720,40 @@ hasMatchingUserMarker p =
   where
     onSuccess = printf "Found matching UserMarker after %d events."
     onFailure = printf "Did not find matching UserMarker after %d events."
+
+{- |
+Test if an `Event` is a `UserMessage` whose message satisfies the given predicate.
+-}
+isMatchingUserMessage :: (Text -> Bool) -> Event -> Bool
+isMatchingUserMessage p ev
+    | E.UserMessage{msg} <- E.evSpec ev = p msg
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a matching `UserMessage` event within the given timeout.
+-}
+hasMatchingUserMessageWithinSec :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Double -> ProcessT IO Event Event
+hasMatchingUserMessageWithinSec p timeoutSec =
+    anyFor timeoutSec (isMatchingUserMessage p) onSuccess onFailure
+  where
+    onSuccess = printf "Found matching UserMessage within %0.2f seconds." timeoutSec
+    onFailure = printf "Did not find matching UserMessage within %0.2f seconds." timeoutSec
+
+{- |
+Assert that the input stream contains a matching `UserMessage` event within the given number of events.
+-}
+hasMatchingUserMessageWithin :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Int -> ProcessT IO Event Event
+hasMatchingUserMessageWithin p count = taking count ~> hasMatchingUserMessage p
+
+{- |
+Assert that the input stream contains a matching `UserMessage` event.
+-}
+hasMatchingUserMessage :: (HasLogger, HasTestInfo) => (Text -> Bool) -> ProcessT IO Event Event
+hasMatchingUserMessage p =
+    anyOf (isMatchingUserMessage p) onSuccess onFailure
+  where
+    onSuccess = printf "Found matching UserMessage after %d events."
+    onFailure = printf "Did not find matching UserMessage after %d events."
 
 {- |
 Send the given `Command` over the `Handle`.

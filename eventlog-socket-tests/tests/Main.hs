@@ -6,7 +6,7 @@ import Data.Functor ((<&>))
 import Data.Machine ((~>))
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Text as T
-import GHC.Eventlog.Socket.Control (Command (..))
+import GHC.Eventlog.Socket.Control (Command (..), CommandId (..), userCommand, userNamespace)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withTempDirectory)
@@ -44,6 +44,7 @@ main = do
         , test_oddball_AfterJunk
         , test_oddball_AlignedJunk
         , test_oddball_MisalignedJunk
+        , test_customCommand
         ]
 
 {- |
@@ -221,3 +222,17 @@ test_oddball_MisalignedJunk =
                     &> sendCommandWithJunk handle "FLORP" RequestHeapProfile "BLERP"
                     !> hasNoHeapProfSampleString
                     ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+
+{- |
+Test that custom commands are respected.
+-}
+test_customCommand :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_customCommand =
+    testCaseFor "test_customCommand" $ \eventlogSocket -> do
+        let customCommand = Program "custom-command" ["--forever"] ["-l-au", "--eventlog-flush-interval=1"] eventlogSocket
+        withProgram customCommand $
+            assertEventlogWith' eventlogSocket $ \handle ->
+                hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`)
+                    &> sendCommand handle (userCommand (userNamespace 1) (CommandId 0))
+                    !> hasMatchingUserMessage ("custom command handled" ==)
+                    &> (2 `times` hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`))
