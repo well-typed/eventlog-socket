@@ -30,7 +30,7 @@ bool eventlog_socket_control_register_command(
 
 void eventlog_socket_init_unix(const char *sock_path);
 void eventlog_socket_init_tcp(const char *host, const char *port);
-void eventlog_socket_ready(void);
+void eventlog_socket_signal_rts_ready(void);
 
 void eventlog_socket_wait(void);
 
