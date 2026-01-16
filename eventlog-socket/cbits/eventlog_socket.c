@@ -626,6 +626,36 @@ void eventlog_socket_signal_rts_ready(void) {
   eventlog_socket_control_signal_rts_ready();
 }
 
+// Unix domain socket paths are limited to 108 bytes.
+// This is 107 characters and one null byte.
+#define UNIX_DOMAIN_SOCKET_PATH_MAX_LEN 108
+
+int eventlog_socket_init_from_env(void) {
+  const char *ghc_eventlog_unix_socket = getenv("GHC_EVENTLOG_UNIX_SOCKET");
+  if (ghc_eventlog_unix_socket != NULL) {
+    const size_t ghc_eventlog_unix_socket_len =
+        strnlen(ghc_eventlog_unix_socket, UNIX_DOMAIN_SOCKET_PATH_MAX_LEN + 1);
+    if (ghc_eventlog_unix_socket_len >= UNIX_DOMAIN_SOCKET_PATH_MAX_LEN) {
+      return -1;
+    } else {
+      eventlog_socket_init_unix(ghc_eventlog_unix_socket);
+    }
+  } else {
+    const char *ghc_eventlog_tcp_host = getenv("GHC_EVENTLOG_TCP_HOST");
+    const char *ghc_eventlog_tcp_port = getenv("GHC_EVENTLOG_TCP_PORT");
+    if (ghc_eventlog_tcp_host != NULL && ghc_eventlog_tcp_port != NULL) {
+      eventlog_socket_init_tcp(ghc_eventlog_tcp_host, ghc_eventlog_tcp_port);
+    } else {
+      return 0;
+    }
+  }
+  const char *ghc_eventlog_wait = getenv("GHC_EVENTLOG_WAIT");
+  if (ghc_eventlog_wait != NULL) {
+    eventlog_socket_wait();
+  }
+  return 1;
+}
+
 void eventlog_socket_init_unix(const char *sock_path) {
   struct listener_config config = {
       .kind = LISTENER_UNIX,
