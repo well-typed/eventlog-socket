@@ -428,8 +428,8 @@ static void *control_receiver(void *arg) {
 }
 
 void HIDDEN
-eventlog_socket_control_create(const volatile int *const control_fd_ptr,
-                               pthread_mutex_t *control_fd_mutex_ptr) {
+eventlog_socket_control_start(const volatile int *const control_fd_ptr,
+                              pthread_mutex_t *control_fd_mutex_ptr) {
   g_control_fd_ptr = control_fd_ptr;
   g_control_fd_mutex_ptr = control_fd_mutex_ptr;
   pthread_t tid;

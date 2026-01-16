@@ -6,7 +6,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-void HIDDEN eventlog_socket_control_create(
+void HIDDEN eventlog_socket_control_start(
     const volatile int *control_fd_ptr, pthread_mutex_t *control_fd_mutex_ptr);
 
 void HIDDEN eventlog_socket_control_signal_rts_ready(void);
