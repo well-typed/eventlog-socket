@@ -20,8 +20,35 @@
 #include "./poll.h"
 #include "eventlog_socket.h"
 
-#define CONTROL_MAGIC "GCTL"
+// CONTROL_MAGIC should be the UTF-8 encoding of some code point between
+// U+010000 and U+10FFFF. Let's pick code point U+01E5CC, for Eventlog
+// 5oscket Control Command. That's:
+//
+// Unicode
+//
+//   0    1    E    5    C    C
+//   u    vvvv wwww xxxx yyyy zzzz
+//   0    0001 1110 0101 1100 1100
+//
+// UTF-8
+//
+//   1111 0uvv 10vv wwww 10xx xxyy 10yy zzzz
+//   1111 0000 1001 1110 1001 0111 1000 1100
+//   F    0    9    E    9    7    8    C
+//
+// To validate this, you can use the following Python expression:
+//
+// chr(0x01E5CC).encode("utf-8")
+// => b'\xf0\x9e\x97\x8c'
+//
+
 #define CONTROL_MAGIC_LEN 4
+static const uint8_t control_magic[CONTROL_MAGIC_LEN] = {
+    [0] = 0xF0,
+    [1] = 0x9E,
+    [2] = 0x97,
+    [3] = 0x8C,
+};
 
 #define BUILTIN_NAMESPACE "eventlog-socket"
 #define BUILTIN_NAMESPACE_ID 0
@@ -317,7 +344,7 @@ control_receive_command(int fd,
   if (status != CONTROL_RECV_OK) {
     return status;
   }
-  if (memcmp(header, CONTROL_MAGIC, CONTROL_MAGIC_LEN) != 0) {
+  if (memcmp(header, control_magic, CONTROL_MAGIC_LEN) != 0) {
     DEBUG_TRACE("invalid control magic: %02x %02x %02x %02x", header[0],
                 header[1], header[2], header[3]);
     return CONTROL_RECV_PROTOCOL_ERROR;
