@@ -66,7 +66,7 @@ __Note:__ This test does not support TCP sockets.
 -}
 test_fibberCMain :: (HasLogger) => EventlogSocket -> Maybe TestTree
 test_fibberCMain =
-    testCaseForUnix "test_fibberCMain" $ \eventlogSocket -> do
+    testCaseFor "test_fibberCMain" $ \eventlogSocket -> do
         let fibber = Program "fibber-c-main" ["35"] ["-l-au"] eventlogSocket
         withProgram fibber $
             assertEventlogWith eventlogSocket $
