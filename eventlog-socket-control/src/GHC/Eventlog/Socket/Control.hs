@@ -11,7 +11,7 @@ module GHC.Eventlog.Socket.Control (
 import Control.Exception (Exception (displayException), throw)
 import Control.Monad (unless, when)
 import Data.Binary (Binary (..), Get, Put, getWord8, putWord8)
-import Data.Foldable (traverse_)
+import Data.Foldable (for_, traverse_)
 import Data.Word (Word8)
 import Text.Printf (printf)
 import Prelude hiding (getChar)
@@ -65,13 +65,13 @@ pattern RequestHeapProfile = Command BuiltinNamespace (CommandId 2)
 instance Binary Command where
     put :: Command -> Put
     put (Command namespace commandId) = do
-        putList "GCTL"
+        putControlMagic
         putNamespace namespace
         putCommandId commandId
 
     get :: Get Command
     get = do
-        getString "GCTL"
+        getControlMagic
         namespace <- getNamespace
         commandId <- getCommandId
         when (namespace == BuiltinNamespace) $
@@ -84,6 +84,19 @@ instance Binary Command where
 -- Internal helpers.
 --------------------------------------------------------------------------------
 
+controlMagic :: [Word8]
+controlMagic = [0xF0, 0x9E, 0x97, 0x8C]
+
+putControlMagic :: Put
+putControlMagic = traverse_ putWord8 controlMagic
+
+getControlMagic :: Get ()
+getControlMagic =
+    for_ controlMagic $ \expect ->
+        getWord8 >>= \actual ->
+            unless (expect == actual) . fail $
+                printf "Unexpected %02x, expected %02x" actual expect
+
 putNamespace :: Namespace -> Put
 putNamespace = putWord8 . unNamespace
 
@@ -95,12 +108,3 @@ putCommandId = putWord8 . unCommandId
 
 getCommandId :: Get CommandId
 getCommandId = CommandId <$> getWord8
-
-getString :: String -> Get ()
-getString = traverse_ getChar
-
-getChar :: Char -> Get ()
-getChar c =
-    get >>= \c' ->
-        unless (c == c') . fail $
-            printf "Unexpected %02x, expected %02x" c' c
