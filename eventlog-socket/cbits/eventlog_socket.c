@@ -313,8 +313,8 @@ static void listen_iteration(void) {
   g_client_fd = fd;
   pthread_cond_broadcast(&g_new_conn_cond);
   pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
-  eventlog_socket_control_create(&g_client_fd,
-                                 &g_write_buffer_and_client_fd_mutex);
+  eventlog_socket_control_start(&g_client_fd,
+                                &g_write_buffer_and_client_fd_mutex);
 
   if (start_eventlog) {
     // start writing
