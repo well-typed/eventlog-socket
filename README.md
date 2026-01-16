@@ -81,8 +81,10 @@ listening, or call `eventlog_socket_hs_main` which wraps those steps for you.
 Control messages use a minimal framing:
 
 ```
-magic: 0x47 0x43 0x54 0x4C  ("GCTL")
-command id: single byte
+magic:         0xF0 0x9E 0x97 0x8C (the UTF-8 encoding of `U+01E5CC`)
+namespace_len: 1 byte
+namespace:     namespace_len bytes
+command id:    1 byte
 ```
 
 Unknown commands are ignored for safety, while malformed frames leave the data
@@ -91,16 +93,16 @@ commands mirror the RTS heap profiling API:
 
 | Command                          | Byte |
 | -------------------------------- | ---- |
-| `startHeapProfiling`             | 0x01 |
-| `stopHeapProfiling`              | 0x02 |
-| `requestHeapProfile` (one-shot)  | 0x03 |
+| `startHeapProfiling`             | 0x00 |
+| `stopHeapProfiling`              | 0x01 |
+| `requestHeapProfile` (one-shot)  | 0x02 |
 
 For example, a simple Python client can request a sample like this:
 
 ```python
-sock.sendall(b"GCTL" + bytes([0x01]))  # startHeapProfiling
+sock.sendall(b"\xF0\x9E\x97\x8C" + bytes([0x00]))  # startHeapProfiling
 ...
-sock.sendall(b"GCTL" + bytes([0x03]))  # requestHeapProfile
+sock.sendall(b"\xF0\x9E\x97\x8C" + bytes([0x02]))  # requestHeapProfile
 ```
 
 Garbage control traffic is ignored, so you can send commands opportunistically
