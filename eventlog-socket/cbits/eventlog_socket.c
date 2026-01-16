@@ -619,7 +619,6 @@ static void eventlog_socket_init(const struct listener_config *config) {
     return;
   }
 
-  eventlog_socket_control_signal_rts_ready();
   open_socket(config);
 }
 
