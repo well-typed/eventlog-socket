@@ -10,7 +10,7 @@ executable custom-command
     main-is:          Main.hs
     hs-source-dirs:   app
     c-sources:
-        cbits/custom-command-main.c
+        cbits/custom-command-c-main.c
         cbits/custom-command-handler.c
     include-dirs:     cbits
     includes:         custom-command-handler.h
