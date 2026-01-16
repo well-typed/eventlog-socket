@@ -1,3 +1,4 @@
+/// @file eventlog_socket.h
 #ifndef EVENGLOG_SOCKET_H
 #define EVENGLOG_SOCKET_H
 

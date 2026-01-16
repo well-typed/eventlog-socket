@@ -8,6 +8,9 @@ cabal.project.local
 # Haskell test suite
 /eventlog-socket-tests.log
 
+# Doxygen
+/docs/html
+
 # C
 /.clangd
 
