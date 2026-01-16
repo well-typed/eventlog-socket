@@ -121,8 +121,9 @@ static void wake_worker(void) {
 }
 
 // concurrency variables
-static pthread_t g_listen_thread;
+static pthread_t g_listen_thread = {0};
 static pthread_cond_t g_new_conn_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t g_control_thread = {0};
 // Global mutex guarding all shared state between RTS threads, the worker
 // thread, and the detached control receiver. Only client_fd and wt need
 // protection, but using a single mutex ensures we keep their updates
@@ -313,8 +314,6 @@ static void listen_iteration(void) {
   g_client_fd = fd;
   pthread_cond_broadcast(&g_new_conn_cond);
   pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
-  eventlog_socket_control_start(&g_client_fd,
-                                &g_write_buffer_and_client_fd_mutex);
 
   if (start_eventlog) {
     // start writing
@@ -566,7 +565,8 @@ static void init_tcp_listener(const char *host, const char *port) {
   }
 }
 
-static void open_socket(const struct listener_config *config) {
+static void worker_start(const struct listener_config *config) {
+  DEBUG_TRACE("Starting worker thread.");
   switch (config->kind) {
   case LISTENER_UNIX:
     init_unix_listener(config->sock_path);
@@ -619,7 +619,13 @@ static void eventlog_socket_init(const struct listener_config *config) {
     return;
   }
 
-  open_socket(config);
+  // start worker thread
+  worker_start(config);
+
+  // start control thread
+  eventlog_socket_control_start(&g_control_thread, &g_client_fd,
+                                &g_write_buffer_and_client_fd_mutex,
+                                &g_new_conn_cond);
 }
 
 void eventlog_socket_signal_rts_ready(void) {
@@ -764,7 +770,14 @@ static void eventlog_socket_start(const struct listener_config *config,
   // warning messages from showing up in stderr.
   startEventLogging(&SocketEventLogWriter);
 
-  open_socket(config);
+  // start worker thread
+  worker_start(config);
+
+  // start control thread
+  eventlog_socket_control_start(&g_control_thread, &g_client_fd,
+                                &g_write_buffer_and_client_fd_mutex,
+                                &g_new_conn_cond);
+
   // Presume that the RTS is already running and we're ready if you're directly
   // using this function.
   eventlog_socket_control_signal_rts_ready();

@@ -1,3 +1,4 @@
+/// @file control.c
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -261,6 +262,7 @@ static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_ghc_rts_ready_cond = PTHREAD_COND_INITIALIZER;
 
 void HIDDEN eventlog_socket_control_signal_rts_ready(void) {
+  DEBUG_TRACE("Sending signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
   if (!g_ghc_rts_ready) {
     g_ghc_rts_ready = true;
@@ -270,6 +272,7 @@ void HIDDEN eventlog_socket_control_signal_rts_ready(void) {
 }
 
 static void eventlog_socket_control_wait_rts_ready(void) {
+  DEBUG_TRACE("Waiting for signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
   while (!g_ghc_rts_ready) {
     pthread_cond_wait(&g_ghc_rts_ready_cond, &g_ghc_rts_ready_mutex);
@@ -277,10 +280,10 @@ static void eventlog_socket_control_wait_rts_ready(void) {
   pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
 }
 
-// static int (*g_read_control_fd_fn)(void) = NULL;
+static int g_control_fd = -1;
 static const volatile int *g_control_fd_ptr = NULL;
-
 static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
+static pthread_cond_t *g_new_conn_cond_ptr = NULL;
 
 static bool control_wait_for_data(int fd) {
   struct pollfd pfd = {
@@ -338,6 +341,7 @@ static eventlog_socket_control_status_t control_read_exact(int fd, uint8_t *buf,
 static eventlog_socket_control_status_t
 control_receive_command(int fd,
                         eventlog_socket_control_command_t *command_out) {
+  DEBUG_TRACE("Listen for command on fd %d", fd);
   uint8_t header[CONTROL_MAGIC_LEN];
   eventlog_socket_control_status_t status =
       control_read_exact(fd, header, CONTROL_MAGIC_LEN);
@@ -368,6 +372,8 @@ control_receive_command(int fd,
 }
 
 static void handle_control_command(eventlog_socket_control_command_t command) {
+  DEBUG_TRACE("Handle command in namespace %02x with id %02x",
+              command.namespace_id, command.command_id);
   eventlog_socket_control_command_handler_t *handler = NULL;
   void *user_data = NULL;
 
@@ -392,29 +398,103 @@ static void handle_control_command(eventlog_socket_control_command_t command) {
   }
 }
 
+static void control_reset(const int new_control_fd) {
+  DEBUG_TRACE("Resetting control server state.");
+  g_control_fd = new_control_fd;
+}
+
+/// @pre must have lock on @link g_control_fd_mutex_ptr
+static void control_wait(void) {
+  DEBUG_TRACE("Waiting to be notified of new connection.");
+  pthread_cond_wait(g_new_conn_cond_ptr, g_control_fd_mutex_ptr);
+}
+
 static void *control_receiver(void *arg) {
   (void)arg;
+
+  assert(g_control_fd_ptr != NULL);
+  assert(g_control_fd_mutex_ptr != NULL);
+  assert(g_new_conn_cond_ptr != NULL);
 
   // Wait for the GHC RTS to become ready.
   eventlog_socket_control_wait_rts_ready();
 
   while (true) {
-    // Grab consistent snapshot of client_fd; connection teardown may happen
-    // at any time so we must hold the mutex while comparing.
-    assert(g_control_fd_ptr != NULL);
-    assert(g_control_fd_mutex_ptr != NULL);
+    DEBUG_TRACE("Starting new control iteration.");
+
+    // Acquire the lock on the connection file description.
+    DEBUG_TRACE("Acquire lock on connection.");
     pthread_mutex_lock(g_control_fd_mutex_ptr);
-    const int control_fd = *g_control_fd_ptr;
-    pthread_mutex_unlock(g_control_fd_mutex_ptr);
-    if (control_fd == -1) {
-      break;
+
+    // Read current connection file description.
+    const int new_control_fd = *g_control_fd_ptr;
+    DEBUG_TRACE("Old connection fd: %d", g_control_fd);
+    DEBUG_TRACE("New connection fd: %d", new_control_fd);
+
+    // If there WAS NO connection and there IS NO connection, then...
+    if (g_control_fd == -1 && new_control_fd == -1) {
+      // ...wait to be notified of a new connection...
+      control_wait();
+      // ...release the lock...
+      pthread_mutex_unlock(g_control_fd_mutex_ptr);
+      // ...and re-enter the loop.
+      continue;
     }
 
+    // If there WAS NO connection and there IS A connection, then...
+    else if (g_control_fd == -1 && new_control_fd != -1) {
+      // ...DON'T wait to be notified of a new connection...
+      // ...we may we have already missed the signal...
+      // ...reset the control server state...
+      control_reset(new_control_fd);
+      // ...continue to try to handle a command.
+    }
+
+    // If there WAS A connection and there IS NO connection, then...
+    else if (g_control_fd != -1 && new_control_fd == -1) {
+      // ...reset the control server state...
+      control_reset(new_control_fd);
+      // ...wait to be notified of a new connection...
+      control_wait();
+      // ...release the lock...
+      pthread_mutex_unlock(g_control_fd_mutex_ptr);
+      // ...and re-enter the loop.
+      continue;
+    }
+
+    // If there WAS A connection and there IS A DIFFERENT connection, then...
+    else if (g_control_fd != -1 && new_control_fd != -1 &&
+             g_control_fd != new_control_fd) {
+      // ...DON'T wait to be notified of a new connection...
+      // ...we may we have already missed the signal...
+      // ...reset the control server state...
+      control_reset(new_control_fd);
+      // ...continue to try to handle a command.
+    }
+
+    // If there WAS A connection and there IS THE SAME connection, then...
+    else if (g_control_fd != -1 && new_control_fd != -1 &&
+             g_control_fd == new_control_fd) {
+      // ...continue to try to handle a command.
+    }
+
+    // These conditions should be covering, so throw an error otherwise.
+    else {
+      assert(false);
+    }
+
+    // Release the lock on the connection file description.
+    pthread_mutex_unlock(g_control_fd_mutex_ptr);
+
+    // Check that g_control_fd is up-to-date:
+    assert(g_control_fd == new_control_fd);
+
+    // Read a command:
     eventlog_socket_control_command_t command = {0};
     eventlog_socket_control_status_t status =
-        control_receive_command(control_fd, &command);
+        control_receive_command(g_control_fd, &command);
     if (status == CONTROL_RECV_DISCONNECTED) {
-      break;
+      continue;
     } else if (status == CONTROL_RECV_PROTOCOL_ERROR) {
       // Ignore protocol errors: they indicate garbage control traffic but
       // shouldn't drop the data writer. Keep listening for valid commands.
@@ -423,23 +503,26 @@ static void *control_receiver(void *arg) {
 
     handle_control_command(command);
   }
-
   return NULL;
 }
 
-void HIDDEN
-eventlog_socket_control_start(const volatile int *const control_fd_ptr,
-                              pthread_mutex_t *control_fd_mutex_ptr) {
+void HIDDEN eventlog_socket_control_start(
+    pthread_t *control_thread, const volatile int *const control_fd_ptr,
+    pthread_mutex_t *control_fd_mutex_ptr, pthread_cond_t *new_conn_cond_ptr) {
+  DEBUG_TRACE("Starting control thread.");
   g_control_fd_ptr = control_fd_ptr;
   g_control_fd_mutex_ptr = control_fd_mutex_ptr;
-  pthread_t tid;
-  int ret = pthread_create(&tid, NULL, control_receiver, NULL);
-  if (ret != 0) {
-    DEBUG_ERROR("failed to start control receiver: %s", strerror(ret));
+  g_new_conn_cond_ptr = new_conn_cond_ptr;
+  const int create_or_error =
+      pthread_create(control_thread, NULL, control_receiver, NULL);
+  if (create_or_error != 0) {
+    DEBUG_ERROR("failed to start control receiver: %s",
+                strerror(create_or_error));
     return;
   }
-  ret = pthread_detach(tid);
-  if (ret != 0) {
-    DEBUG_ERROR("failed to detach control receiver: %s", strerror(ret));
+  const int detach_or_error = pthread_detach(*control_thread);
+  if (detach_or_error != 0) {
+    DEBUG_ERROR("failed to detach control receiver: %s",
+                strerror(detach_or_error));
   }
 }

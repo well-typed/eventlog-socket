@@ -35,20 +35,20 @@
 #define DEBUG_TRACE(...)                                                       \
   do {                                                                         \
     DEBUG_PREFIX("TRACE", DEBUG_COLOR_BLUE);                                   \
-    printf(__VA_ARGS__);                                                       \
-    printf("\n");                                                              \
+    fprintf(stderr, __VA_ARGS__);                                              \
+    fprintf(stderr, "\n");                                                     \
   } while (0)
 #define DEBUG_WARN(...)                                                        \
   do {                                                                         \
     DEBUG_PREFIX("WARNING", DEBUG_COLOR_YELLOW);                               \
-    printf(__VA_ARGS__);                                                       \
-    printf("\n");                                                              \
+    fprintf(stderr, __VA_ARGS__);                                              \
+    fprintf(stderr, "\n");                                                     \
   } while (0)
 #define DEBUG_ERROR(...)                                                       \
   do {                                                                         \
     DEBUG_PREFIX("ERROR", DEBUG_COLOR_RED);                                    \
-    printf(__VA_ARGS__);                                                       \
-    printf("\n");                                                              \
+    fprintf(stderr, __VA_ARGS__);                                              \
+    fprintf(stderr, "\n");                                                     \
   } while (0)
 
 #else
