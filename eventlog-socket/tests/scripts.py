@@ -2,7 +2,7 @@
 from typing import Callable
 import time
 
-CONTROL_MAGIC = b"GCTL"
+CONTROL_MAGIC = bytes([0xF0,0x9E,0x97,0x8C])
 CONTROL_NAMESPACE_CORE = 0
 CUSTOM_COMMAND_NAMESPACE = 1
 CUSTOM_COMMAND_ID = 0
