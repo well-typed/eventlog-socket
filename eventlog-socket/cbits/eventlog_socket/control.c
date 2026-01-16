@@ -229,48 +229,31 @@ typedef enum eventlog_socket_control_status {
   CONTROL_RECV_DISCONNECTED,
 } eventlog_socket_control_status_t;
 
-// Whether we have started the control thread
-static volatile bool g_control_ready = false;
+static volatile bool g_ghc_rts_ready = false;
+static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_ghc_rts_ready_cond = PTHREAD_COND_INITIALIZER;
 
-// Whether the controller thread is ready to start
-static bool g_control_ready_armed = false;
-
-static pthread_mutex_t g_control_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void HIDDEN eventlog_socket_control_arm(void) {
-  pthread_mutex_lock(&g_control_ready_mutex);
-  g_control_ready = false;
-  g_control_ready_armed = true;
-  pthread_mutex_unlock(&g_control_ready_mutex);
+void HIDDEN eventlog_socket_control_signal_rts_ready(void) {
+  pthread_mutex_lock(&g_ghc_rts_ready_mutex);
+  if (!g_ghc_rts_ready) {
+    g_ghc_rts_ready = true;
+    pthread_cond_broadcast(&g_ghc_rts_ready_cond);
+  }
+  pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
 }
 
-bool HIDDEN eventlog_socket_control_is_armed(void) {
-  bool armed = false;
-  pthread_mutex_lock(&g_control_ready_mutex);
-  if (g_control_ready_armed) {
-    g_control_ready_armed = false;
-    armed = true;
+static void eventlog_socket_control_wait_rts_ready(void) {
+  pthread_mutex_lock(&g_ghc_rts_ready_mutex);
+  while (!g_ghc_rts_ready) {
+    pthread_cond_wait(&g_ghc_rts_ready_cond, &g_ghc_rts_ready_mutex);
   }
-  pthread_mutex_unlock(&g_control_ready_mutex);
-  return armed;
+  pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
 }
 
 // static int (*g_read_control_fd_fn)(void) = NULL;
 static const volatile int *g_control_fd_ptr = NULL;
 
 static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
-
-// Signal to the control thread to start.
-static pthread_cond_t g_control_ready_cond = PTHREAD_COND_INITIALIZER;
-
-void HIDDEN eventlog_socket_control_start(void) {
-  pthread_mutex_lock(&g_control_ready_mutex);
-  if (!g_control_ready) {
-    g_control_ready = true;
-    pthread_cond_broadcast(&g_control_ready_cond);
-  }
-  pthread_mutex_unlock(&g_control_ready_mutex);
-}
 
 static bool control_wait_for_data(int fd) {
   struct pollfd pfd = {
@@ -385,11 +368,8 @@ static void handle_control_command(eventlog_socket_control_command_t command) {
 static void *control_receiver(void *arg) {
   (void)arg;
 
-  pthread_mutex_lock(&g_control_ready_mutex);
-  while (!g_control_ready) {
-    pthread_cond_wait(&g_control_ready_cond, &g_control_ready_mutex);
-  }
-  pthread_mutex_unlock(&g_control_ready_mutex);
+  // Wait for the GHC RTS to become ready.
+  eventlog_socket_control_wait_rts_ready();
 
   while (true) {
     // Grab consistent snapshot of client_fd; connection teardown may happen

@@ -619,14 +619,12 @@ static void eventlog_socket_init(const struct listener_config *config) {
     return;
   }
 
-  eventlog_socket_control_arm();
+  eventlog_socket_control_signal_rts_ready();
   open_socket(config);
 }
 
-void eventlog_socket_ready(void) {
-  if (eventlog_socket_control_is_armed()) {
-    eventlog_socket_control_start();
-  }
+void eventlog_socket_signal_rts_ready(void) {
+  eventlog_socket_control_signal_rts_ready();
 }
 
 void eventlog_socket_init_unix(const char *sock_path) {
@@ -676,7 +674,7 @@ int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf,
 
   // Signal that the RTS is ready so the eventlog writer can accept control
   // connections.
-  eventlog_socket_ready();
+  eventlog_socket_signal_rts_ready();
 
   {
     Capability *cap = rts_lock();
@@ -740,7 +738,7 @@ static void eventlog_socket_start(const struct listener_config *config,
   open_socket(config);
   // Presume that the RTS is already running and we're ready if you're directly
   // using this function.
-  eventlog_socket_control_start();
+  eventlog_socket_control_signal_rts_ready();
   if (wait) {
     switch (config->kind) {
     case LISTENER_UNIX:
