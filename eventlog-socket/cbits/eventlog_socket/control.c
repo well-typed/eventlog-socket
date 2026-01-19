@@ -261,17 +261,7 @@ static volatile bool g_ghc_rts_ready = false;
 static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_ghc_rts_ready_cond = PTHREAD_COND_INITIALIZER;
 
-void HIDDEN eventlog_socket_control_signal_rts_ready(void) {
-  DEBUG_TRACE("Sending signal that GHC RTS is ready.");
-  pthread_mutex_lock(&g_ghc_rts_ready_mutex);
-  if (!g_ghc_rts_ready) {
-    g_ghc_rts_ready = true;
-    pthread_cond_broadcast(&g_ghc_rts_ready_cond);
-  }
-  pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
-}
-
-static void eventlog_socket_control_wait_rts_ready(void) {
+static void control_wait_ghc_rts_ready(void) {
   DEBUG_TRACE("Waiting for signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
   while (!g_ghc_rts_ready) {
@@ -339,8 +329,7 @@ static eventlog_socket_control_status_t control_read_exact(int fd, uint8_t *buf,
 }
 
 static eventlog_socket_control_status_t
-control_receive_command(int fd,
-                        eventlog_socket_control_command_t *command_out) {
+control_read_command(int fd, eventlog_socket_control_command_t *command_out) {
   DEBUG_TRACE("Listen for command on fd %d", fd);
   uint8_t header[CONTROL_MAGIC_LEN];
   eventlog_socket_control_status_t status =
@@ -371,7 +360,7 @@ control_receive_command(int fd,
   return CONTROL_RECV_OK;
 }
 
-static void handle_control_command(eventlog_socket_control_command_t command) {
+static void control_handle_command(eventlog_socket_control_command_t command) {
   DEBUG_TRACE("Handle command in namespace %02x with id %02x",
               command.namespace_id, command.command_id);
   eventlog_socket_control_command_handler_t *handler = NULL;
@@ -409,7 +398,7 @@ static void control_wait(void) {
   pthread_cond_wait(g_new_conn_cond_ptr, g_control_fd_mutex_ptr);
 }
 
-static void *control_receiver(void *arg) {
+static void *control_loop(void *arg) {
   (void)arg;
 
   assert(g_control_fd_ptr != NULL);
@@ -417,7 +406,7 @@ static void *control_receiver(void *arg) {
   assert(g_new_conn_cond_ptr != NULL);
 
   // Wait for the GHC RTS to become ready.
-  eventlog_socket_control_wait_rts_ready();
+  control_wait_ghc_rts_ready();
 
   while (true) {
     DEBUG_TRACE("Starting new control iteration.");
@@ -492,7 +481,7 @@ static void *control_receiver(void *arg) {
     // Read a command:
     eventlog_socket_control_command_t command = {0};
     eventlog_socket_control_status_t status =
-        control_receive_command(g_control_fd, &command);
+        control_read_command(g_control_fd, &command);
     if (status == CONTROL_RECV_DISCONNECTED) {
       continue;
     } else if (status == CONTROL_RECV_PROTOCOL_ERROR) {
@@ -501,9 +490,23 @@ static void *control_receiver(void *arg) {
       continue;
     }
 
-    handle_control_command(command);
+    control_handle_command(command);
   }
   return NULL;
+}
+
+/******************************************************************************
+ * public interface
+ ******************************************************************************/
+
+void HIDDEN eventlog_socket_control_signal_ghc_rts_ready(void) {
+  DEBUG_TRACE("Sending signal that GHC RTS is ready.");
+  pthread_mutex_lock(&g_ghc_rts_ready_mutex);
+  if (!g_ghc_rts_ready) {
+    g_ghc_rts_ready = true;
+    pthread_cond_broadcast(&g_ghc_rts_ready_cond);
+  }
+  pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
 }
 
 void HIDDEN eventlog_socket_control_start(
@@ -514,7 +517,7 @@ void HIDDEN eventlog_socket_control_start(
   g_control_fd_mutex_ptr = control_fd_mutex_ptr;
   g_new_conn_cond_ptr = new_conn_cond_ptr;
   const int create_or_error =
-      pthread_create(control_thread, NULL, control_receiver, NULL);
+      pthread_create(control_thread, NULL, control_loop, NULL);
   if (create_or_error != 0) {
     DEBUG_ERROR("failed to start control receiver: %s",
                 strerror(create_or_error));

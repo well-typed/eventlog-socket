@@ -629,7 +629,7 @@ static void eventlog_socket_init(const struct listener_config *config) {
 }
 
 void eventlog_socket_signal_rts_ready(void) {
-  eventlog_socket_control_signal_rts_ready();
+  eventlog_socket_control_signal_ghc_rts_ready();
 }
 
 // Unix domain socket paths are limited to 108 bytes.
@@ -780,7 +780,7 @@ static void eventlog_socket_start(const struct listener_config *config,
 
   // Presume that the RTS is already running and we're ready if you're directly
   // using this function.
-  eventlog_socket_control_signal_rts_ready();
+  eventlog_socket_control_signal_ghc_rts_ready();
   if (wait) {
     switch (config->kind) {
     case LISTENER_UNIX:
