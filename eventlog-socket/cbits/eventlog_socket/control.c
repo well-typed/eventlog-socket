@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -43,6 +44,7 @@
 // => b'\xf0\x9e\x97\x8c'
 //
 
+#define CONTROL_READ_COMMAND_CHUNK_SIZE 32
 #define CONTROL_MAGIC_LEN 4
 static const uint8_t control_magic[CONTROL_MAGIC_LEN] = {
     [0] = 0xF0,
@@ -66,68 +68,119 @@ typedef struct eventlog_socket_control_namespace_entry
     eventlog_socket_control_namespace_entry_t;
 
 struct eventlog_socket_control_namespace_entry {
-  const char *namespace;
-  const size_t namespace_len;
-  const eventlog_socket_control_namespace_id_t namespace_id;
+  size_t namespace_len;
+  char *namespace;
   eventlog_socket_control_namespace_entry_t *next;
 };
 
-eventlog_socket_control_namespace_entry_t
-    g_eventlog_socket_control_namespace_list = {
-        .namespace = BUILTIN_NAMESPACE,
-        .namespace_len = strlen(BUILTIN_NAMESPACE),
-        .next = NULL,
+eventlog_socket_control_namespace_entry_t g_control_namespace_list = {
+    .namespace = BUILTIN_NAMESPACE,
+    .namespace_len = strlen(BUILTIN_NAMESPACE),
+    .next = NULL,
 };
 
-bool eventlog_socket_control_register_namespace(
-    const size_t namespace_len, const char namespace[namespace_len + 1],
+pthread_mutex_t g_control_namespace_list_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+bool control_namespace_match(
+    const eventlog_socket_control_namespace_entry_t *namespace_entry,
+    const size_t namespace_len, const char namespace[namespace_len]) {
+  // if namespace_entry == NULL, then...
+  if (namespace_entry == NULL) {
+    // ...that's definitely not a match...
+    return false;
+  }
+  // otherwise, compare the longest valid prefix of the namespaces...
+  const size_t min_namespace_len =
+      namespace_len < namespace_entry->namespace_len
+          ? namespace_len
+          : namespace_entry->namespace_len;
+  const int namespace_cmp =
+      strncmp(namespace, namespace_entry->namespace, min_namespace_len);
+  return namespace_cmp == 0;
+}
+
+bool control_namespace_resolve(
+    const size_t namespace_len, const char namespace[namespace_len],
     eventlog_socket_control_namespace_id_t *namespace_id_out) {
+
+  // Acquire a lock on g_control_namespace_list.
+  pthread_mutex_lock(&g_control_namespace_list_mutex);
 
   // Initialise the namespace_entry pointer.
   eventlog_socket_control_namespace_entry_t *namespace_entry =
-      &g_eventlog_socket_control_namespace_list;
+      &g_control_namespace_list;
+
+  // Let's start counting namespace ids.
+  eventlog_socket_control_namespace_id_t namespace_id = 0;
+
+  while (namespace_entry != NULL) {
+    // Is this the namespace you are looking for?
+    if (control_namespace_match(namespace_entry, namespace_len, namespace)) {
+      // Write out the namespace_id.
+      *namespace_id_out = namespace_id;
+      // Release the lock on g_control_namespace_list.
+      pthread_mutex_unlock(&g_control_namespace_list_mutex);
+      return true;
+    }
+    // Otherwise, continue with the next namespace_entry.
+    namespace_entry = namespace_entry->next;
+    ++namespace_id;
+  }
+  // Release the lock on g_control_namespace_list.
+  pthread_mutex_unlock(&g_control_namespace_list_mutex);
+  return false;
+}
+
+bool eventlog_socket_control_register_namespace(
+    const uint8_t namespace_len, const char namespace[namespace_len],
+    eventlog_socket_control_namespace_id_t *namespace_id_out) {
+
+  // Acquire the lock on g_control_namespace_list.
+  pthread_mutex_lock(&g_control_namespace_list_mutex);
+
+  // Initialise the namespace_entry pointer.
+  eventlog_socket_control_namespace_entry_t *namespace_entry =
+      &g_control_namespace_list;
 
   // Let's start counting namespace ids.
   eventlog_socket_control_namespace_id_t namespace_id = 0;
 
   // Is the requested namespace already registered?
   do {
-    // Does the requested namespace match the current namespace_entry?
-    if (namespace_entry->namespace_len == namespace_len) {
-      const int cmp =
-          strncmp(namespace_entry->namespace, namespace, namespace_len);
-      if (cmp == 0) {
-        // Return the associated namespace_id.
-        return namespace_id;
-      }
+    // Is this the namespace you are trying to register?
+    if (control_namespace_match(namespace_entry, namespace_len, namespace)) {
+      // If so, return false.
+      pthread_mutex_unlock(&g_control_namespace_list_mutex);
+      return false;
     }
-    // Continue with the next namespace_entry.
-    if (namespace_entry->next != NULL) {
-      namespace_entry = namespace_entry->next;
-      ++namespace_id;
-    } else {
+    // Is this the last namespace_entry?
+    if (namespace_entry->next == NULL) {
+      // If so, stop.
       break;
     }
+    // Otherwise, continue with the next entry.
+    namespace_entry = namespace_entry->next;
+    ++namespace_id;
   } while (true);
 
   // Register the requested namespace.
   assert(namespace_entry != NULL);
   assert(namespace_entry->next == NULL);
-  char *namespace_cpy = malloc(namespace_len);
-  strncpy(namespace_cpy, namespace, namespace_len);
-  namespace_entry->next = &(eventlog_socket_control_namespace_entry_t){
-      .namespace = namespace_cpy,
-      .namespace_len = namespace_len,
-      .next = NULL,
-  };
   ++namespace_id;
-  DEBUG_TRACE("Registered namespace '%s' under ID %d", namespace_cpy,
-              namespace_id);
+  eventlog_socket_control_namespace_entry_t *next =
+      malloc(sizeof(eventlog_socket_control_namespace_entry_t));
+  next->namespace_len = namespace_len;
+  next->namespace = malloc(namespace_len + 1);
+  next->namespace[namespace_len] = '\0';
+  strncpy(next->namespace, namespace, namespace_len);
+  namespace_entry->next = next;
+  DEBUG_TRACE("Registered namespace '%s' under ID %d", namespace, namespace_id);
 
   // Write out the new namespace_id.
   *namespace_id_out = namespace_id;
 
   // Return success.
+  pthread_mutex_unlock(&g_control_namespace_list_mutex);
   return true;
 }
 
@@ -251,6 +304,410 @@ out:
  * control thread
  ******************************************************************************/
 
+static int g_control_fd = -1;
+
+typedef enum {
+  CONTROL_READ_HEADER,
+  CONTROL_READ_NAMESPACE_LEN,
+  CONTROL_READ_NAMESPACE,
+  CONTROL_READ_COMMAND_ID,
+} control_read_state_tag_t;
+
+const char *control_read_state_tag_show(control_read_state_tag_t tag) {
+  switch (tag) {
+  case CONTROL_READ_HEADER:
+    return "CONTROL_READ_HEADER";
+  case CONTROL_READ_NAMESPACE_LEN:
+    return "CONTROL_READ_NAMESPACE_LEN";
+  case CONTROL_READ_NAMESPACE:
+    return "CONTROL_READ_NAMESPACE";
+  case CONTROL_READ_COMMAND_ID:
+    return "CONTROL_READ_COMMAND_ID";
+  }
+}
+
+typedef struct {
+  control_read_state_tag_t tag;
+  union {
+    // if .tag == CONTROL_READ_HEADER
+    // the state stores:
+    // * the position of the next header byte
+    /// @invariant header_pos < CONTROL_MAGIC_LEN
+    uint8_t header_pos;
+
+    // if .tag == CONTROL_READ_NAMESPACE_LEN
+    // the state stores nothing.
+
+    // if .tag == CONTROL_READ_NAMESPACE
+    // the state stores:
+    // * the expected namespace length in bytes
+    // * the position of the next namespace byte
+    // * all previously received namespace bytes
+    struct {
+      /// @invariant namespace_buffer_len > 0
+      uint8_t namespace_buffer_len;
+      /// @invariant namespace_buffer_pos < namespace_buffer_len
+      uint8_t namespace_buffer_pos;
+      /// @invariant sizeof(namespace_buffer) == namespace_buffer_len
+      char *namespace_buffer;
+    };
+
+    // if .tag == CONTROL_READ_COMMAND
+    // the state stores:
+    // * the current namespace id
+    eventlog_socket_control_namespace_id_t command_namespace_id;
+  };
+} control_read_state_t;
+
+control_read_state_t g_control_read_state = {
+    .tag = CONTROL_READ_HEADER,
+    .header_pos = 0,
+};
+
+typedef enum {
+  CONTROL_FD_CLOSED,
+  CONTROL_FD_ERROR,
+  CONTROL_FD_RETRY,
+  CONTROL_FD_READY,
+} control_fd_status_t;
+
+static bool control_handle_command(eventlog_socket_control_command_t command) {
+  DEBUG_TRACE("Handle command in namespace %02x with id %02x",
+              command.namespace_id, command.command_id);
+  eventlog_socket_control_command_handler_t *handler = NULL;
+  void *user_data = NULL;
+
+  pthread_mutex_lock(&g_control_handlers_mutex);
+  eventlog_socket_control_command_item_t *entry = g_control_handlers;
+  while (entry != NULL) {
+    if (entry->namespace_id == command.namespace_id &&
+        entry->command_id == command.command_id) {
+      handler = entry->handler;
+      user_data = entry->user_data;
+      break;
+    }
+    entry = entry->next;
+  }
+  pthread_mutex_unlock(&g_control_handlers_mutex);
+
+  if (handler != NULL) {
+    handler(command, user_data);
+    return true;
+  } else {
+    DEBUG_ERROR("control: unhandled command namespace=0x%08x id=0x%02x",
+                command.namespace_id, command.command_id);
+    return false;
+  }
+}
+
+/// @pre g_control_read_state.tag != tag
+static void control_read_enter_state(const control_read_state_tag_t tag,
+                                     const uint8_t *current_byte) {
+  DEBUG_TRACE("control_read_enter_state: %s -> %s",
+              control_read_state_tag_show(g_control_read_state.tag),
+              control_read_state_tag_show(tag));
+
+  // function should only be called when changing state...
+  assert(g_control_read_state.tag != tag);
+  if (g_control_read_state.tag == tag) {
+    return;
+  }
+
+  // if the parser is leaving CONTROL_READ_NAMESPACE, then...
+  if (g_control_read_state.tag == CONTROL_READ_NAMESPACE) {
+    // ...free the namespace buffer...
+    free(g_control_read_state.namespace_buffer);
+  }
+
+  // initialise the control state appropriately...
+  switch (tag) {
+  case CONTROL_READ_HEADER: {
+    // if restarting, handle current_byte...
+    if (tag == CONTROL_READ_HEADER && current_byte != NULL &&
+        *current_byte == control_magic[0]) {
+      // ...start at the second header byte...
+      g_control_read_state.header_pos = 1;
+    } else {
+      // ...start at the first header byte...
+      g_control_read_state.header_pos = 0;
+    }
+    break;
+  }
+  case CONTROL_READ_NAMESPACE_LEN: {
+    assert(current_byte == NULL);
+    break;
+  }
+  case CONTROL_READ_NAMESPACE: {
+    assert(current_byte != NULL);
+    const size_t namespace_len = *current_byte;
+    g_control_read_state.namespace_buffer_len = namespace_len;
+    g_control_read_state.namespace_buffer_pos = 0;
+    // allocate space for the namespace, with one additional byte to ensure
+    // that the string is always null-terminated in memory.
+    g_control_read_state.namespace_buffer = malloc(namespace_len + 1);
+    g_control_read_state.namespace_buffer[namespace_len] = '\0';
+  }
+  case CONTROL_READ_COMMAND_ID: {
+    assert(current_byte == NULL);
+    g_control_read_state.command_namespace_id = UCHAR_MAX;
+    break;
+  }
+  }
+}
+
+static void control_handle_command_chunk(const size_t chunk_size,
+                                         const uint8_t chunk[chunk_size]) {
+  // iterate over the bytes in the chunk...
+  for (size_t chunk_index = 0; chunk_index < chunk_size; ++chunk_index) {
+    // get the next byte from the chunk...
+    const uint8_t current_byte = chunk[chunk_index];
+    switch (g_control_read_state.tag) {
+    // the parser is currently reading the header...
+    case CONTROL_READ_HEADER: {
+      // invariant: header_pos should be a valid index into control_magic
+      assert(0 <= g_control_read_state.header_pos);
+      assert(g_control_read_state.header_pos < CONTROL_MAGIC_LEN);
+      const uint8_t expected_byte =
+          control_magic[g_control_read_state.header_pos];
+      // if the next byte is the expected byte...
+      if (current_byte == expected_byte) {
+        DEBUG_TRACE("matched control_magic byte %d",
+                    g_control_read_state.header_pos);
+        // ...move on the the next state...
+        ++g_control_read_state.header_pos;
+        // if header_pos moves out of control_magic...
+        if (g_control_read_state.header_pos >= CONTROL_MAGIC_LEN) {
+          // ...continue reading the namespace length...
+          g_control_read_state.tag = CONTROL_READ_NAMESPACE_LEN;
+        }
+        // ...continue processing with the _next_ byte...
+        continue;
+      }
+      // if the next byte is not the expected byte...
+      else {
+        // ...there has been a protocol error...
+        // ...restart with the _current_ byte...
+        control_read_enter_state(CONTROL_READ_HEADER, &current_byte);
+        // ...continue processing with the _next_ byte...
+        continue;
+      }
+    }
+    // the parser is currently reading the namespace length...
+    case CONTROL_READ_NAMESPACE_LEN: {
+      // if current_byte == 0, then...
+      if (current_byte == 0) {
+        // ...there has been a protocol error...
+        // todo: enforce this in the register function
+        // todo: write an error to the eventlog
+        DEBUG_ERROR("received namespace length 0");
+        // ...restart with the _current_ byte...
+        control_read_enter_state(CONTROL_READ_HEADER, &current_byte);
+        continue;
+      } else {
+        DEBUG_TRACE("matched namespace_len byte %d", current_byte);
+        // otherwise, accept the namespace length and move to the next state...
+        control_read_enter_state(CONTROL_READ_NAMESPACE, &current_byte);
+        continue;
+      }
+    }
+    case CONTROL_READ_NAMESPACE: {
+      // calculate the number of bytes still required for the namespace.
+      // note: subtraction is safe due to the invariant on namespace_buffer_pos.
+      assert(g_control_read_state.namespace_buffer_len > 0);
+      assert(g_control_read_state.namespace_buffer_pos <
+             g_control_read_state.namespace_buffer_len);
+      const uint8_t required_bytes_for_namespace =
+          g_control_read_state.namespace_buffer_len -
+          g_control_read_state.namespace_buffer_pos;
+      assert(required_bytes_for_namespace > 0);
+
+      // calculate the number of bytes still available in the chunk.
+      // note: subtraction is safe due to the loop invariant.
+      assert(chunk_index < chunk_size);
+      const uint8_t remaining_bytes_in_chunk = chunk_size - chunk_index;
+      assert(remaining_bytes_in_chunk > 0);
+
+      // calculate the number of bytes that are available to be copied to the
+      // namespace buffer.
+      const uint8_t available_bytes =
+          remaining_bytes_in_chunk < required_bytes_for_namespace
+              ? remaining_bytes_in_chunk
+              : required_bytes_for_namespace;
+      assert(available_bytes > 0);
+
+      // copy all available bytes to the namespace buffer.
+      void *cpy_dest = g_control_read_state.namespace_buffer +
+                       g_control_read_state.namespace_buffer_pos;
+      const void *cpy_src = chunk + chunk_index;
+      memcpy(cpy_dest, cpy_src, available_bytes);
+      // move namespace_buffer_pos.
+      g_control_read_state.namespace_buffer_pos += available_bytes;
+
+      // if the namespace is incomplete, then...
+      if (g_control_read_state.namespace_buffer_pos <
+          g_control_read_state.namespace_buffer_len) {
+        // move chunk_index by the number of copied bytes less one,
+        // because the chunk_index will be updated when we reenter the for loop.
+        // note: the subtraction is safe because available_bytes > 0
+        chunk_index += available_bytes - 1;
+        // ...continue processing with the _next_ byte...
+        continue;
+      }
+
+      // otherwise, the namespace is complete...
+      // note: this relies on the fact that the string is null-terminated!
+      DEBUG_TRACE("matched namespace '%s'",
+                  g_control_read_state.namespace_buffer);
+
+      // ...try to resolve the namespace...
+      uint8_t namespace_id = UCHAR_MAX;
+      const bool namespace_id_found = control_namespace_resolve(
+          g_control_read_state.namespace_buffer_len,
+          g_control_read_state.namespace_buffer, &namespace_id);
+      // if the namespace was successfully resolved, then...
+      if (namespace_id_found) {
+        DEBUG_TRACE("resolved namespace '%s' to %d",
+                    g_control_read_state.namespace_buffer, namespace_id);
+        // move chunk_index by the number of copied bytes less one,
+        // because the chunk_index will be updated when we reenter the for loop.
+        // note: the subtraction is safe because available_bytes > 0
+        chunk_index += available_bytes - 1;
+        // ...move to the next state...
+        control_read_enter_state(CONTROL_READ_COMMAND_ID, NULL);
+        // ...continue processing with the _next_ byte...
+        continue;
+      }
+
+      // otherwise, the namespace was not successfully resolved...
+      else {
+        // ...there has been a protocol error...
+        // note: If the socket is noisy and happens to produce the sequence
+        //       of control_magic bytes, the subsequent byte is interpreted
+        //       as namespace_len and the parser unconditionally consumes the
+        //       next namespace_len bytes. It then fails _at this point_, when
+        //       it fails to resolve the namespace.
+        //
+        //       If we continue from the current byte onwards, that means that
+        //       we skip namespace_len bytes, which may have a valid command.
+        //
+        //       However, I don't think it's unreasonable to assume that the
+        //       common case is a message with an unregistered namespace.
+        //       In this case, it'd be reasonable to continue from the current
+        //       byte onwards, or – ideally – skip the command_id byte and
+        //       continue from _there on_.
+        //
+        //       In order to distinguish between noise and an unregistered
+        //       namespace, it may help to require that the namespace bytes
+        //       are separated from the command ID with a null byte.
+        //       While noise _could_ produce that pattern, it's vastly less
+        //       likely that random noise or messages from another protocol
+        //       would produce:
+        //
+        //         <control_magic bytes>
+        //           + <namespace_len byte>
+        //           + <namespace_len number of bytes>
+        //           + '\0'
+        //
+        // todo: write an error to the eventlog
+        DEBUG_ERROR("unknown namespace %s",
+                    g_control_read_state.namespace_buffer);
+        // ...restart with the _current_ byte...
+        control_read_enter_state(CONTROL_READ_HEADER, &current_byte);
+        // ...continue processing with the _next_ byte...
+        continue;
+      }
+    }
+    case CONTROL_READ_COMMAND_ID: {
+      DEBUG_TRACE("matched command_id byte '%d'", current_byte);
+      // Create a command.
+      const eventlog_socket_control_command_t command = {
+          .namespace_id = g_control_read_state.command_namespace_id,
+          .command_id = current_byte,
+      };
+      // Handle the command.
+      control_handle_command(command);
+      // ...restart _without_ the current byte...
+      control_read_enter_state(CONTROL_READ_HEADER, NULL);
+      // ...continue processing with the _next_ byte...
+      continue;
+    }
+    }
+  }
+}
+
+static control_fd_status_t control_wait_for_input(void) {
+  DEBUG_TRACE("Waiting for input on %d.", g_control_fd);
+
+  // poll for available data:
+  // note: POLLHUP and POLLRDHUP are output only and are ignored input.
+  struct pollfd pfds[1] = {{
+      .fd = g_control_fd,
+      .events = POLLIN,
+      .revents = 0,
+  }};
+  const int ready = poll(pfds, 1, POLL_LISTEN_TIMEOUT);
+  // if ready is -1, an error occurred...
+  if (ready == -1) {
+    DEBUG_ERRNO("poll() failed");
+    return CONTROL_FD_ERROR;
+  }
+  // if ready is 0, the call to poll timed out...
+  if (ready == 0) {
+    return CONTROL_FD_RETRY;
+  }
+  // otherwise ready is 1, and the file descriptor is ready...
+  assert(ready == 1); // poll invariant: ready <= |pfds|
+  const int revents = pfds[0].revents;
+  // if the POLLIN bit is set, the file descriptor is ready with input...
+  if (revents & POLLIN) {
+    return CONTROL_FD_READY;
+  }
+  // if either of the POLLERR, POLLHUP, or POLLNVAL bits are set,
+  // the file descriptor is closed...
+  // note: in the case of POLLHUP there may still be buffered input,
+  //       so this condition should be checked _after_ POLLIN.
+  if ((revents & POLLNVAL) || (revents & POLLHUP) || (revents & POLLERR)) {
+    return CONTROL_FD_CLOSED;
+  }
+  // note: the above conditions should cover all possible outputs.
+  //       if this isn't the case, the following assertion should trigger.
+  assert(false);
+  //       if assertions are turned off, treat this as a timeout.
+  return CONTROL_FD_RETRY;
+}
+
+static control_fd_status_t
+control_read_command_chunk(const size_t chunk_size, uint8_t chunk[chunk_size]) {
+  DEBUG_TRACE("Receiving input from %d.", g_control_fd);
+
+  // read a chunk from the file descriptor...
+  const ssize_t chunk_size_or_error =
+      recv(g_control_fd, chunk, CONTROL_READ_COMMAND_CHUNK_SIZE, 0);
+  // if num_bytes_or_error == -1, an error occurred...
+  if (chunk_size_or_error == -1) {
+    // if errno is EGAIN or EWOULDBLOCK, recv timed out...
+    // if errno is EINTR, the receive was interrupted...
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+      DEBUG_TRACE("recv() timed out or was interrupted.");
+      // note: the socket should have SO_RCVTIMEO set.
+      return CONTROL_FD_RETRY;
+    }
+    // if errno is anything else, there is some error...
+    DEBUG_ERRNO("recv() failed");
+    return CONTROL_FD_ERROR;
+  }
+  // if num_bytes_or_error == 0, the connection was closed...
+  if (chunk_size_or_error == 0) {
+    DEBUG_TRACE("recv() failed: the connection was closed.");
+    return CONTROL_FD_CLOSED;
+  }
+  // otherwise, handle the received chunk...
+  DEBUG_TRACE("recv() read %zd bytes", chunk_size_or_error);
+  return CONTROL_FD_READY;
+}
+
+// HERE BE DRAGONS
+
 typedef enum eventlog_socket_control_status {
   CONTROL_RECV_OK,
   CONTROL_RECV_PROTOCOL_ERROR,
@@ -270,7 +727,6 @@ static void control_wait_ghc_rts_ready(void) {
   pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
 }
 
-static int g_control_fd = -1;
 static const volatile int *g_control_fd_ptr = NULL;
 static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
 static pthread_cond_t *g_new_conn_cond_ptr = NULL;
@@ -360,33 +816,6 @@ control_read_command(int fd, eventlog_socket_control_command_t *command_out) {
   return CONTROL_RECV_OK;
 }
 
-static void control_handle_command(eventlog_socket_control_command_t command) {
-  DEBUG_TRACE("Handle command in namespace %02x with id %02x",
-              command.namespace_id, command.command_id);
-  eventlog_socket_control_command_handler_t *handler = NULL;
-  void *user_data = NULL;
-
-  pthread_mutex_lock(&g_control_handlers_mutex);
-  eventlog_socket_control_command_item_t *entry = g_control_handlers;
-  while (entry != NULL) {
-    if (entry->namespace_id == command.namespace_id &&
-        entry->command_id == command.command_id) {
-      handler = entry->handler;
-      user_data = entry->user_data;
-      break;
-    }
-    entry = entry->next;
-  }
-  pthread_mutex_unlock(&g_control_handlers_mutex);
-
-  if (handler != NULL) {
-    handler(command, user_data);
-  } else {
-    DEBUG_ERROR("control: unhandled command namespace=0x%08x id=0x%02x",
-                command.namespace_id, command.command_id);
-  }
-}
-
 static void control_reset(const int new_control_fd) {
   DEBUG_TRACE("Resetting control server state.");
   g_control_fd = new_control_fd;
@@ -412,16 +841,18 @@ static void *control_loop(void *arg) {
     DEBUG_TRACE("Starting new control iteration.");
 
     // Acquire the lock on the connection file description.
-    DEBUG_TRACE("Acquire lock on connection.");
     pthread_mutex_lock(g_control_fd_mutex_ptr);
 
     // Read current connection file description.
     const int new_control_fd = *g_control_fd_ptr;
-    DEBUG_TRACE("Old connection fd: %d", g_control_fd);
-    DEBUG_TRACE("New connection fd: %d", new_control_fd);
+    if (g_control_fd != new_control_fd) {
+      DEBUG_TRACE("Old connection fd: %d", g_control_fd);
+      DEBUG_TRACE("New connection fd: %d", new_control_fd);
+    }
 
     // If there WAS NO connection and there IS NO connection, then...
     if (g_control_fd == -1 && new_control_fd == -1) {
+      DEBUG_TRACE("There WAS NO connection and there IS NO connection.");
       // ...wait to be notified of a new connection...
       control_wait();
       // ...release the lock...
@@ -430,8 +861,9 @@ static void *control_loop(void *arg) {
       continue;
     }
 
-    // If there WAS NO connection and there IS A connection, then...
+    // If there WAS NO connection but there IS A connection, then...
     else if (g_control_fd == -1 && new_control_fd != -1) {
+      DEBUG_TRACE("There WAS NO connection but there IS A connection.");
       // ...DON'T wait to be notified of a new connection...
       // ...we may we have already missed the signal...
       // ...reset the control server state...
@@ -439,8 +871,9 @@ static void *control_loop(void *arg) {
       // ...continue to try to handle a command.
     }
 
-    // If there WAS A connection and there IS NO connection, then...
+    // If there WAS A connection but there IS NO connection, then...
     else if (g_control_fd != -1 && new_control_fd == -1) {
+      DEBUG_TRACE("There WAS A connection but there IS NO connection.");
       // ...reset the control server state...
       control_reset(new_control_fd);
       // ...wait to be notified of a new connection...
@@ -454,6 +887,8 @@ static void *control_loop(void *arg) {
     // If there WAS A connection and there IS A DIFFERENT connection, then...
     else if (g_control_fd != -1 && new_control_fd != -1 &&
              g_control_fd != new_control_fd) {
+      DEBUG_TRACE(
+          "There WAS A connection and there IS A DIFFERENT connection.");
       // ...DON'T wait to be notified of a new connection...
       // ...we may we have already missed the signal...
       // ...reset the control server state...
@@ -465,6 +900,7 @@ static void *control_loop(void *arg) {
     else if (g_control_fd != -1 && new_control_fd != -1 &&
              g_control_fd == new_control_fd) {
       // ...continue to try to handle a command.
+      DEBUG_TRACE("There WAS A connection and there IS THE SAME connection.");
     }
 
     // These conditions should be covering, so throw an error otherwise.
@@ -478,19 +914,30 @@ static void *control_loop(void *arg) {
     // Check that g_control_fd is up-to-date:
     assert(g_control_fd == new_control_fd);
 
-    // Read a command:
-    eventlog_socket_control_command_t command = {0};
-    eventlog_socket_control_status_t status =
-        control_read_command(g_control_fd, &command);
-    if (status == CONTROL_RECV_DISCONNECTED) {
-      continue;
-    } else if (status == CONTROL_RECV_PROTOCOL_ERROR) {
-      // Ignore protocol errors: they indicate garbage control traffic but
-      // shouldn't drop the data writer. Keep listening for valid commands.
+    // Wait for input:
+    const control_fd_status_t wait_fd_status = control_wait_for_input();
+    switch (wait_fd_status) {
+    case CONTROL_FD_READY:
+      break;
+    case CONTROL_FD_CLOSED:
+    case CONTROL_FD_ERROR:
+    case CONTROL_FD_RETRY:
       continue;
     }
 
-    control_handle_command(command);
+    // Read a command:
+    uint8_t chunk[CONTROL_READ_COMMAND_CHUNK_SIZE] = {0};
+    const control_fd_status_t read_fd_status =
+        control_read_command_chunk(CONTROL_READ_COMMAND_CHUNK_SIZE, chunk);
+    switch (read_fd_status) {
+    case CONTROL_FD_READY:
+      control_handle_command_chunk(CONTROL_READ_COMMAND_CHUNK_SIZE, chunk);
+      break;
+    case CONTROL_FD_CLOSED:
+    case CONTROL_FD_ERROR:
+    case CONTROL_FD_RETRY:
+      continue;
+    }
   }
   return NULL;
 }
