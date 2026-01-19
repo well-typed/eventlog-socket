@@ -50,12 +50,18 @@
     fprintf(stderr, __VA_ARGS__);                                              \
     fprintf(stderr, "\n");                                                     \
   } while (0)
+#define DEBUG_ERRNO(s)                                                         \
+  do {                                                                         \
+    DEBUG_PREFIX("ERROR", DEBUG_COLOR_RED);                                    \
+    perror(s);                                                                 \
+  } while (0)
 
 #else
 
 #define DEBUG_TRACE(...) ((void)0)
 #define DEBUG_WARN(...) ((void)0)
 #define DEBUG_ERROR(...) ((void)0)
+#define DEBUG_ERRNO(s) ((void)0)
 
 #endif /* DEBUG */
 #endif /* EVENTLOG_SOCKET_DEBUG_H */
