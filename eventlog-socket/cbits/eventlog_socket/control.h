@@ -11,6 +11,6 @@ void HIDDEN eventlog_socket_control_start(pthread_t *control_thread,
                                           pthread_mutex_t *control_fd_mutex_ptr,
                                           pthread_cond_t *new_conn_cond_ptr);
 
-void HIDDEN eventlog_socket_control_signal_rts_ready(void);
+void HIDDEN eventlog_socket_control_signal_ghc_rts_ready(void);
 
 #endif /* EVENTLOG_SOCKET_CONTROL_H */
