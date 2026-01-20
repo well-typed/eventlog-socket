@@ -88,6 +88,85 @@ jobs:
             ghc-version: "9.10.2"
 
   #############################################################################
+  # Lint with actionlint
+  #############################################################################
+
+  lint-actionlint:
+    name: "Lint with actionlint"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: 🗄️ Read dev-dependencies
+        run: cat "./scripts/dev-dependencies.txt" >> "$GITHUB_OUTPUT"
+        id: dev-dependencies
+
+      - name: "Setup actionlint"
+        uses: ./.github/actions/setup-actionlint
+        with:
+          actionlint-version: ${{ steps.dev-dependencies.outputs.actionlint }}
+
+      - name: 🎗️ Lint with actionlint
+        run: ./scripts/lint-actionlint.sh
+
+  #############################################################################
+  # Lint with cabal
+  #############################################################################
+
+  lint-cabal:
+    name: "Lint with Cabal"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: 🗄️ Read dev-dependencies
+        run: cat "./scripts/dev-dependencies.txt" >> "$GITHUB_OUTPUT"
+        id: dev-dependencies
+
+      - name: 🛠️ Install Haskell
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{ steps.dev-dependencies.outputs.ghc }}
+          cabal-version: ${{ steps.dev-dependencies.outputs.cabal }}
+        id: setup-haskell
+
+      - name: 🎗️ Lint with Cabal
+        run: ./scripts/lint-cabal.sh
+
+  #############################################################################
+  # Lint with cabal-fmt
+  #############################################################################
+
+  lint-cabal-fmt:
+    name: "Lint with cabal-fmt"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: 🗄️ Read dev-dependencies
+        run: cat "./scripts/dev-dependencies.txt" >> "$GITHUB_OUTPUT"
+        id: dev-dependencies
+
+      - name: 🛠️ Install cabal-fmt
+        uses: ./.github/actions/setup-cabal-fmt
+        with:
+          cabal-fmt-version: ${{ steps.dev-dependencies.outputs.cabal-fmt }}
+          ghc-version: ${{ steps.dev-dependencies.outputs.ghc }}
+          cabal-version: ${{ steps.dev-dependencies.outputs.cabal }}
+
+      - name: 🎗️ Lint with cabal-fmt
+        run: ./scripts/lint-cabal-fmt.sh
+
+  #############################################################################
   # Lint with clang-format
   #############################################################################
 
@@ -110,6 +189,33 @@ jobs:
           clang-format-version: ${{ steps.dev-dependencies.outputs.clang-format }}
 
   #############################################################################
+  # Lint with Fourmolu
+  #############################################################################
+
+  lint-fourmolu:
+    name: "Lint with Fourmolu"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: 🗄️ Read dev-dependencies
+        run: cat "./scripts/dev-dependencies.txt" >> "$GITHUB_OUTPUT"
+        id: dev-dependencies
+
+      - name: 🛠️ Install Fourmolu
+        uses: ./.github/actions/setup-fourmolu
+        with:
+          fourmolu-version: ${{ steps.dev-dependencies.outputs.fourmolu }}
+          ghc-version: ${{ steps.dev-dependencies.outputs.ghc }}
+          cabal-version: ${{ steps.dev-dependencies.outputs.cabal }}
+
+      - name: 🎗️ Lint with Fourmolu
+        run: ./scripts/lint-fourmolu.sh
+
+  #############################################################################
   # Lint with pyright
   #############################################################################
 
@@ -124,4 +230,3 @@ jobs:
 
       - name: 🎗️ Lint with pyright
         uses: jakebailey/pyright-action@v2
-
