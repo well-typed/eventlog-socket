@@ -6,7 +6,7 @@ import Data.Functor ((<&>))
 import Data.Machine ((~>))
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Text as T
-import GHC.Eventlog.Socket.Control (Command (..), CommandId (..), userCommand, userNamespace)
+import GHC.Eventlog.Socket.Control (CommandId (..), requestHeapProfile, startHeapProfiling, stopHeapProfiling, userCommand, userNamespace)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withTempDirectory)
@@ -130,9 +130,9 @@ test_oddball_StartAndStopHeapProfiling =
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> hasNoHeapProfSampleString
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendCommand handle StartHeapProfiling
+                    &> sendCommand handle startHeapProfiling
                     !> (2 `times` (hasHeapProfSampleString &> hasHeapProfSampleEnd))
-                    &> sendCommand handle StopHeapProfiling
+                    &> sendCommand handle stopHeapProfiling
                     !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
                     &> hasNoHeapProfSampleString
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
@@ -150,7 +150,7 @@ test_oddball_RequestHeapProfile =
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> hasNoHeapProfSampleString
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendCommand handle RequestHeapProfile
+                    &> sendCommand handle requestHeapProfile
                     -- validate that there is exactly one heap sample, and that
                     -- afterwards there are no further samples, either in this
                     -- or the next iteration.
@@ -177,7 +177,7 @@ test_oddball_AfterJunk =
                     -- Validate that there are no heap profile samples in the
                     -- remainder of this iteration AND the next iteration.
                     ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
-                    &> sendCommand handle RequestHeapProfile
+                    &> sendCommand handle requestHeapProfile
                     !> hasHeapProfSampleString
                     &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
                     &> hasNoHeapProfSampleString
@@ -198,7 +198,7 @@ test_oddball_AlignedJunk =
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> hasNoHeapProfSampleString
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendCommandWithJunk handle "FLORPIES" RequestHeapProfile "BLEHBLES"
+                    &> sendCommandWithJunk handle "FLORPIES" requestHeapProfile "BLEHBLES"
                     !> hasHeapProfSampleString
                     &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
                     &> hasNoHeapProfSampleString
@@ -219,7 +219,7 @@ test_oddball_MisalignedJunk =
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> hasNoHeapProfSampleString
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendCommandWithJunk handle "FLORP" RequestHeapProfile "BLERP"
+                    &> sendCommandWithJunk handle "FLORP" requestHeapProfile "BLERP"
                     !> hasNoHeapProfSampleString
                     ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
@@ -233,6 +233,6 @@ test_customCommand =
         withProgram customCommand $
             assertEventlogWith' eventlogSocket $ \handle ->
                 hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`)
-                    &> sendCommand handle (userCommand (userNamespace 1) (CommandId 0))
+                    &> sendCommand handle (userCommand (userNamespace "custom-command") (CommandId 0))
                     !> hasMatchingUserMessage ("custom command handled" ==)
                     &> (2 `times` hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`))
