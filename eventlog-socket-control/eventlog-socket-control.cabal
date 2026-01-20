@@ -37,9 +37,9 @@ library
   import:          language
   exposed-modules: GHC.Eventlog.Socket.Control
   build-depends:
-    , base       >=4.14 && <5
-    , binary     >=0.8  && <0.9
-    , bytestring >=0.9  && <0.13
-    , text       >=1.0  && <3.0
+    , base        >=4.14 && <5
+    , binary      >=0.8  && <0.9
+    , bytestring  >=0.9  && <0.13
+    , text        >=1.0  && <3.0
 
   hs-source-dirs:  src
