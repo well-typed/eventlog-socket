@@ -9,18 +9,18 @@ module GHC.Eventlog.Socket.Control (
     userCommand,
 ) where
 
-import Control.Exception (Exception (displayException), throw, assert)
+import Control.Exception (Exception (displayException), assert, throw)
 import Control.Monad (unless, when)
 import Data.Binary (Binary (..), Get, Put, getWord8, putWord8)
+import Data.Binary.Get (getByteString)
 import Data.ByteString (ByteString, length)
 import Data.Foldable (for_, traverse_)
 import Data.String (IsString (..))
 import Data.Text (Text, pack, unpack)
-import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Word (Word8)
 import Text.Printf (printf)
 import Prelude hiding (getChar, length)
-import Data.Binary.Get (getByteString)
 
 userCommand :: Namespace -> CommandId -> Command
 userCommand namespace commandId
@@ -31,10 +31,9 @@ userCommand namespace commandId
 data Namespace = Namespace
     { namespaceText :: !Text
     , namespaceUtf8 :: ByteString
-    {- ^ Must satisfy the following invariants:
-    prop> namespaceUtf8 == encodeUtf8 namespaceText
-    prop> length namespaceUtf8 <= fromIntegral (maxBound :: Word8)
-    -}
+    -- ^ Must satisfy the following invariants:
+    --     prop> namespaceUtf8 == encodeUtf8 namespaceText
+    --     prop> length namespaceUtf8 <= fromIntegral (maxBound :: Word8)
     }
     deriving (Eq)
 
@@ -155,10 +154,11 @@ getNamespace = do
     -- Get the namespace bytes
     namespaceBytes <- getByteString (fromIntegral namespaceNumBytes)
     -- Build a namespace
-    pure Namespace
-        { namespaceText = decodeUtf8 namespaceBytes
-        , namespaceUtf8 = namespaceBytes
-        }
+    pure
+        Namespace
+            { namespaceText = decodeUtf8 namespaceBytes
+            , namespaceUtf8 = namespaceBytes
+            }
 
 putCommandId :: CommandId -> Put
 putCommandId = putWord8 . unCommandId
