@@ -1,43 +1,86 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 module GHC.Eventlog.Socket.Control (
     Namespace,
     userNamespace,
     CommandId (..),
-    Command (StartHeapProfiling, StopHeapProfiling, RequestHeapProfile),
+    Command,
+    startHeapProfiling,
+    stopHeapProfiling,
+    requestHeapProfile,
     userCommand,
 ) where
 
-import Control.Exception (Exception (displayException), throw)
+import Control.Exception (Exception (displayException), throw, assert)
 import Control.Monad (unless, when)
 import Data.Binary (Binary (..), Get, Put, getWord8, putWord8)
+import Data.ByteString (ByteString, length)
 import Data.Foldable (for_, traverse_)
+import Data.String (IsString (..))
+import Data.Text (Text, pack, unpack)
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import Data.Word (Word8)
 import Text.Printf (printf)
-import Prelude hiding (getChar)
+import Prelude hiding (getChar, length)
+import Data.Binary.Get (getByteString)
 
 userCommand :: Namespace -> CommandId -> Command
 userCommand namespace commandId
-    | namespace == BuiltinNamespace = throw CannotUseBuiltinNamespace
+    | isBuiltinNamespace namespace = throw CannotUseBuiltinNamespace
+    | isNamespaceTooLong namespace = throw (NamespaceTooLong namespace)
     | otherwise = Command namespace commandId
 
-newtype Namespace = Namespace {unNamespace :: Word8}
-    deriving (Eq, Show)
+data Namespace = Namespace
+    { namespaceText :: !Text
+    , namespaceUtf8 :: ByteString
+    {- ^ Must satisfy the following invariants:
+    prop> namespaceUtf8 == encodeUtf8 namespaceText
+    prop> length namespaceUtf8 <= fromIntegral (maxBound :: Word8)
+    -}
+    }
+    deriving (Eq)
 
-pattern BuiltinNamespace :: Namespace
-pattern BuiltinNamespace = Namespace 0
+instance Show Namespace where
+    show :: Namespace -> String
+    show = show . unpack . namespaceText
 
-userNamespace :: Word8 -> Namespace
-userNamespace namespaceId
-    | namespace == BuiltinNamespace = throw CannotUseBuiltinNamespace
+unsafeMakeNamespace :: Text -> Namespace
+unsafeMakeNamespace namespaceText' =
+    Namespace
+        { namespaceText = namespaceText'
+        , namespaceUtf8 = encodeUtf8 namespaceText'
+        }
+
+eventlogSocketNamespace :: Namespace
+eventlogSocketNamespace = unsafeMakeNamespace (pack "eventlog-socket")
+
+isBuiltinNamespace :: Namespace -> Bool
+isBuiltinNamespace = (== eventlogSocketNamespace)
+
+userNamespace :: Text -> Namespace
+userNamespace (unsafeMakeNamespace -> namespace)
+    | isBuiltinNamespace namespace = throw CannotUseBuiltinNamespace
+    | isNamespaceTooLong namespace = throw (NamespaceTooLong namespace)
     | otherwise = namespace
-  where
-    namespace = Namespace namespaceId
+
+instance IsString Namespace where
+    fromString :: String -> Namespace
+    fromString = userNamespace . pack
 
 data CannotUseBuiltinNamespace = CannotUseBuiltinNamespace
     deriving (Show)
 
 instance Exception CannotUseBuiltinNamespace
+
+namespaceMaxBytes :: Int
+namespaceMaxBytes = fromIntegral (maxBound :: Word8)
+
+isNamespaceTooLong :: Namespace -> Bool
+isNamespaceTooLong (namespaceUtf8 -> namespaceBytes) =
+    length namespaceBytes > namespaceMaxBytes
+
+data NamespaceTooLong = NamespaceTooLong Namespace
+    deriving (Show)
+
+instance Exception NamespaceTooLong
 
 newtype CommandId = CommandId {unCommandId :: Word8}
     deriving (Eq, Show)
@@ -53,14 +96,14 @@ instance Exception UnknownBuiltinCommandId
 data Command = Command !Namespace !CommandId
     deriving (Eq, Show)
 
-pattern StartHeapProfiling :: Command
-pattern StartHeapProfiling = Command BuiltinNamespace (CommandId 0)
+startHeapProfiling :: Command
+startHeapProfiling = Command eventlogSocketNamespace (CommandId 0)
 
-pattern StopHeapProfiling :: Command
-pattern StopHeapProfiling = Command BuiltinNamespace (CommandId 1)
+stopHeapProfiling :: Command
+stopHeapProfiling = Command eventlogSocketNamespace (CommandId 1)
 
-pattern RequestHeapProfile :: Command
-pattern RequestHeapProfile = Command BuiltinNamespace (CommandId 2)
+requestHeapProfile :: Command
+requestHeapProfile = Command eventlogSocketNamespace (CommandId 2)
 
 instance Binary Command where
     put :: Command -> Put
@@ -74,7 +117,7 @@ instance Binary Command where
         getControlMagic
         namespace <- getNamespace
         commandId <- getCommandId
-        when (namespace == BuiltinNamespace) $
+        when (namespace == eventlogSocketNamespace) $
             when (unCommandId commandId >= unCommandId nextBuiltinCommandId) $
                 fail . displayException $
                     UnknownBuiltinCommandId commandId
@@ -98,10 +141,24 @@ getControlMagic =
                 printf "Unexpected %02x, expected %02x" actual expect
 
 putNamespace :: Namespace -> Put
-putNamespace = putWord8 . unNamespace
+putNamespace (namespaceUtf8 -> namespaceBytes) =
+    assert (length namespaceBytes <= namespaceMaxBytes) $ do
+        -- Put the namespace length as a Word8
+        putWord8 (fromIntegral (length namespaceBytes))
+        -- Put the namespace bytes
+        put namespaceBytes
 
 getNamespace :: Get Namespace
-getNamespace = Namespace <$> getWord8
+getNamespace = do
+    -- Get the namespace length as a Word8
+    namespaceNumBytes <- getWord8
+    -- Get the namespace bytes
+    namespaceBytes <- getByteString (fromIntegral namespaceNumBytes)
+    -- Build a namespace
+    pure Namespace
+        { namespaceText = decodeUtf8 namespaceBytes
+        , namespaceUtf8 = namespaceBytes
+        }
 
 putCommandId :: CommandId -> Put
 putCommandId = putWord8 . unCommandId
