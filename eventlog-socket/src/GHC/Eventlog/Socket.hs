@@ -34,10 +34,9 @@ A type representing the supported eventlog socket modes.
 data EventlogSocket
     = EventlogUnixSocket
         { unixSocketPath :: FilePath
-        {- ^ Unix socket path, e.g., @"/tmp/ghc_eventlog.sock"@.
-
-        __Warning:__ Unix socket paths are limited to 107 characters.
-        -}
+        -- ^ Unix socket path, e.g., @"/tmp/ghc_eventlog.sock"@.
+        --
+        --         __Warning:__ Unix socket paths are limited to 107 characters.
         }
     | EventlogTcpSocket
         { tcpHost :: String

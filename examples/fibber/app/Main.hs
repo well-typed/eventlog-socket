@@ -21,6 +21,13 @@ parseArgs :: [String] -> (Mode, [String])
 parseArgs ("--forever" : rest) = (Infinite, rest)
 parseArgs args = (Finite, args)
 
+performPreferablyBlockingMajorGC :: IO ()
+#if MIN_VERSION_base(4,20,0)
+performPreferablyBlockingMajorGC = performBlockingMajorGC
+#else
+performPreferablyBlockingMajorGC = performMajorGC
+#endif
+
 main :: IO ()
 main = do
     startFromEnv
@@ -30,11 +37,7 @@ main = do
             traceMarkerIO $ "Starting fib " <> arg
             print $ fib (read arg)
             traceMarkerIO $ "Finished fib " <> arg
-#if MIN_VERSION_base(4,20,0)
-            performBlockingMajorGC
-#else
-            performMajorGC
-#endif
+            performPreferablyBlockingMajorGC
     case (mode, fibArgs) of
         (_, []) -> putStrLn "Provide at least one integer argument."
         (Finite, _) -> workload
