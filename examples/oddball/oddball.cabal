@@ -1,14 +1,14 @@
 cabal-version: 2.4
 name:          oddball
 version:       0.1.0.0
-synopsis:      Example with an interesting heap profile.
-description:   Repeatedly sum long sequences of random numbers.
-author:        Finley McIlwaine
-maintainer:    wen@well-typed.com
-copyright:     (c) 2023 Well-Typed
+synopsis:      Example program that sums random lists of numbers
+description:   Example program that sums random lists of numbers.
 license:       BSD-3-Clause
 license-file:  LICENSE
-category:      Debug, Monitoring, System, Network
+author:        Eventlog Socket Contributors
+maintainer:    wen@well-typed.com
+copyright:     (c) 2025 Well-Typed
+category:      Test
 tested-with:
   GHC ==9.2.8
    || ==9.4.8
@@ -24,9 +24,9 @@ executable oddball
   default-extensions: TypeApplications
   ghc-options:        -threaded -rtsopts
   build-depends:
-    , base             >=4.14  && <5
-    , eventlog-socket  >=0.1.0 && <0.2
-    , random           >=1.2   && <1.4
+    , base             >=4.14 && <5
+    , eventlog-socket  >=0.1  && <0.2
+    , random           >=1.2  && <1.4
 
   if impl(ghc <9.4)
     ghc-options: -eventlog

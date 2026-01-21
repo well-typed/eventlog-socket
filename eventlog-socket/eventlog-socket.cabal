@@ -5,9 +5,9 @@ synopsis:           Stream GHC eventlog events to external processes
 description:        Stream GHC eventlog events to external processes.
 license:            BSD-3-Clause
 license-file:       LICENSE
-author:             Ben Gamari
-maintainer:         ben@smart-cactus.org
-copyright:          (c) 2018 Ben Gamari
+author:             Eventlog Socket Contributors
+maintainer:         wen@well-typed.com
+copyright:          (c) 2018-2026 Well-Typed
 category:           System
 build-type:         Simple
 tested-with:
