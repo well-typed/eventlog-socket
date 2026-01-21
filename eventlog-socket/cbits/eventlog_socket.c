@@ -102,7 +102,7 @@ static void drain_worker_wake(void) {
     } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
       break;
     } else {
-      DEBUG_ERROR("failed to drain wake pipe: %s", strerror(errno));
+      DEBUG_ERRNO("read() failed");
       break;
     }
   }
@@ -116,7 +116,7 @@ static void wake_worker(void) {
   uint8_t byte = 1;
   ssize_t ret = write(g_wake_pipe[1], &byte, sizeof(byte));
   if (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
-    DEBUG_ERROR("failed to wake worker: %s", strerror(errno));
+    DEBUG_ERRNO("write() failed");
   }
 }
 
@@ -200,7 +200,7 @@ static bool writer_write(void *eventlog, size_t size) {
         goto exit;
 
       } else {
-        DEBUG_ERROR("failed to write: %s", strerror(errno));
+        DEBUG_ERRNO("write() failed");
         goto exit;
       }
     } else {
@@ -252,7 +252,7 @@ static void listen_iteration(void) {
   bool start_eventlog = false;
 
   if (listen(g_listen_fd, LISTEN_BACKLOG) == -1) {
-    DEBUG_ERROR("listen() failed: %s", strerror(errno));
+    DEBUG_ERRNO("listen() failed");
     abort();
   }
 
@@ -271,7 +271,7 @@ static void listen_iteration(void) {
   while (true) {
     int ret = poll(&pfd_accept, 1, POLL_LISTEN_TIMEOUT);
     if (ret == -1) {
-      DEBUG_ERROR("poll() failed: %s", strerror(errno));
+      DEBUG_ERRNO("poll() failed");
       return;
     } else if (ret == 0) {
       DEBUG_TRACE("%s", "accept poll timed out");
@@ -285,7 +285,7 @@ static void listen_iteration(void) {
   // accept
   int fd = accept(g_listen_fd, (struct sockaddr *)&remote, &len);
   if (fd == -1) {
-    DEBUG_ERROR("accept failed: %s", strerror(errno));
+    DEBUG_ERRNO("accept() failed");
     return;
   }
   DEBUG_TRACE("accepted new connection fd=%d", fd);
@@ -293,10 +293,10 @@ static void listen_iteration(void) {
   // set socket into non-blocking mode
   int flags = fcntl(fd, F_GETFL);
   if (flags == -1) {
-    DEBUG_ERROR("fnctl F_GETFL failed: %s", strerror(errno));
+    DEBUG_ERRNO("fnctl() failed for F_GETFL");
   }
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-    DEBUG_ERROR("fnctl F_SETFL failed: %s", strerror(errno));
+    DEBUG_ERRNO("fnctl() failed for F_SETFL");
   }
 
   // we stop existing logging so we can replay header on the new connection
@@ -347,7 +347,7 @@ static void nonwrite_iteration(int fd) {
     if (errno == EINTR) {
       return;
     }
-    DEBUG_ERROR("poll() failed: %s", strerror(errno));
+    DEBUG_ERRNO("poll() failed");
     return;
   }
 
@@ -383,7 +383,7 @@ static void write_iteration(int fd) {
   const int num_ready_or_err = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
   if (num_ready_or_err == -1 && errno != EAGAIN) {
     // error
-    DEBUG_ERROR("poll() failed: %s", strerror(errno));
+    DEBUG_ERRNO("poll() failed");
     return;
   } else if (num_ready_or_err == 0) {
     // timeout
@@ -422,7 +422,7 @@ static void write_iteration(int fd) {
           g_client_fd = -1;
           write_buffer_free(&g_write_buffer);
         } else {
-          DEBUG_ERROR("failed to write: %s", strerror(errno));
+          DEBUG_ERRNO("write() failed");
         }
 
         // break out of the loop
@@ -522,7 +522,7 @@ static void init_unix_listener(const char *sock_path) {
   unlink(sock_path);
   if (bind(g_listen_fd, (struct sockaddr *)&local,
            sizeof(struct sockaddr_un)) == -1) {
-    DEBUG_ERROR("failed to bind socket %s: %s", sock_path, strerror(errno));
+    DEBUG_ERRNO("bind() failed");
     abort();
   }
 }
@@ -540,7 +540,7 @@ static void init_tcp_listener(const char *host, const char *port) {
   struct addrinfo *res = NULL;
   int ret = getaddrinfo(host, port, &hints, &res);
   if (ret != 0) {
-    DEBUG_ERROR("getaddrinfo failed: %s", gai_strerror(ret));
+    DEBUG_ERROR("getaddrinfo() failed: %s", gai_strerror(ret));
     abort();
   }
 
@@ -554,7 +554,7 @@ static void init_tcp_listener(const char *host, const char *port) {
     int reuse = 1;
     if (setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
                    sizeof(reuse)) == -1) {
-      DEBUG_ERROR("setsockopt(SO_REUSEADDR) failed: %s", strerror(errno));
+      DEBUG_ERRNO("setsockopt() failed for SO_REUSEADDR");
       close(g_listen_fd);
       g_listen_fd = -1;
       continue;
@@ -571,7 +571,7 @@ static void init_tcp_listener(const char *host, const char *port) {
       break; // success
     }
 
-    DEBUG_ERROR("failed to bind TCP socket: %s", strerror(errno));
+    DEBUG_ERRNO("bind() failed");
     close(g_listen_fd);
     g_listen_fd = -1;
   }
@@ -600,7 +600,7 @@ static void worker_start(const struct listener_config *config) {
 
   int ret = pthread_create(&g_listen_thread, NULL, worker, NULL);
   if (ret != 0) {
-    DEBUG_ERROR("failed to spawn thread: %s", strerror(ret));
+    DEBUG_ERRNO("pthread_create() failed");
     abort();
   }
 }
@@ -612,14 +612,14 @@ static void worker_start(const struct listener_config *config) {
 static void ensure_initialized(void) {
   if (!g_initialized) {
     if (pipe(g_wake_pipe) == -1) {
-      DEBUG_ERROR("failed to create wake pipe: %s", strerror(errno));
+      DEBUG_ERRNO("pipe() failed");
       abort();
     }
     for (int i = 0; i < 2; i++) {
       int flags = fcntl(g_wake_pipe[i], F_GETFL, 0);
       if (flags == -1 ||
           fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
-        DEBUG_ERROR("failed to set wake pipe nonblocking: %s", strerror(errno));
+        DEBUG_ERRNO("fcntl() failed for F_SETFL");
         abort();
       }
     }
@@ -711,7 +711,7 @@ void eventlog_socket_wait(void) {
     int ret = pthread_cond_wait(&g_new_conn_cond,
                                 &g_write_buffer_and_client_fd_mutex);
     if (ret != 0) {
-      DEBUG_ERROR("failed to wait on condition variable: %s", strerror(ret));
+      DEBUG_ERRNO("pthread_cond_wait() failed");
     }
     DEBUG_TRACE("woke up, client_fd=%d", g_client_fd);
   }
