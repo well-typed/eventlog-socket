@@ -17,8 +17,7 @@ jobs:
   ################################################################################
   build:
     name: |
-      ${{ matrix.name
-       || format(
+      ${{ format(
             'Test on {0}{1}',
             ( startsWith(matrix.os, 'ubuntu-') && ( endsWith(matrix.os, '-arm') && 'Linux (aarch64)' || 'Linux (x86)' )
             ) ||
