@@ -1,4 +1,4 @@
-actionlint=1.7.7
+actionlint=1.7.10
 cabal-fmt=0.1.12
 cabal=3.12.1.0
 clang-format=21
