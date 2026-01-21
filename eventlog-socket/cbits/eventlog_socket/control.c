@@ -44,7 +44,7 @@
 // => b'\xf0\x9e\x97\x8c'
 //
 
-#define CONTROL_READ_COMMAND_CHUNK_SIZE 32
+#define CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE 32
 #define CONTROL_MAGIC_LEN 4
 static const uint8_t control_magic[CONTROL_MAGIC_LEN] = {
     [0] = 0xF0,
@@ -64,25 +64,24 @@ static const uint8_t control_magic[CONTROL_MAGIC_LEN] = {
  * namespace registry
  ******************************************************************************/
 
-typedef struct eventlog_socket_control_namespace_entry
-    eventlog_socket_control_namespace_entry_t;
+typedef struct control_namespace_store_entry control_namespace_store_entry_t;
 
-struct eventlog_socket_control_namespace_entry {
+struct control_namespace_store_entry {
   size_t namespace_len;
   char *namespace;
-  eventlog_socket_control_namespace_entry_t *next;
+  control_namespace_store_entry_t *next;
 };
 
-eventlog_socket_control_namespace_entry_t g_control_namespace_list = {
+control_namespace_store_entry_t g_control_namespace_store = {
     .namespace = BUILTIN_NAMESPACE,
     .namespace_len = strlen(BUILTIN_NAMESPACE),
     .next = NULL,
 };
 
-pthread_mutex_t g_control_namespace_list_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t g_control_namespace_store_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-bool control_namespace_match(
-    const eventlog_socket_control_namespace_entry_t *namespace_entry,
+bool control_namespace_store_match(
+    const control_namespace_store_entry_t *namespace_entry,
     const size_t namespace_len, const char namespace[namespace_len]) {
   // if namespace_entry == NULL, then...
   if (namespace_entry == NULL) {
@@ -99,35 +98,35 @@ bool control_namespace_match(
   return namespace_cmp == 0;
 }
 
-bool control_namespace_resolve(
+bool control_namespace_store_resolve(
     const size_t namespace_len, const char namespace[namespace_len],
     eventlog_socket_control_namespace_id_t *namespace_id_out) {
 
-  // Acquire a lock on g_control_namespace_list.
-  pthread_mutex_lock(&g_control_namespace_list_mutex);
+  // Acquire a lock on g_control_namespace_store.
+  pthread_mutex_lock(&g_control_namespace_store_mutex);
 
   // Initialise the namespace_entry pointer.
-  eventlog_socket_control_namespace_entry_t *namespace_entry =
-      &g_control_namespace_list;
+  control_namespace_store_entry_t *namespace_entry = &g_control_namespace_store;
 
   // Let's start counting namespace ids.
   eventlog_socket_control_namespace_id_t namespace_id = 0;
 
   while (namespace_entry != NULL) {
     // Is this the namespace you are looking for?
-    if (control_namespace_match(namespace_entry, namespace_len, namespace)) {
+    if (control_namespace_store_match(namespace_entry, namespace_len,
+                                      namespace)) {
       // Write out the namespace_id.
       *namespace_id_out = namespace_id;
-      // Release the lock on g_control_namespace_list.
-      pthread_mutex_unlock(&g_control_namespace_list_mutex);
+      // Release the lock on g_control_namespace_store.
+      pthread_mutex_unlock(&g_control_namespace_store_mutex);
       return true;
     }
     // Otherwise, continue with the next namespace_entry.
     namespace_entry = namespace_entry->next;
     ++namespace_id;
   }
-  // Release the lock on g_control_namespace_list.
-  pthread_mutex_unlock(&g_control_namespace_list_mutex);
+  // Release the lock on g_control_namespace_store.
+  pthread_mutex_unlock(&g_control_namespace_store_mutex);
   return false;
 }
 
@@ -135,12 +134,11 @@ bool eventlog_socket_control_register_namespace(
     const uint8_t namespace_len, const char namespace[namespace_len],
     eventlog_socket_control_namespace_id_t *namespace_id_out) {
 
-  // Acquire the lock on g_control_namespace_list.
-  pthread_mutex_lock(&g_control_namespace_list_mutex);
+  // Acquire the lock on g_control_namespace_store.
+  pthread_mutex_lock(&g_control_namespace_store_mutex);
 
   // Initialise the namespace_entry pointer.
-  eventlog_socket_control_namespace_entry_t *namespace_entry =
-      &g_control_namespace_list;
+  control_namespace_store_entry_t *namespace_entry = &g_control_namespace_store;
 
   // Let's start counting namespace ids.
   eventlog_socket_control_namespace_id_t namespace_id = 0;
@@ -148,9 +146,10 @@ bool eventlog_socket_control_register_namespace(
   // Is the requested namespace already registered?
   do {
     // Is this the namespace you are trying to register?
-    if (control_namespace_match(namespace_entry, namespace_len, namespace)) {
+    if (control_namespace_store_match(namespace_entry, namespace_len,
+                                      namespace)) {
       // If so, return false.
-      pthread_mutex_unlock(&g_control_namespace_list_mutex);
+      pthread_mutex_unlock(&g_control_namespace_store_mutex);
       return false;
     }
     // Is this the last namespace_entry?
@@ -167,8 +166,8 @@ bool eventlog_socket_control_register_namespace(
   assert(namespace_entry != NULL);
   assert(namespace_entry->next == NULL);
   ++namespace_id;
-  eventlog_socket_control_namespace_entry_t *next =
-      malloc(sizeof(eventlog_socket_control_namespace_entry_t));
+  control_namespace_store_entry_t *next =
+      malloc(sizeof(control_namespace_store_entry_t));
   next->namespace_len = namespace_len;
   next->namespace = malloc(namespace_len + 1);
   next->namespace[namespace_len] = '\0';
@@ -180,7 +179,7 @@ bool eventlog_socket_control_register_namespace(
   *namespace_id_out = namespace_id;
 
   // Return success.
-  pthread_mutex_unlock(&g_control_namespace_list_mutex);
+  pthread_mutex_unlock(&g_control_namespace_store_mutex);
   return true;
 }
 
@@ -195,15 +194,14 @@ bool eventlog_socket_control_register_namespace(
 // todo: don't store the explicit namespace and command ids with each command,
 //       but rather have those be an index into a data structure.
 
-typedef struct eventlog_socket_control_command_item
-    eventlog_socket_control_command_item_t;
+typedef struct control_command_store_entry control_command_store_entry_t;
 
-struct eventlog_socket_control_command_item {
+struct control_command_store_entry {
   eventlog_socket_control_namespace_id_t namespace_id;
   eventlog_socket_control_command_id_t command_id;
   eventlog_socket_control_command_handler_t *handler;
   void *user_data;
-  eventlog_socket_control_command_item_t *next;
+  control_command_store_entry_t *next;
 };
 
 // Builtin control command handlers
@@ -239,18 +237,18 @@ control_request_heap_profile(eventlog_socket_control_command_t command,
 }
 
 // Registry of control command handlers
-static eventlog_socket_control_command_item_t *g_control_handlers =
-    &(eventlog_socket_control_command_item_t){
+static control_command_store_entry_t *g_control_command_store =
+    &(control_command_store_entry_t){
         .namespace_id = BUILTIN_NAMESPACE_ID,
         .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
         .handler = control_start_heap_profiling,
         .user_data = NULL,
-        .next = &(eventlog_socket_control_command_item_t){
+        .next = &(control_command_store_entry_t){
             .namespace_id = BUILTIN_NAMESPACE_ID,
             .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
             .handler = control_stop_heap_profiling,
             .user_data = NULL,
-            .next = &(eventlog_socket_control_command_item_t){
+            .next = &(control_command_store_entry_t){
                 .namespace_id = BUILTIN_NAMESPACE_ID,
                 .command_id = BUILTIN_COMMAND_ID_REQUEST_HEAP_PROFILE,
                 .handler = control_request_heap_profile,
@@ -269,7 +267,7 @@ bool eventlog_socket_control_register_command(
 
   bool success = false;
   pthread_mutex_lock(&g_control_handlers_mutex);
-  eventlog_socket_control_command_item_t *entry = g_control_handlers;
+  control_command_store_entry_t *entry = g_control_command_store;
   while (entry != NULL) {
     if (entry->namespace_id == command.namespace_id &&
         entry->command_id == command.command_id) {
@@ -282,7 +280,7 @@ bool eventlog_socket_control_register_command(
     entry = entry->next;
   }
 
-  entry = malloc(sizeof(eventlog_socket_control_command_item_t));
+  entry = malloc(sizeof(control_command_store_entry_t));
   if (entry == NULL) {
     DEBUG_ERROR("%s", "control: failed to allocate handler entry");
     goto out;
@@ -291,8 +289,8 @@ bool eventlog_socket_control_register_command(
   entry->command_id = command.command_id;
   entry->handler = handler;
   entry->user_data = user_data;
-  entry->next = g_control_handlers;
-  g_control_handlers = entry;
+  entry->next = g_control_command_store;
+  g_control_command_store = entry;
   success = true;
 
 out:
@@ -307,44 +305,45 @@ out:
 static int g_control_fd = -1;
 
 typedef enum {
-  CONTROL_READ_MAGIC,
-  CONTROL_READ_PROTOCOL_VERSION,
-  CONTROL_READ_NAMESPACE_LEN,
-  CONTROL_READ_NAMESPACE,
-  CONTROL_READ_COMMAND_ID,
-} control_read_state_tag_t;
+  CONTROL_COMMAND_PARSER_STATE_MAGIC,
+  CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION,
+  CONTROL_COMMAND_PARSER_STATE_NAMESPACE_LEN,
+  CONTROL_COMMAND_PARSER_STATE_NAMESPACE,
+  CONTROL_COMMAND_PARSER_STATE_COMMAND_ID,
+} control_command_parser_state_tag_t;
 
-const char *control_read_state_tag_show(control_read_state_tag_t tag) {
+const char *
+control_command_parser_state_tag_show(control_command_parser_state_tag_t tag) {
   switch (tag) {
-  case CONTROL_READ_MAGIC:
-    return "CONTROL_READ_MAGIC";
-  case CONTROL_READ_PROTOCOL_VERSION:
-    return "CONTROL_READ_PROTOCOL_VERSION";
-  case CONTROL_READ_NAMESPACE_LEN:
-    return "CONTROL_READ_NAMESPACE_LEN";
-  case CONTROL_READ_NAMESPACE:
-    return "CONTROL_READ_NAMESPACE";
-  case CONTROL_READ_COMMAND_ID:
-    return "CONTROL_READ_COMMAND_ID";
+  case CONTROL_COMMAND_PARSER_STATE_MAGIC:
+    return "CONTROL_COMMAND_PARSER_STATE_MAGIC";
+  case CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION:
+    return "CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION";
+  case CONTROL_COMMAND_PARSER_STATE_NAMESPACE_LEN:
+    return "CONTROL_COMMAND_PARSER_STATE_NAMESPACE_LEN";
+  case CONTROL_COMMAND_PARSER_STATE_NAMESPACE:
+    return "CONTROL_COMMAND_PARSER_STATE_NAMESPACE";
+  case CONTROL_COMMAND_PARSER_STATE_COMMAND_ID:
+    return "CONTROL_COMMAND_PARSER_STATE_COMMAND_ID";
   }
 }
 
 typedef struct {
-  control_read_state_tag_t tag;
+  control_command_parser_state_tag_t tag;
   union {
-    // if .tag == CONTROL_READ_MAGIC
+    // if .tag == CONTROL_COMMAND_PARSER_STATE_MAGIC
     // the state stores:
     // * the position of the next header byte
     /// @invariant header_pos < CONTROL_MAGIC_LEN
     uint8_t header_pos;
 
-    // if .tag == CONTROL_READ_PROTOCOL_VERSION
+    // if .tag == CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION
     // the state stores nothing.
 
-    // if .tag == CONTROL_READ_NAMESPACE_LEN
+    // if .tag == CONTROL_COMMAND_PARSER_STATE_NAMESPACE_LEN
     // the state stores nothing.
 
-    // if .tag == CONTROL_READ_NAMESPACE
+    // if .tag == CONTROL_COMMAND_PARSER_STATE_NAMESPACE
     // the state stores:
     // * the expected namespace length in bytes
     // * the position of the next namespace byte
@@ -358,34 +357,34 @@ typedef struct {
       char *namespace_buffer;
     };
 
-    // if .tag == CONTROL_READ_COMMAND
+    // if .tag == CONTROL_COMMAND_PARSER_STATE_COMMAND
     // the state stores:
     // * the current namespace id
     eventlog_socket_control_namespace_id_t command_namespace_id;
   };
-} control_read_state_t;
+} control_command_parser_state_t;
 
-control_read_state_t g_control_read_state = {
-    .tag = CONTROL_READ_MAGIC,
+control_command_parser_state_t g_control_command_parser_state = {
+    .tag = CONTROL_COMMAND_PARSER_STATE_MAGIC,
     .header_pos = 0,
 };
 
 typedef enum {
-  CONTROL_FD_CLOSED,
-  CONTROL_FD_ERROR,
-  CONTROL_FD_RETRY,
-  CONTROL_FD_READY,
-  CONTROL_FD_INTR,
+  CONTROL_FD_STATUS_CLOSED,
+  CONTROL_FD_STATUS_ERROR,
+  CONTROL_FD_STATUS_RETRY,
+  CONTROL_FD_STATUS_READY,
+  CONTROL_FD_STATUS_INTR,
 } control_fd_status_t;
 
-static bool control_handle_command(eventlog_socket_control_command_t command) {
+static bool control_command_handle(eventlog_socket_control_command_t command) {
   DEBUG_TRACE("Handle command in namespace %02x with id %02x",
               command.namespace_id, command.command_id);
   eventlog_socket_control_command_handler_t *handler = NULL;
   void *user_data = NULL;
 
   pthread_mutex_lock(&g_control_handlers_mutex);
-  eventlog_socket_control_command_item_t *entry = g_control_handlers;
+  control_command_store_entry_t *entry = g_control_command_store;
   while (entry != NULL) {
     if (entry->namespace_id == command.namespace_id &&
         entry->command_id == command.command_id) {
@@ -407,91 +406,97 @@ static bool control_handle_command(eventlog_socket_control_command_t command) {
   }
 }
 
-/// @pre g_control_read_state.tag != tag
-static void control_read_enter_state(const control_read_state_tag_t tag,
-                                     const uint8_t *data) {
-  DEBUG_TRACE("%s -> %s", control_read_state_tag_show(g_control_read_state.tag),
-              control_read_state_tag_show(tag));
+static void
+control_command_parser_enter_state(const control_command_parser_state_tag_t tag,
+                                   const uint8_t *data) {
+  DEBUG_TRACE(
+      "%s -> %s",
+      control_command_parser_state_tag_show(g_control_command_parser_state.tag),
+      control_command_parser_state_tag_show(tag));
 
   // this should only be called when restarting or moving to a different
   // state...
-  assert(tag == CONTROL_READ_MAGIC || g_control_read_state.tag != tag);
+  assert(tag == CONTROL_COMMAND_PARSER_STATE_MAGIC ||
+         g_control_command_parser_state.tag != tag);
 
-  // if the parser is leaving CONTROL_READ_NAMESPACE, then...
-  if (g_control_read_state.tag == CONTROL_READ_NAMESPACE) {
+  // if the parser is leaving CONTROL_COMMAND_PARSER_STATE_NAMESPACE, then...
+  if (g_control_command_parser_state.tag ==
+      CONTROL_COMMAND_PARSER_STATE_NAMESPACE) {
     // ...free the namespace buffer...
-    free(g_control_read_state.namespace_buffer);
+    free(g_control_command_parser_state.namespace_buffer);
   }
 
   // update the control state tag...
-  g_control_read_state.tag = tag;
+  g_control_command_parser_state.tag = tag;
 
   // initialise the control state appropriately...
   switch (tag) {
-  case CONTROL_READ_MAGIC: {
+  case CONTROL_COMMAND_PARSER_STATE_MAGIC: {
     // if restarting, handle current_byte...
-    if (tag == CONTROL_READ_MAGIC && data != NULL &&
+    if (tag == CONTROL_COMMAND_PARSER_STATE_MAGIC && data != NULL &&
         *data == control_magic[0]) {
       // ...start at the second header byte...
-      g_control_read_state.header_pos = 1;
+      g_control_command_parser_state.header_pos = 1;
     } else {
       // ...start at the first header byte...
-      g_control_read_state.header_pos = 0;
+      g_control_command_parser_state.header_pos = 0;
     }
     break;
   }
-  case CONTROL_READ_PROTOCOL_VERSION: {
+  case CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION: {
     assert(data == NULL);
     break;
   }
-  case CONTROL_READ_NAMESPACE_LEN: {
+  case CONTROL_COMMAND_PARSER_STATE_NAMESPACE_LEN: {
     assert(data == NULL);
     break;
   }
-  case CONTROL_READ_NAMESPACE: {
+  case CONTROL_COMMAND_PARSER_STATE_NAMESPACE: {
     assert(data != NULL);
     const size_t namespace_len = *data;
-    g_control_read_state.namespace_buffer_len = namespace_len;
-    g_control_read_state.namespace_buffer_pos = 0;
+    g_control_command_parser_state.namespace_buffer_len = namespace_len;
+    g_control_command_parser_state.namespace_buffer_pos = 0;
     // allocate space for the namespace, with one additional byte to ensure
     // that the string is always null-terminated in memory.
-    g_control_read_state.namespace_buffer = malloc(namespace_len + 1);
-    g_control_read_state.namespace_buffer[namespace_len] = '\0';
+    g_control_command_parser_state.namespace_buffer = malloc(namespace_len + 1);
+    g_control_command_parser_state.namespace_buffer[namespace_len] = '\0';
     break;
   }
-  case CONTROL_READ_COMMAND_ID: {
+  case CONTROL_COMMAND_PARSER_STATE_COMMAND_ID: {
     assert(data != NULL);
-    g_control_read_state.command_namespace_id = *data;
+    g_control_command_parser_state.command_namespace_id = *data;
     break;
   }
   }
 }
 
-static void control_handle_command_chunk(const size_t chunk_size,
-                                         const uint8_t chunk[chunk_size]) {
+static void
+control_command_parser_handle_chunk(const size_t chunk_size,
+                                    const uint8_t chunk[chunk_size]) {
   DEBUG_TRACE("Received chunk of size %zd.", chunk_size);
   // iterate over the bytes in the chunk...
   for (size_t chunk_index = 0; chunk_index < chunk_size; ++chunk_index) {
     // get the next byte from the chunk...
     const uint8_t current_byte = chunk[chunk_index];
-    switch (g_control_read_state.tag) {
+    switch (g_control_command_parser_state.tag) {
     // the parser is currently reading the header...
-    case CONTROL_READ_MAGIC: {
+    case CONTROL_COMMAND_PARSER_STATE_MAGIC: {
       // invariant: header_pos should be a valid index into control_magic
-      assert(0 <= g_control_read_state.header_pos);
-      assert(g_control_read_state.header_pos < CONTROL_MAGIC_LEN);
+      assert(0 <= g_control_command_parser_state.header_pos);
+      assert(g_control_command_parser_state.header_pos < CONTROL_MAGIC_LEN);
       const uint8_t expected_byte =
-          control_magic[g_control_read_state.header_pos];
+          control_magic[g_control_command_parser_state.header_pos];
       // if the next byte is the expected byte...
       if (current_byte == expected_byte) {
         DEBUG_TRACE("Matched control_magic byte %d",
-                    g_control_read_state.header_pos);
+                    g_control_command_parser_state.header_pos);
         // ...move on the the next state...
-        ++g_control_read_state.header_pos;
+        ++g_control_command_parser_state.header_pos;
         // if header_pos moves out of control_magic...
-        if (g_control_read_state.header_pos >= CONTROL_MAGIC_LEN) {
+        if (g_control_command_parser_state.header_pos >= CONTROL_MAGIC_LEN) {
           // ...continue reading the namespace length...
-          control_read_enter_state(CONTROL_READ_PROTOCOL_VERSION, NULL);
+          control_command_parser_enter_state(
+              CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION, NULL);
         }
         // ...continue processing with the _next_ byte...
         continue;
@@ -500,28 +505,31 @@ static void control_handle_command_chunk(const size_t chunk_size,
       else {
         // ...there has been a protocol error...
         // ...restart with the _current_ byte...
-        control_read_enter_state(CONTROL_READ_MAGIC, &current_byte);
+        control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
+                                           &current_byte);
         // ...continue processing with the _next_ byte...
         continue;
       }
     }
     // the parser is currently reading the protocol version...
-    case CONTROL_READ_PROTOCOL_VERSION: {
+    case CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION: {
       DEBUG_TRACE("Matched protocol version byte %d", current_byte);
       // if the message version matches the protocol version...
       if (current_byte == EVENTLOG_SOCKET_CONTROL_PROTOCOL_VERSION) {
         // ...then we should be able to parse the message...
         // ...continue processing with the _next_ byte...
-        control_read_enter_state(CONTROL_READ_NAMESPACE_LEN, NULL);
+        control_command_parser_enter_state(
+            CONTROL_COMMAND_PARSER_STATE_NAMESPACE_LEN, NULL);
         continue;
       } else {
         // ...otherwise, let's not try and parse this message...
         // ...restart with the _current_ byte...
-        control_read_enter_state(CONTROL_READ_MAGIC, &current_byte);
+        control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
+                                           &current_byte);
       }
     }
     // the parser is currently reading the namespace length...
-    case CONTROL_READ_NAMESPACE_LEN: {
+    case CONTROL_COMMAND_PARSER_STATE_NAMESPACE_LEN: {
       // if current_byte == 0, then...
       if (current_byte == 0) {
         // ...there has been a protocol error...
@@ -529,24 +537,26 @@ static void control_handle_command_chunk(const size_t chunk_size,
         // todo: write an error to the eventlog
         DEBUG_ERROR("%s", "Received namespace length 0");
         // ...restart with the _current_ byte...
-        control_read_enter_state(CONTROL_READ_MAGIC, &current_byte);
+        control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
+                                           &current_byte);
         continue;
       } else {
         DEBUG_TRACE("Matched namespace_len byte %d", current_byte);
         // otherwise, accept the namespace length and move to the next state...
-        control_read_enter_state(CONTROL_READ_NAMESPACE, &current_byte);
+        control_command_parser_enter_state(
+            CONTROL_COMMAND_PARSER_STATE_NAMESPACE, &current_byte);
         continue;
       }
     }
-    case CONTROL_READ_NAMESPACE: {
+    case CONTROL_COMMAND_PARSER_STATE_NAMESPACE: {
       // calculate the number of bytes still required for the namespace.
       // note: subtraction is safe due to the invariant on namespace_buffer_pos.
-      assert(g_control_read_state.namespace_buffer_len > 0);
-      assert(g_control_read_state.namespace_buffer_pos <
-             g_control_read_state.namespace_buffer_len);
+      assert(g_control_command_parser_state.namespace_buffer_len > 0);
+      assert(g_control_command_parser_state.namespace_buffer_pos <
+             g_control_command_parser_state.namespace_buffer_len);
       const uint8_t required_bytes_for_namespace =
-          g_control_read_state.namespace_buffer_len -
-          g_control_read_state.namespace_buffer_pos;
+          g_control_command_parser_state.namespace_buffer_len -
+          g_control_command_parser_state.namespace_buffer_pos;
       assert(required_bytes_for_namespace > 0);
 
       // calculate the number of bytes still available in the chunk.
@@ -564,16 +574,16 @@ static void control_handle_command_chunk(const size_t chunk_size,
       assert(available_bytes > 0);
 
       // copy all available bytes to the namespace buffer.
-      void *cpy_dest = g_control_read_state.namespace_buffer +
-                       g_control_read_state.namespace_buffer_pos;
+      void *cpy_dest = g_control_command_parser_state.namespace_buffer +
+                       g_control_command_parser_state.namespace_buffer_pos;
       const void *cpy_src = chunk + chunk_index;
       memcpy(cpy_dest, cpy_src, available_bytes);
       // move namespace_buffer_pos.
-      g_control_read_state.namespace_buffer_pos += available_bytes;
+      g_control_command_parser_state.namespace_buffer_pos += available_bytes;
 
       // if the namespace is incomplete, then...
-      if (g_control_read_state.namespace_buffer_pos <
-          g_control_read_state.namespace_buffer_len) {
+      if (g_control_command_parser_state.namespace_buffer_pos <
+          g_control_command_parser_state.namespace_buffer_len) {
         // move chunk_index by the number of copied bytes less one,
         // because the chunk_index will be updated when we reenter the for loop.
         // note: the subtraction is safe because available_bytes > 0
@@ -585,23 +595,25 @@ static void control_handle_command_chunk(const size_t chunk_size,
       // otherwise, the namespace is complete...
       // note: this relies on the fact that the string is null-terminated!
       DEBUG_TRACE("matched namespace '%s'",
-                  g_control_read_state.namespace_buffer);
+                  g_control_command_parser_state.namespace_buffer);
 
       // ...try to resolve the namespace...
       uint8_t namespace_id = UCHAR_MAX;
-      const bool namespace_id_found = control_namespace_resolve(
-          g_control_read_state.namespace_buffer_len,
-          g_control_read_state.namespace_buffer, &namespace_id);
+      const bool namespace_id_found = control_namespace_store_resolve(
+          g_control_command_parser_state.namespace_buffer_len,
+          g_control_command_parser_state.namespace_buffer, &namespace_id);
       // if the namespace was successfully resolved, then...
       if (namespace_id_found) {
         DEBUG_TRACE("resolved namespace '%s' to %d",
-                    g_control_read_state.namespace_buffer, namespace_id);
+                    g_control_command_parser_state.namespace_buffer,
+                    namespace_id);
         // move chunk_index by the number of copied bytes less one,
         // because the chunk_index will be updated when we reenter the for loop.
         // note: the subtraction is safe because available_bytes > 0
         chunk_index += available_bytes - 1;
         // ...move to the next state...
-        control_read_enter_state(CONTROL_READ_COMMAND_ID, &namespace_id);
+        control_command_parser_enter_state(
+            CONTROL_COMMAND_PARSER_STATE_COMMAND_ID, &namespace_id);
         // ...continue processing with the _next_ byte...
         continue;
       }
@@ -638,24 +650,26 @@ static void control_handle_command_chunk(const size_t chunk_size,
         //
         // todo: write an error to the eventlog
         DEBUG_ERROR("unknown namespace %s",
-                    g_control_read_state.namespace_buffer);
+                    g_control_command_parser_state.namespace_buffer);
         // ...restart with the _current_ byte...
-        control_read_enter_state(CONTROL_READ_MAGIC, &current_byte);
+        control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
+                                           &current_byte);
         // ...continue processing with the _next_ byte...
         continue;
       }
     }
-    case CONTROL_READ_COMMAND_ID: {
+    case CONTROL_COMMAND_PARSER_STATE_COMMAND_ID: {
       DEBUG_TRACE("matched command_id byte '%d'", current_byte);
       // Create a command.
       const eventlog_socket_control_command_t command = {
-          .namespace_id = g_control_read_state.command_namespace_id,
+          .namespace_id = g_control_command_parser_state.command_namespace_id,
           .command_id = current_byte,
       };
       // Handle the command.
-      control_handle_command(command);
+      control_command_handle(command);
       // ...restart _without_ the current byte...
-      control_read_enter_state(CONTROL_READ_MAGIC, NULL);
+      control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
+                                         NULL);
       // ...continue processing with the _next_ byte...
       continue;
     }
@@ -663,7 +677,7 @@ static void control_handle_command_chunk(const size_t chunk_size,
   }
 }
 
-static control_fd_status_t control_wait_for_input(void) {
+static control_fd_status_t control_fd_wait_for_input(void) {
   DEBUG_TRACE("Waiting for input on %d.", g_control_fd);
 
   // poll for available data:
@@ -678,74 +692,68 @@ static control_fd_status_t control_wait_for_input(void) {
   // if ready is -1, an error occurred...
   if (ready == -1) {
     DEBUG_ERRNO("poll() failed");
-    return CONTROL_FD_ERROR;
+    return CONTROL_FD_STATUS_ERROR;
   }
   // if ready is 0, the call to poll timed out...
   if (ready == 0) {
     DEBUG_TRACE("%s", "poll() timed out");
-    return CONTROL_FD_RETRY;
+    return CONTROL_FD_STATUS_RETRY;
   }
   // otherwise ready is 1, and the file descriptor is ready...
   assert(ready == 1); // poll invariant: ready <= |pfds|
   const int revents = pfds[0].revents;
   // if the POLLIN bit is set, the file descriptor is ready with input...
   if (revents & POLLIN) {
-    return CONTROL_FD_READY;
+    return CONTROL_FD_STATUS_READY;
   }
   // if either of the POLLERR, POLLHUP, or POLLNVAL bits are set,
   // the file descriptor is closed...
   // note: in the case of POLLHUP there may still be buffered input,
   //       so this condition should be checked _after_ POLLIN.
   if ((revents & POLLNVAL) || (revents & POLLHUP) || (revents & POLLERR)) {
-    return CONTROL_FD_CLOSED;
+    return CONTROL_FD_STATUS_CLOSED;
   }
   // note: the above conditions should cover all possible outputs.
   //       if this isn't the case, the following assertion should trigger.
   assert(false);
   //       if assertions are turned off, treat this as a timeout.
-  return CONTROL_FD_RETRY;
+  return CONTROL_FD_STATUS_RETRY;
 }
 
-static control_fd_status_t
-control_read_command_chunk(const size_t chunk_size, uint8_t chunk[chunk_size]) {
+static control_fd_status_t control_fd_read_chunk(const size_t chunk_size,
+                                                 uint8_t chunk[chunk_size]) {
   DEBUG_TRACE("Receiving input from %d.", g_control_fd);
 
   // read a chunk from the file descriptor...
-  const ssize_t chunk_size_or_error =
-      recv(g_control_fd, chunk, CONTROL_READ_COMMAND_CHUNK_SIZE, 0);
+  const ssize_t chunk_size_or_error = recv(
+      g_control_fd, chunk, CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE, 0);
   // if num_bytes_or_error == -1, an error occurred...
   if (chunk_size_or_error == -1) {
     // if errno is EINTR, the receive was interrupted...
     if (errno == EINTR) {
-      return CONTROL_FD_INTR;
+      return CONTROL_FD_STATUS_INTR;
     }
     // if errno is EGAIN or EWOULDBLOCK, recv timed out...
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       DEBUG_TRACE("%s", "recv() timed out or was interrupted.");
       // note: the socket should have SO_RCVTIMEO set.
-      return CONTROL_FD_RETRY;
+      return CONTROL_FD_STATUS_RETRY;
     }
     // if errno is anything else, there is some error...
     DEBUG_ERRNO("recv() failed");
-    return CONTROL_FD_ERROR;
+    return CONTROL_FD_STATUS_ERROR;
   }
   // if num_bytes_or_error == 0, the connection was closed...
   if (chunk_size_or_error == 0) {
     DEBUG_TRACE("%s", "recv() failed: the connection was closed.");
-    return CONTROL_FD_CLOSED;
+    return CONTROL_FD_STATUS_CLOSED;
   }
   // otherwise, handle the received chunk...
   DEBUG_TRACE("recv() read %zd bytes", chunk_size_or_error);
-  return CONTROL_FD_READY;
+  return CONTROL_FD_STATUS_READY;
 }
 
 // HERE BE DRAGONS
-
-typedef enum eventlog_socket_control_status {
-  CONTROL_RECV_OK,
-  CONTROL_RECV_PROTOCOL_ERROR,
-  CONTROL_RECV_DISCONNECTED,
-} eventlog_socket_control_status_t;
 
 static volatile bool g_ghc_rts_ready = false;
 static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -764,13 +772,14 @@ static const volatile int *g_control_fd_ptr = NULL;
 static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
 static pthread_cond_t *g_new_conn_cond_ptr = NULL;
 
-static void control_reset(const int new_control_fd) {
+static void control_fd_reset_to(const int new_control_fd) {
   DEBUG_TRACE("%s", "Resetting control server state.");
   g_control_fd = new_control_fd;
+  // todo: reset parser state
 }
 
 /// @pre must have lock on @link g_control_fd_mutex_ptr
-static void control_wait(void) {
+static void control_fd_wait_for_connection(void) {
   DEBUG_TRACE("%s", "Waiting to be notified of new connection.");
   pthread_cond_wait(g_new_conn_cond_ptr, g_control_fd_mutex_ptr);
 }
@@ -802,7 +811,7 @@ static void *control_loop(void *arg) {
     if (g_control_fd == -1 && new_control_fd == -1) {
       DEBUG_TRACE("%s", "There WAS NO connection and there IS NO connection.");
       // ...wait to be notified of a new connection...
-      control_wait();
+      control_fd_wait_for_connection();
       // ...release the lock...
       pthread_mutex_unlock(g_control_fd_mutex_ptr);
       // ...and re-enter the loop.
@@ -815,7 +824,7 @@ static void *control_loop(void *arg) {
       // ...DON'T wait to be notified of a new connection...
       // ...we may we have already missed the signal...
       // ...reset the control server state...
-      control_reset(new_control_fd);
+      control_fd_reset_to(new_control_fd);
       // ...continue to try to handle a command.
     }
 
@@ -823,9 +832,9 @@ static void *control_loop(void *arg) {
     else if (g_control_fd != -1 && new_control_fd == -1) {
       DEBUG_TRACE("%s", "There WAS A connection but there IS NO connection.");
       // ...reset the control server state...
-      control_reset(new_control_fd);
+      control_fd_reset_to(new_control_fd);
       // ...wait to be notified of a new connection...
-      control_wait();
+      control_fd_wait_for_connection();
       // ...release the lock...
       pthread_mutex_unlock(g_control_fd_mutex_ptr);
       // ...and re-enter the loop.
@@ -840,7 +849,7 @@ static void *control_loop(void *arg) {
       // ...DON'T wait to be notified of a new connection...
       // ...we may we have already missed the signal...
       // ...reset the control server state...
-      control_reset(new_control_fd);
+      control_fd_reset_to(new_control_fd);
       // ...continue to try to handle a command.
     }
 
@@ -864,31 +873,32 @@ static void *control_loop(void *arg) {
     assert(g_control_fd == new_control_fd);
 
     // Wait for input:
-    const control_fd_status_t wait_fd_status = control_wait_for_input();
+    const control_fd_status_t wait_fd_status = control_fd_wait_for_input();
     switch (wait_fd_status) {
-    case CONTROL_FD_READY:
+    case CONTROL_FD_STATUS_READY:
       break;
-    case CONTROL_FD_CLOSED:
-    case CONTROL_FD_ERROR:
-    case CONTROL_FD_RETRY:
+    case CONTROL_FD_STATUS_CLOSED:
+    case CONTROL_FD_STATUS_ERROR:
+    case CONTROL_FD_STATUS_RETRY:
       continue;
-    case CONTROL_FD_INTR:
+    case CONTROL_FD_STATUS_INTR:
       return NULL;
     }
 
     // Read a command:
-    uint8_t chunk[CONTROL_READ_COMMAND_CHUNK_SIZE] = {0};
-    const control_fd_status_t read_fd_status =
-        control_read_command_chunk(CONTROL_READ_COMMAND_CHUNK_SIZE, chunk);
+    uint8_t chunk[CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE] = {0};
+    const control_fd_status_t read_fd_status = control_fd_read_chunk(
+        CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE, chunk);
     switch (read_fd_status) {
-    case CONTROL_FD_READY:
-      control_handle_command_chunk(CONTROL_READ_COMMAND_CHUNK_SIZE, chunk);
+    case CONTROL_FD_STATUS_READY:
+      control_command_parser_handle_chunk(
+          CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE, chunk);
       break;
-    case CONTROL_FD_CLOSED:
-    case CONTROL_FD_ERROR:
-    case CONTROL_FD_RETRY:
+    case CONTROL_FD_STATUS_CLOSED:
+    case CONTROL_FD_STATUS_ERROR:
+    case CONTROL_FD_STATUS_RETRY:
       continue;
-    case CONTROL_FD_INTR:
+    case CONTROL_FD_STATUS_INTR:
       return NULL;
     }
   }
