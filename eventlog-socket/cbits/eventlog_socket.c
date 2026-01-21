@@ -154,7 +154,7 @@ static void writer_init(void) {
 }
 
 static void writer_enqueue(uint8_t *data, size_t size) {
-  DEBUG_TRACE("size: %p %lu", data, size);
+  DEBUG_TRACE("size: %p %lu", (void *)data, size);
   bool was_empty = g_write_buffer.head == NULL;
 
   // TODO: check the size of the queue
@@ -163,7 +163,7 @@ static void writer_enqueue(uint8_t *data, size_t size) {
   // for now, we just push everythinb to the back of the buffer.
   write_buffer_push(&g_write_buffer, data, size);
 
-  DEBUG_TRACE("wt.head = %p", g_write_buffer.head);
+  DEBUG_TRACE("wt.head = %p", (void *)g_write_buffer.head);
   if (was_empty) {
     wake_worker();
   }
@@ -179,7 +179,7 @@ static bool writer_write(void *eventlog, size_t size) {
     goto exit;
   }
 
-  DEBUG_TRACE("client_fd = %d; wt.head = %p", fd, g_write_buffer.head);
+  DEBUG_TRACE("client_fd = %d; wt.head = %p", fd, (void *)g_write_buffer.head);
 
   if (g_write_buffer.head != NULL) {
     // if there is stuff in queue already, we enqueue the current block.
@@ -453,7 +453,7 @@ static void iteration(void) {
   pthread_mutex_lock(&g_write_buffer_and_client_fd_mutex);
   int fd = g_client_fd;
   bool empty = g_write_buffer.head == NULL;
-  DEBUG_TRACE("fd = %d, wt.head = %p", fd, g_write_buffer.head);
+  DEBUG_TRACE("fd = %d, wt.head = %p", fd, (void *)g_write_buffer.head);
   pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
 
   if (fd != -1) {
