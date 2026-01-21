@@ -214,7 +214,7 @@ control_start_heap_profiling(eventlog_socket_control_command_t command,
                              void *user_data) {
   (void)command;
   (void)user_data;
-  DEBUG_TRACE("control: startHeapProfiling");
+  DEBUG_TRACE("%s", "control: startHeapProfiling");
   startHeapProfTimer();
 }
 
@@ -224,7 +224,7 @@ control_stop_heap_profiling(eventlog_socket_control_command_t command,
                             void *user_data) {
   (void)command;
   (void)user_data;
-  DEBUG_TRACE("control: stopHeapProfiling");
+  DEBUG_TRACE("%s", "control: stopHeapProfiling");
   stopHeapProfTimer();
 }
 
@@ -234,7 +234,7 @@ control_request_heap_profile(eventlog_socket_control_command_t command,
                              void *user_data) {
   (void)command;
   (void)user_data;
-  DEBUG_TRACE("control: requestHeapProfile");
+  DEBUG_TRACE("%s", "control: requestHeapProfile");
   requestHeapCensus();
 }
 
@@ -284,7 +284,7 @@ bool eventlog_socket_control_register_command(
 
   entry = malloc(sizeof(eventlog_socket_control_command_item_t));
   if (entry == NULL) {
-    DEBUG_ERROR("control: failed to allocate handler entry");
+    DEBUG_ERROR("%s", "control: failed to allocate handler entry");
     goto out;
   }
   entry->namespace_id = command.namespace_id;
@@ -307,10 +307,10 @@ out:
 static int g_control_fd = -1;
 
 typedef enum {
-  CONTROL_READ_HEADER,
-  CONTROL_READ_NAMESPACE_LEN,
-  CONTROL_READ_NAMESPACE,
-  CONTROL_READ_COMMAND_ID,
+  CONTROL_READ_HEADER = 0,
+  CONTROL_READ_NAMESPACE_LEN = 1,
+  CONTROL_READ_NAMESPACE = 2,
+  CONTROL_READ_COMMAND_ID = 3,
 } control_read_state_tag_t;
 
 const char *control_read_state_tag_show(control_read_state_tag_t tag) {
@@ -369,6 +369,7 @@ typedef enum {
   CONTROL_FD_ERROR,
   CONTROL_FD_RETRY,
   CONTROL_FD_READY,
+  CONTROL_FD_INTR,
 } control_fd_status_t;
 
 static bool control_handle_command(eventlog_socket_control_command_t command) {
@@ -402,16 +403,13 @@ static bool control_handle_command(eventlog_socket_control_command_t command) {
 
 /// @pre g_control_read_state.tag != tag
 static void control_read_enter_state(const control_read_state_tag_t tag,
-                                     const uint8_t *current_byte) {
-  DEBUG_TRACE("control_read_enter_state: %s -> %s",
-              control_read_state_tag_show(g_control_read_state.tag),
+                                     const uint8_t *data) {
+  DEBUG_TRACE("%s -> %s", control_read_state_tag_show(g_control_read_state.tag),
               control_read_state_tag_show(tag));
 
-  // function should only be called when changing state...
-  assert(g_control_read_state.tag != tag);
-  if (g_control_read_state.tag == tag) {
-    return;
-  }
+  // this should only be called when restarting or moving to a different
+  // state...
+  assert(tag == CONTROL_READ_HEADER || g_control_read_state.tag != tag);
 
   // if the parser is leaving CONTROL_READ_NAMESPACE, then...
   if (g_control_read_state.tag == CONTROL_READ_NAMESPACE) {
@@ -419,12 +417,15 @@ static void control_read_enter_state(const control_read_state_tag_t tag,
     free(g_control_read_state.namespace_buffer);
   }
 
+  // update the control state tag...
+  g_control_read_state.tag = tag;
+
   // initialise the control state appropriately...
   switch (tag) {
   case CONTROL_READ_HEADER: {
     // if restarting, handle current_byte...
-    if (tag == CONTROL_READ_HEADER && current_byte != NULL &&
-        *current_byte == control_magic[0]) {
+    if (tag == CONTROL_READ_HEADER && data != NULL &&
+        *data == control_magic[0]) {
       // ...start at the second header byte...
       g_control_read_state.header_pos = 1;
     } else {
@@ -434,22 +435,23 @@ static void control_read_enter_state(const control_read_state_tag_t tag,
     break;
   }
   case CONTROL_READ_NAMESPACE_LEN: {
-    assert(current_byte == NULL);
+    assert(data == NULL);
     break;
   }
   case CONTROL_READ_NAMESPACE: {
-    assert(current_byte != NULL);
-    const size_t namespace_len = *current_byte;
+    assert(data != NULL);
+    const size_t namespace_len = *data;
     g_control_read_state.namespace_buffer_len = namespace_len;
     g_control_read_state.namespace_buffer_pos = 0;
     // allocate space for the namespace, with one additional byte to ensure
     // that the string is always null-terminated in memory.
     g_control_read_state.namespace_buffer = malloc(namespace_len + 1);
     g_control_read_state.namespace_buffer[namespace_len] = '\0';
+    break;
   }
   case CONTROL_READ_COMMAND_ID: {
-    assert(current_byte == NULL);
-    g_control_read_state.command_namespace_id = UCHAR_MAX;
+    assert(data != NULL);
+    g_control_read_state.command_namespace_id = *data;
     break;
   }
   }
@@ -457,6 +459,7 @@ static void control_read_enter_state(const control_read_state_tag_t tag,
 
 static void control_handle_command_chunk(const size_t chunk_size,
                                          const uint8_t chunk[chunk_size]) {
+  DEBUG_TRACE("Received chunk of size %zd.", chunk_size);
   // iterate over the bytes in the chunk...
   for (size_t chunk_index = 0; chunk_index < chunk_size; ++chunk_index) {
     // get the next byte from the chunk...
@@ -471,14 +474,14 @@ static void control_handle_command_chunk(const size_t chunk_size,
           control_magic[g_control_read_state.header_pos];
       // if the next byte is the expected byte...
       if (current_byte == expected_byte) {
-        DEBUG_TRACE("matched control_magic byte %d",
+        DEBUG_TRACE("Matched control_magic byte %d",
                     g_control_read_state.header_pos);
         // ...move on the the next state...
         ++g_control_read_state.header_pos;
         // if header_pos moves out of control_magic...
         if (g_control_read_state.header_pos >= CONTROL_MAGIC_LEN) {
           // ...continue reading the namespace length...
-          g_control_read_state.tag = CONTROL_READ_NAMESPACE_LEN;
+          control_read_enter_state(CONTROL_READ_NAMESPACE_LEN, NULL);
         }
         // ...continue processing with the _next_ byte...
         continue;
@@ -499,12 +502,12 @@ static void control_handle_command_chunk(const size_t chunk_size,
         // ...there has been a protocol error...
         // todo: enforce this in the register function
         // todo: write an error to the eventlog
-        DEBUG_ERROR("received namespace length 0");
+        DEBUG_ERROR("%s", "Received namespace length 0");
         // ...restart with the _current_ byte...
         control_read_enter_state(CONTROL_READ_HEADER, &current_byte);
         continue;
       } else {
-        DEBUG_TRACE("matched namespace_len byte %d", current_byte);
+        DEBUG_TRACE("Matched namespace_len byte %d", current_byte);
         // otherwise, accept the namespace length and move to the next state...
         control_read_enter_state(CONTROL_READ_NAMESPACE, &current_byte);
         continue;
@@ -573,7 +576,7 @@ static void control_handle_command_chunk(const size_t chunk_size,
         // note: the subtraction is safe because available_bytes > 0
         chunk_index += available_bytes - 1;
         // ...move to the next state...
-        control_read_enter_state(CONTROL_READ_COMMAND_ID, NULL);
+        control_read_enter_state(CONTROL_READ_COMMAND_ID, &namespace_id);
         // ...continue processing with the _next_ byte...
         continue;
       }
@@ -646,6 +649,7 @@ static control_fd_status_t control_wait_for_input(void) {
       .revents = 0,
   }};
   const int ready = poll(pfds, 1, POLL_LISTEN_TIMEOUT);
+
   // if ready is -1, an error occurred...
   if (ready == -1) {
     DEBUG_ERRNO("poll() failed");
@@ -653,6 +657,7 @@ static control_fd_status_t control_wait_for_input(void) {
   }
   // if ready is 0, the call to poll timed out...
   if (ready == 0) {
+    DEBUG_TRACE("%s", "poll() timed out");
     return CONTROL_FD_RETRY;
   }
   // otherwise ready is 1, and the file descriptor is ready...
@@ -685,10 +690,13 @@ control_read_command_chunk(const size_t chunk_size, uint8_t chunk[chunk_size]) {
       recv(g_control_fd, chunk, CONTROL_READ_COMMAND_CHUNK_SIZE, 0);
   // if num_bytes_or_error == -1, an error occurred...
   if (chunk_size_or_error == -1) {
-    // if errno is EGAIN or EWOULDBLOCK, recv timed out...
     // if errno is EINTR, the receive was interrupted...
-    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-      DEBUG_TRACE("recv() timed out or was interrupted.");
+    if (errno == EINTR) {
+      return CONTROL_FD_INTR;
+    }
+    // if errno is EGAIN or EWOULDBLOCK, recv timed out...
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      DEBUG_TRACE("%s", "recv() timed out or was interrupted.");
       // note: the socket should have SO_RCVTIMEO set.
       return CONTROL_FD_RETRY;
     }
@@ -698,7 +706,7 @@ control_read_command_chunk(const size_t chunk_size, uint8_t chunk[chunk_size]) {
   }
   // if num_bytes_or_error == 0, the connection was closed...
   if (chunk_size_or_error == 0) {
-    DEBUG_TRACE("recv() failed: the connection was closed.");
+    DEBUG_TRACE("%s", "recv() failed: the connection was closed.");
     return CONTROL_FD_CLOSED;
   }
   // otherwise, handle the received chunk...
@@ -719,7 +727,7 @@ static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_ghc_rts_ready_cond = PTHREAD_COND_INITIALIZER;
 
 static void control_wait_ghc_rts_ready(void) {
-  DEBUG_TRACE("Waiting for signal that GHC RTS is ready.");
+  DEBUG_TRACE("%s", "Waiting for signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
   while (!g_ghc_rts_ready) {
     pthread_cond_wait(&g_ghc_rts_ready_cond, &g_ghc_rts_ready_mutex);
@@ -817,13 +825,13 @@ control_read_command(int fd, eventlog_socket_control_command_t *command_out) {
 }
 
 static void control_reset(const int new_control_fd) {
-  DEBUG_TRACE("Resetting control server state.");
+  DEBUG_TRACE("%s", "Resetting control server state.");
   g_control_fd = new_control_fd;
 }
 
 /// @pre must have lock on @link g_control_fd_mutex_ptr
 static void control_wait(void) {
-  DEBUG_TRACE("Waiting to be notified of new connection.");
+  DEBUG_TRACE("%s", "Waiting to be notified of new connection.");
   pthread_cond_wait(g_new_conn_cond_ptr, g_control_fd_mutex_ptr);
 }
 
@@ -838,7 +846,7 @@ static void *control_loop(void *arg) {
   control_wait_ghc_rts_ready();
 
   while (true) {
-    DEBUG_TRACE("Starting new control iteration.");
+    DEBUG_TRACE("%s", "Starting new control iteration.");
 
     // Acquire the lock on the connection file description.
     pthread_mutex_lock(g_control_fd_mutex_ptr);
@@ -852,7 +860,7 @@ static void *control_loop(void *arg) {
 
     // If there WAS NO connection and there IS NO connection, then...
     if (g_control_fd == -1 && new_control_fd == -1) {
-      DEBUG_TRACE("There WAS NO connection and there IS NO connection.");
+      DEBUG_TRACE("%s", "There WAS NO connection and there IS NO connection.");
       // ...wait to be notified of a new connection...
       control_wait();
       // ...release the lock...
@@ -863,7 +871,7 @@ static void *control_loop(void *arg) {
 
     // If there WAS NO connection but there IS A connection, then...
     else if (g_control_fd == -1 && new_control_fd != -1) {
-      DEBUG_TRACE("There WAS NO connection but there IS A connection.");
+      DEBUG_TRACE("%s", "There WAS NO connection but there IS A connection.");
       // ...DON'T wait to be notified of a new connection...
       // ...we may we have already missed the signal...
       // ...reset the control server state...
@@ -873,7 +881,7 @@ static void *control_loop(void *arg) {
 
     // If there WAS A connection but there IS NO connection, then...
     else if (g_control_fd != -1 && new_control_fd == -1) {
-      DEBUG_TRACE("There WAS A connection but there IS NO connection.");
+      DEBUG_TRACE("%s", "There WAS A connection but there IS NO connection.");
       // ...reset the control server state...
       control_reset(new_control_fd);
       // ...wait to be notified of a new connection...
@@ -888,7 +896,7 @@ static void *control_loop(void *arg) {
     else if (g_control_fd != -1 && new_control_fd != -1 &&
              g_control_fd != new_control_fd) {
       DEBUG_TRACE(
-          "There WAS A connection and there IS A DIFFERENT connection.");
+          "%s", "There WAS A connection and there IS A DIFFERENT connection.");
       // ...DON'T wait to be notified of a new connection...
       // ...we may we have already missed the signal...
       // ...reset the control server state...
@@ -900,7 +908,8 @@ static void *control_loop(void *arg) {
     else if (g_control_fd != -1 && new_control_fd != -1 &&
              g_control_fd == new_control_fd) {
       // ...continue to try to handle a command.
-      DEBUG_TRACE("There WAS A connection and there IS THE SAME connection.");
+      DEBUG_TRACE("%s",
+                  "There WAS A connection and there IS THE SAME connection.");
     }
 
     // These conditions should be covering, so throw an error otherwise.
@@ -923,6 +932,8 @@ static void *control_loop(void *arg) {
     case CONTROL_FD_ERROR:
     case CONTROL_FD_RETRY:
       continue;
+    case CONTROL_FD_INTR:
+      return NULL;
     }
 
     // Read a command:
@@ -937,6 +948,8 @@ static void *control_loop(void *arg) {
     case CONTROL_FD_ERROR:
     case CONTROL_FD_RETRY:
       continue;
+    case CONTROL_FD_INTR:
+      return NULL;
     }
   }
   return NULL;
@@ -947,7 +960,7 @@ static void *control_loop(void *arg) {
  ******************************************************************************/
 
 void HIDDEN eventlog_socket_control_signal_ghc_rts_ready(void) {
-  DEBUG_TRACE("Sending signal that GHC RTS is ready.");
+  DEBUG_TRACE("%s", "Sending signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
   if (!g_ghc_rts_ready) {
     g_ghc_rts_ready = true;
@@ -959,7 +972,7 @@ void HIDDEN eventlog_socket_control_signal_ghc_rts_ready(void) {
 void HIDDEN eventlog_socket_control_start(
     pthread_t *control_thread, const volatile int *const control_fd_ptr,
     pthread_mutex_t *control_fd_mutex_ptr, pthread_cond_t *new_conn_cond_ptr) {
-  DEBUG_TRACE("Starting control thread.");
+  DEBUG_TRACE("%s", "Starting control thread.");
   g_control_fd_ptr = control_fd_ptr;
   g_control_fd_mutex_ptr = control_fd_mutex_ptr;
   g_new_conn_cond_ptr = new_conn_cond_ptr;
