@@ -10,14 +10,15 @@ module GHC.Eventlog.Socket.Control (
 ) where
 
 import Control.Exception (Exception (displayException), assert, throw)
-import Control.Monad (unless, when)
+import Control.Monad (replicateM, unless, when)
 import Data.Binary (Binary (..), Get, Put, getWord8, putWord8)
-import Data.Binary.Get (getByteString)
-import Data.ByteString (ByteString, length)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import Data.Foldable (for_, traverse_)
 import Data.String (IsString (..))
-import Data.Text (Text, pack, unpack)
-import Data.Text.Encoding (decodeUtf8, encodeUtf8)
+import Data.Text (Text)
+import qualified Data.Text as T (pack, unpack)
+import qualified Data.Text.Encoding as TE (decodeUtf8, encodeUtf8)
 import Data.Word (Word8)
 import Text.Printf (printf)
 import Prelude hiding (getChar, length)
@@ -39,17 +40,17 @@ data Namespace = Namespace
 
 instance Show Namespace where
     show :: Namespace -> String
-    show = show . unpack . namespaceText
+    show = show . T.unpack . namespaceText
 
 unsafeMakeNamespace :: Text -> Namespace
 unsafeMakeNamespace namespaceText' =
     Namespace
         { namespaceText = namespaceText'
-        , namespaceUtf8 = encodeUtf8 namespaceText'
+        , namespaceUtf8 = TE.encodeUtf8 namespaceText'
         }
 
 eventlogSocketNamespace :: Namespace
-eventlogSocketNamespace = unsafeMakeNamespace (pack "eventlog-socket")
+eventlogSocketNamespace = unsafeMakeNamespace (T.pack "eventlog-socket")
 
 isBuiltinNamespace :: Namespace -> Bool
 isBuiltinNamespace = (== eventlogSocketNamespace)
@@ -62,7 +63,7 @@ userNamespace (unsafeMakeNamespace -> namespace)
 
 instance IsString Namespace where
     fromString :: String -> Namespace
-    fromString = userNamespace . pack
+    fromString = userNamespace . T.pack
 
 data CannotUseBuiltinNamespace = CannotUseBuiltinNamespace
     deriving (Show)
@@ -74,7 +75,7 @@ namespaceMaxBytes = fromIntegral (maxBound :: Word8)
 
 isNamespaceTooLong :: Namespace -> Bool
 isNamespaceTooLong (namespaceUtf8 -> namespaceBytes) =
-    length namespaceBytes > namespaceMaxBytes
+    BS.length namespaceBytes > namespaceMaxBytes
 
 data NamespaceTooLong = NamespaceTooLong Namespace
     deriving (Show)
@@ -140,23 +141,26 @@ getControlMagic =
                 printf "Unexpected %02x, expected %02x" actual expect
 
 putNamespace :: Namespace -> Put
-putNamespace (namespaceUtf8 -> namespaceBytes) =
-    assert (length namespaceBytes <= namespaceMaxBytes) $ do
+putNamespace (namespaceUtf8 -> namespaceBytes) = do
+    let namespaceNumBytes = BS.length namespaceBytes
+    assert (namespaceNumBytes <= namespaceMaxBytes) $ do
         -- Put the namespace length as a Word8
-        putWord8 (fromIntegral (length namespaceBytes))
-        -- Put the namespace bytes
-        put namespaceBytes
+        putWord8 (fromIntegral namespaceNumBytes)
+        -- -- Put the namespace bytes
+        for_ [0 .. namespaceNumBytes - 1] $ \i ->
+            for_ (BS.indexMaybe namespaceBytes i) $ \namespaceByte ->
+                putWord8 namespaceByte
 
 getNamespace :: Get Namespace
 getNamespace = do
     -- Get the namespace length as a Word8
-    namespaceNumBytes <- getWord8
+    namespaceNumBytes <- fromIntegral <$> getWord8
     -- Get the namespace bytes
-    namespaceBytes <- getByteString (fromIntegral namespaceNumBytes)
-    -- Build a namespace
+    namespaceBytes <- BS.pack <$> replicateM namespaceNumBytes getWord8
+    -- Create a namespace
     pure
         Namespace
-            { namespaceText = decodeUtf8 namespaceBytes
+            { namespaceText = TE.decodeUtf8 namespaceBytes
             , namespaceUtf8 = namespaceBytes
             }
 
