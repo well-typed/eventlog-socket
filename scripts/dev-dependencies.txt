@@ -4,5 +4,5 @@ cabal=3.12.1.0
 clang-format=21
 doxygen=1
 fourmolu=0.16.2.0
-ghc=9.10.3
+ghc=9.8.4
 shellcheck=0.10.0
