@@ -676,83 +676,6 @@ control_command_parser_handle_chunk(const size_t chunk_size,
   }
 }
 
-static control_fd_status_t control_fd_wait_for_input(void) {
-  DEBUG_TRACE("Waiting for input on %d.", g_control_fd);
-
-  // poll for available data:
-  // note: POLLHUP and POLLRDHUP are output only and are ignored input.
-  struct pollfd pfds[1] = {{
-      .fd = g_control_fd,
-      .events = POLLIN,
-      .revents = 0,
-  }};
-  const int ready = poll(pfds, 1, POLL_LISTEN_TIMEOUT);
-
-  // if ready is -1, an error occurred...
-  if (ready == -1) {
-    DEBUG_ERRNO("poll() failed");
-    return CONTROL_FD_STATUS_ERROR;
-  }
-  // if ready is 0, the call to poll timed out...
-  if (ready == 0) {
-    DEBUG_TRACE("%s", "poll() timed out");
-    return CONTROL_FD_STATUS_RETRY;
-  }
-  // otherwise ready is 1, and the file descriptor is ready...
-  assert(ready == 1); // poll invariant: ready <= |pfds|
-  const int revents = pfds[0].revents;
-  // if the POLLIN bit is set, the file descriptor is ready with input...
-  if (revents & POLLIN) {
-    return CONTROL_FD_STATUS_READY;
-  }
-  // if either of the POLLERR, POLLHUP, or POLLNVAL bits are set,
-  // the file descriptor is closed...
-  // note: in the case of POLLHUP there may still be buffered input,
-  //       so this condition should be checked _after_ POLLIN.
-  if ((revents & POLLNVAL) || (revents & POLLHUP) || (revents & POLLERR)) {
-    return CONTROL_FD_STATUS_CLOSED;
-  }
-  // note: the above conditions should cover all possible outputs.
-  //       if this isn't the case, the following assertion should trigger.
-  assert(false);
-  //       if assertions are turned off, treat this as a timeout.
-  return CONTROL_FD_STATUS_RETRY;
-}
-
-static control_fd_status_t control_fd_read_chunk(const size_t chunk_size,
-                                                 uint8_t chunk[chunk_size]) {
-  DEBUG_TRACE("Receiving input from %d.", g_control_fd);
-
-  // read a chunk from the file descriptor...
-  const ssize_t chunk_size_or_error = recv(g_control_fd, chunk, chunk_size, 0);
-  // if num_bytes_or_error == -1, an error occurred...
-  if (chunk_size_or_error == -1) {
-    // if errno is EINTR, the receive was interrupted...
-    if (errno == EINTR) {
-      return CONTROL_FD_STATUS_INTR;
-    }
-    // if errno is EGAIN or EWOULDBLOCK, recv timed out...
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      DEBUG_TRACE("%s", "recv() timed out or was interrupted.");
-      // note: the socket should have SO_RCVTIMEO set.
-      return CONTROL_FD_STATUS_RETRY;
-    }
-    // if errno is anything else, there is some error...
-    DEBUG_ERRNO("recv() failed");
-    return CONTROL_FD_STATUS_ERROR;
-  }
-  // if num_bytes_or_error == 0, the connection was closed...
-  if (chunk_size_or_error == 0) {
-    DEBUG_TRACE("%s", "recv() failed: the connection was closed.");
-    return CONTROL_FD_STATUS_CLOSED;
-  }
-  // otherwise, handle the received chunk...
-  DEBUG_TRACE("recv() read %zd bytes", chunk_size_or_error);
-  return CONTROL_FD_STATUS_READY;
-}
-
-// HERE BE DRAGONS
-
 static volatile bool g_ghc_rts_ready = false;
 static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_ghc_rts_ready_cond = PTHREAD_COND_INITIALIZER;
@@ -832,27 +755,27 @@ static control_fd_status_t control_fd_update(void) {
     ret = CONTROL_FD_STATUS_RETRY;
   }
 
-  // If there WAS A connection and there IS A DIFFERENT connection, then...
-  else if (g_control_fd != -1 && new_control_fd != -1 &&
-           g_control_fd != new_control_fd) {
-    DEBUG_TRACE("%s",
-                "There WAS A connection and there IS A DIFFERENT connection.");
-    // ...DON'T wait to be notified of a new connection...
-    // ...we may we have already missed the signal...
-    // ...reset the control server state...
-    control_fd_reset_to(new_control_fd);
-    // ...continue to try to handle a command.
-    ret = CONTROL_FD_STATUS_READY;
-  }
-
-  // If there WAS A connection and there IS THE SAME connection, then...
-  else if (g_control_fd != -1 && new_control_fd != -1 &&
-           g_control_fd == new_control_fd) {
-    // ...continue to try to handle a command.
-    DEBUG_TRACE("%s",
-                "There WAS A connection and there IS THE SAME connection.");
-    // ...continue to try to handle a command.
-    ret = CONTROL_FD_STATUS_READY;
+  // If there WAS A connection and there IS A connection, then...
+  else if (g_control_fd != -1 && new_control_fd != -1) {
+    // If it is A DIFFERENT connection, then...
+    if (g_control_fd != new_control_fd) {
+      DEBUG_TRACE(
+          "%s", "There WAS A connection and there IS A DIFFERENT connection.");
+      // ...DON'T wait to be notified of a new connection...
+      // ...we may we have already missed the signal...
+      // ...reset the control server state...
+      control_fd_reset_to(new_control_fd);
+      // ...continue to try to handle a command.
+      ret = CONTROL_FD_STATUS_READY;
+    }
+    // If it is THE SAME connection, then...
+    else {
+      // ...continue to try to handle a command.
+      DEBUG_TRACE("%s",
+                  "There WAS A connection and there IS THE SAME connection.");
+      // ...continue to try to handle a command.
+      ret = CONTROL_FD_STATUS_READY;
+    }
   }
 
   // These conditions should be covering, so throw an error otherwise.
@@ -877,12 +800,12 @@ static void *control_loop(void *arg) {
   assert(g_new_conn_cond_ptr != NULL);
 
   // Allocate memory for chunks:
-  const long pagesize = sysconf(_SC_PAGESIZE);
-  if (pagesize == -1) {
+  const long chunk_size = sysconf(_SC_PAGESIZE);
+  if (chunk_size == -1) {
     DEBUG_ERRNO("sysconf(_SC_PAGESIZE) failed");
   }
   uint8_t *chunk;
-  posix_memalign((void **)&chunk, pagesize, pagesize);
+  posix_memalign((void **)&chunk, chunk_size, chunk_size);
 
   // Wait for the GHC RTS to become ready.
   control_wait_ghc_rts_ready();
@@ -903,32 +826,84 @@ static void *control_loop(void *arg) {
       goto onexit;
     }
 
-    // Wait for input:
-    const control_fd_status_t wait_fd_status = control_fd_wait_for_input();
-    switch (wait_fd_status) {
-    case CONTROL_FD_STATUS_READY:
-      break;
-    case CONTROL_FD_STATUS_CLOSED:
-    case CONTROL_FD_STATUS_ERROR:
-    case CONTROL_FD_STATUS_RETRY:
+    // wait for input:
+    // note: POLLHUP and POLLRDHUP are output only and are ignored input.
+    struct pollfd pfds[1] = {{
+        .fd = g_control_fd,
+        .events = POLLIN,
+        .revents = 0,
+    }};
+    const int ready_or_error = poll(pfds, 1, POLL_LISTEN_TIMEOUT);
+    // if ready_or_error is -1, an error occurred...
+    if (ready_or_error == -1) {
+      // if errno is EINTR, the receive was interrupted...
+      if (errno == EINTR) {
+        goto onexit;
+      }
+      // if errno is anything else, there is some other error...
+      else {
+        DEBUG_ERRNO("poll() failed");
+        continue;
+      }
+    }
+    // if ready_or_error is 0, the call to poll timed out...
+    else if (ready_or_error == 0) {
+      DEBUG_TRACE("%s", "poll() timed out");
       continue;
-    case CONTROL_FD_STATUS_INTR:
-      goto onexit;
+    }
+    // otherwise ready_or_error is 1, and the file descriptor is
+    // ready_or_error...
+    else {
+      assert(ready_or_error == 1); // poll invariant: ready_or_error <= |pfds|
+      const int revents = pfds[0].revents;
+      // if either of the POLLERR, POLLHUP, or POLLNVAL bits are set,
+      // the file descriptor is closed...
+      // note: in the case of POLLHUP there may still be buffered input,
+      //       so this condition should be checked _after_ POLLIN.
+      if ((revents & POLLNVAL) || (revents & POLLHUP) || (revents & POLLERR)) {
+        // todo: wait for a new connection...
+        DEBUG_TRACE("Connection on fd %d closed.", g_control_fd);
+        continue;
+      }
+      // otherwise, the POLLIN bit should be set...
+      assert(revents & POLLIN);
+      // ...so the file descriptor is ready with input...
+      // ...continue with the main loop...
     }
 
-    // Read a command:
-    const control_fd_status_t read_fd_status =
-        control_fd_read_chunk(pagesize, chunk);
-    switch (read_fd_status) {
-    case CONTROL_FD_STATUS_READY:
-      control_command_parser_handle_chunk(pagesize, chunk);
-      break;
-    case CONTROL_FD_STATUS_CLOSED:
-    case CONTROL_FD_STATUS_ERROR:
-    case CONTROL_FD_STATUS_RETRY:
+    // read a chunk:
+    const ssize_t chunk_size_or_error =
+        recv(g_control_fd, chunk, chunk_size, 0);
+    // if num_bytes_or_error == -1, an error occurred...
+    if (chunk_size_or_error == -1) {
+      // if errno is EINTR, the receive was interrupted...
+      if (errno == EINTR) {
+        goto onexit;
+      }
+      // if errno is EGAIN or EWOULDBLOCK, recv timed out...
+      else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        DEBUG_TRACE("%s", "recv() timed out or was interrupted.");
+        // note: the socket should have SO_RCVTIMEO set.
+        continue;
+      }
+      // if errno is anything else, there is some other error...
+      else {
+        DEBUG_ERRNO("recv() failed");
+        continue;
+      }
+    }
+    // if num_bytes_or_error == 0, the connection was closed...
+    else if (chunk_size_or_error == 0) {
+      DEBUG_TRACE("%s", "recv() failed: the connection was closed.");
+      // todo: wait for a new connection...
+      DEBUG_TRACE("Connection on fd %d closed.", g_control_fd);
       continue;
-    case CONTROL_FD_STATUS_INTR:
-      goto onexit;
+    }
+    // otherwise, handle the received chunk...
+    else {
+      DEBUG_TRACE("recv() read %zd bytes", chunk_size_or_error);
+      assert(chunk_size_or_error > 0);
+      control_command_parser_handle_chunk(chunk_size_or_error, chunk);
     }
   }
   goto onexit;
