@@ -90,11 +90,13 @@ import Data.Text (Text)
 import Data.Word (Word16, Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Eventlog.Socket (EventlogSocket (..))
-import GHC.Eventlog.Socket.Control (Command (..))
+import GHC.Eventlog.Socket.Control (Command)
 import GHC.RTS.Events (Event)
 import qualified GHC.RTS.Events as E
 import GHC.RTS.Events.Incremental (Decoder (..), decodeEventLog)
+import Network.Socket (Socket)
 import qualified Network.Socket as S
+import qualified Network.Socket.ByteString as SB
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (splitFileName, (</>))
@@ -213,6 +215,7 @@ murderProcess programName (maybeStdIn, maybeStdOut, maybeStdErr, processHandle) 
                 Just exitCode ->
                     pure exitCode
     exitCode <- murderLoop
+    debugInfo $ "Killed the process for " <> programName
 
     -- Clean up handles:
     traverse_ (ignoreSigPipe . IO.hClose) maybeStdIn
@@ -250,7 +253,7 @@ data EventlogAssertion x
     { initialTimeoutS :: Double
     , timeoutExponent :: Double
     , eventlogSocket :: EventlogSocket
-    , validateEvents :: Handle -> ProcessT IO Event x
+    , validateEvents :: Socket -> ProcessT IO Event x
     }
 
 defaultEventlogAssertion :: EventlogSocket -> EventlogAssertion Event
@@ -280,7 +283,7 @@ assertEventlogWith eventlogSocket validateEvents =
 assertEventlogWith' ::
     (HasLogger, HasTestInfo) =>
     EventlogSocket ->
-    (Handle -> ProcessT IO Event x) ->
+    (Socket -> ProcessT IO Event x) ->
     Assertion
 assertEventlogWith' eventlogSocket validateEvents =
     runEventlogAssertion (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
@@ -290,15 +293,15 @@ runEventlogAssertion ::
     EventlogAssertion x ->
     Assertion
 runEventlogAssertion EventlogAssertion{..} =
-    withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket $ \handle ->
-        runT_ $ fromHandle 1000 4096 handle ~> decodeEvent ~> debugEvents ~> validateEvents handle
+    withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket $ \socket ->
+        runT_ $ fromSocket 1000 4096 socket ~> decodeEvent ~> debugEvents ~> validateEvents socket
 
 withEventlogHandle ::
     (HasLogger, HasTestInfo) =>
     Double ->
     Double ->
     EventlogSocket ->
-    (Handle -> IO a) ->
+    (Socket -> IO a) ->
     IO a
 withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
     connectLoop initialTimeoutS
@@ -324,13 +327,13 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
             let timeoutMSec = round $ timeoutS * 1e3
             case eventlogSocket of
                 EventlogUnixSocket{..} -> do
-                    bracket (S.socket S.AF_UNIX S.Stream S.defaultProtocol) S.close $ \socket -> do
+                    let newSocket = S.socket S.AF_UNIX S.Stream S.defaultProtocol
+                    let closeSocket socket = S.close socket
+                    bracket newSocket closeSocket $ \socket -> do
                         debugInfo $ "Trying to connect to Unix socket at " <> unixSocketPath
                         S.connect socket (S.SockAddrUnix unixSocketPath)
                         debugInfo $ "Connected to Unix socket at " <> unixSocketPath
-                        bracket (S.socketToHandle socket ReadWriteMode) IO.hClose $ \handle -> do
-                            hSetBuffering handle NoBuffering
-                            action handle
+                        action socket
                 EventlogTcpSocket{..} -> do
                     let tcpHints =
                             S.defaultHints
@@ -344,33 +347,43 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
                         debugInfo $ "Trying to connect to TCP socket at " <> show (S.addrAddress addr)
                         S.connect socket (S.addrAddress addr)
                         debugInfo $ "Connected to TCP socket at " <> show (S.addrAddress addr)
-                        bracket (S.socketToHandle socket ReadWriteMode) IO.hClose $ \handle -> do
-                            hSetBuffering handle NoBuffering
-                            action handle
+                        action socket
 
-fromHandle ::
-    (HasCallStack) =>
+fromSocket ::
     Int ->
+    Int ->
+    Socket ->
+    SourceT IO BS.ByteString
+fromSocket _timeoutMSec chunkSizeBytes socket = construct go
+  where
+    go = do
+        chunk <- liftIO (SB.recv socket chunkSizeBytes)
+        yield chunk
+        go
+
+-- liftIO (isReady timeoutMSec handle) >>= \case
+--     Just ready
+--         | ready -> liftIO (BS.hGetSome handle chunkSizeBytes) >>= yield >> go
+--         | otherwise -> go
+--     Nothing ->
+--         liftIO $ debugInfo $ "Handle closed."
+
+isReady ::
+    (HasLogger, HasTestInfo) =>
     Int ->
     Handle ->
-    SourceT IO BS.ByteString
-fromHandle timeoutMSec chunkSizeBytes handle = construct go
-  where
-    go =
-        liftIO (isReady timeoutMSec handle) >>= \case
-            Just ready
-                | ready -> liftIO (BS.hGetSome handle chunkSizeBytes) >>= yield >> go
-                | otherwise -> go
-            Nothing -> pure ()
-
-isReady :: (HasCallStack) => Int -> Handle -> IO (Maybe Bool)
+    IO (Maybe Bool)
 isReady timeoutMSec handle = catch ready onEOF
   where
     ready =
         hWaitForInput handle timeoutMSec
             >>= pure . Just
     onEOF (e :: IOError) =
-        if isEOFError e then pure Nothing else assertFailure (displayException e)
+        if isEOFError e
+            then do
+                debugInfo $ displayException e
+                pure Nothing
+            else assertFailure (displayException e)
 
 decodeEvent :: ProcessT IO BS.ByteString Event
 decodeEvent = construct $ loop decodeEventLog
@@ -756,28 +769,33 @@ hasMatchingUserMessage p =
     onFailure = printf "Did not find matching UserMessage after %d events."
 
 {- |
-Send the given `Command` over the `Handle`.
+Send the given `Command` over the `Socket`.
 -}
-sendCommand :: Handle -> Command -> IO ()
-sendCommand handle command = do
-    BSL.hPutStr handle (B.encode command)
-    IO.hFlush handle
+sendCommand :: (HasLogger, HasTestInfo) => Socket -> Command -> IO ()
+sendCommand socket command = do
+    let commandBytes = B.encode command
+    debugInfo $ "Sending control command: " <> show commandBytes
+    bytesSent <- SB.send socket (BSL.toStrict commandBytes)
+    debugInfo $ "Sent " <> show bytesSent <> " bytes."
 
 {- |
-Send junk over the `Handle`.
+Send junk over the `Socket`.
 -}
-sendJunk :: Handle -> BSL.ByteString -> IO ()
-sendJunk handle junk = do
-    BSL.hPutStr handle junk
-    IO.hFlush handle
+sendJunk :: (HasLogger, HasTestInfo) => Socket -> BSL.ByteString -> IO ()
+sendJunk socket junkBytes = do
+    debugInfo $ "Sending junk: " <> show junkBytes
+    bytesSent <- SB.send socket (BSL.toStrict junkBytes)
+    debugInfo $ "Sent " <> show bytesSent <> " bytes."
 
 {- |
-Send the given `Command` over the `Handle`.
+Send the given `Command` over the `Socket`.
 -}
-sendCommandWithJunk :: Handle -> BSL.ByteString -> Command -> BSL.ByteString -> IO ()
-sendCommandWithJunk handle junkBefore command junkAfter = do
-    BSL.hPutStr handle (junkBefore <> B.encode command <> junkAfter)
-    IO.hFlush handle
+sendCommandWithJunk :: (HasLogger, HasTestInfo) => Socket -> BSL.ByteString -> Command -> BSL.ByteString -> IO ()
+sendCommandWithJunk socket junkBefore command junkAfter = do
+    let commandWithJunkBytes = junkBefore <> B.encode command <> junkAfter
+    debugInfo $ "Sending control command with junk " <> show commandWithJunkBytes
+    bytesSent <- SB.send socket (BSL.toStrict commandWithJunkBytes)
+    debugInfo $ "Sent " <> show bytesSent <> " bytes."
 
 --------------------------------------------------------------------------------
 -- Print Debug Message
