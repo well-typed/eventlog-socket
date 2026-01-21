@@ -919,13 +919,11 @@ void HIDDEN eventlog_socket_control_start(
   const int create_or_error =
       pthread_create(control_thread, NULL, control_loop, NULL);
   if (create_or_error != 0) {
-    DEBUG_ERROR("failed to start control receiver: %s",
-                strerror(create_or_error));
+    DEBUG_ERRNO("pthread_create() failed");
     return;
   }
   const int detach_or_error = pthread_detach(*control_thread);
   if (detach_or_error != 0) {
-    DEBUG_ERROR("failed to detach control receiver: %s",
-                strerror(detach_or_error));
+    DEBUG_ERRNO("pthread_detach() failed");
   }
 }
