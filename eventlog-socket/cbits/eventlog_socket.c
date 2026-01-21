@@ -274,10 +274,10 @@ static void listen_iteration(void) {
       DEBUG_ERROR("poll() failed: %s", strerror(errno));
       return;
     } else if (ret == 0) {
-      DEBUG_TRACE("accept poll timed out");
+      DEBUG_TRACE("%s", "accept poll timed out");
     } else {
       // got connection
-      DEBUG_TRACE("accept poll ready");
+      DEBUG_TRACE("%s", "accept poll ready");
       break;
     }
   }
@@ -496,6 +496,25 @@ static void init_unix_listener(const char *sock_path) {
   // Record the sock_path so it can be unlinked at exit
   g_sock_path = strdup(sock_path);
 
+  // set socket linger
+  const struct linger so_linger = {
+      .l_onoff = true,
+      .l_linger = 10,
+  };
+  const int so_linger_success_or_error = setsockopt(
+      g_listen_fd, SOL_SOCKET, SO_LINGER, &so_linger, sizeof(so_linger));
+  if (so_linger_success_or_error != 0) {
+    DEBUG_ERRNO("setsockopt() failed for SO_LINGER");
+  }
+
+  // set socket receive low water mark
+  const int so_rcvlowat = 1;
+  const int so_rcvlowat_success_or_error = setsockopt(
+      g_listen_fd, SOL_SOCKET, SO_RCVLOWAT, &so_rcvlowat, sizeof(so_rcvlowat));
+  if (so_rcvlowat_success_or_error != 0) {
+    DEBUG_ERRNO("setsockopt() failed for SO_RCVLOWAT");
+  }
+
   struct sockaddr_un local;
   memset(&local, 0, sizeof(local));
   local.sun_family = AF_UNIX;
@@ -560,13 +579,13 @@ static void init_tcp_listener(const char *host, const char *port) {
   freeaddrinfo(res);
 
   if (g_listen_fd == -1) {
-    DEBUG_ERROR("unable to bind TCP listener");
+    DEBUG_ERROR("%s", "unable to bind TCP listener");
     abort();
   }
 }
 
 static void worker_start(const struct listener_config *config) {
-  DEBUG_TRACE("Starting worker thread.");
+  DEBUG_TRACE("%s", "Starting worker thread.");
   switch (config->kind) {
   case LISTENER_UNIX:
     init_unix_listener(config->sock_path);
@@ -575,7 +594,7 @@ static void worker_start(const struct listener_config *config) {
     init_tcp_listener(config->tcp_host, config->tcp_port);
     break;
   default:
-    DEBUG_ERROR("unknown listener kind");
+    DEBUG_ERROR("%s", "unknown listener kind");
     abort();
   }
 
@@ -688,7 +707,7 @@ void eventlog_socket_wait(void) {
   pthread_mutex_lock(&g_write_buffer_and_client_fd_mutex);
   DEBUG_TRACE("initial client_fd=%d", g_client_fd);
   while (g_client_fd == -1) {
-    DEBUG_TRACE("blocking for connection");
+    DEBUG_TRACE("%s", "blocking for connection");
     int ret = pthread_cond_wait(&g_new_conn_cond,
                                 &g_write_buffer_and_client_fd_mutex);
     if (ret != 0) {
@@ -751,7 +770,7 @@ static void eventlog_socket_start(const struct listener_config *config,
   }
 
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
-    DEBUG_ERROR("eventlog is not supported.");
+    DEBUG_ERROR("%s", "eventlog is not supported.");
     return;
   }
 
