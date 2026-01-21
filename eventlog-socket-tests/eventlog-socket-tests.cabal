@@ -5,9 +5,10 @@ synopsis:        Test suite for eventlog-socket
 description:     Test suite for eventlog-socket.
 license:         BSD-3-Clause
 license-file:    LICENSE
-author:          Wen Kokke
+author:          Eventlog Socket Contributors
 maintainer:      wen@well-typed.com
 copyright:       (c) 2025 Well-Typed
+category:        Test
 build-type:      Simple
 extra-doc-files: CHANGELOG.md
 tested-with:

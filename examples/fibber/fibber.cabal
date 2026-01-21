@@ -1,10 +1,14 @@
 cabal-version: 2.2
 name:          fibber
 version:       0.1.0.0
+synopsis:      Example program that computes Fibonnaci numbers
+description:   Example program that computes Fibonnaci numbers.
 license:       BSD-3-Clause
 license-file:  LICENSE
-author:        Wen Kokke
-copyright:     (c) 2025 Wen Kokke
+author:        Eventlog Socket Contributors
+maintainer:    wen@well-typed.com
+copyright:     (c) 2025 Well-Typed
+category:      Test
 build-type:    Simple
 
 executable fibber
@@ -13,7 +17,7 @@ executable fibber
   default-language: Haskell2010
   build-depends:
     , base             >=4.14 && <5
-    , eventlog-socket
+    , eventlog-socket  >=0.1  && <0.2
 
   ghc-options:      -threaded -rtsopts
 

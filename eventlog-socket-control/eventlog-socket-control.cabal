@@ -5,9 +5,10 @@ synopsis:        Control protocol for eventlog-socket
 description:     Control protocol for eventlog-socket.
 license:         BSD-3-Clause
 license-file:    LICENSE
-author:          Wen Kokke
+author:          Eventlog Socket Contributors
 maintainer:      wen@well-typed.com
-copyright:       (c) 2025 Well-Typed
+copyright:       (c) 2025-2026 Well-Typed
+category:        System
 build-type:      Simple
 extra-doc-files: CHANGELOG.md
 tested-with:

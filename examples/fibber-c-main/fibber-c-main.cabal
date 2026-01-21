@@ -1,10 +1,14 @@
 cabal-version: 2.2
 name:          fibber-c-main
 version:       0.1.0.0
+synopsis:      Variant of fibber with a C main
+description:   Variant of fibber with a C main.
 license:       BSD-3-Clause
 license-file:  LICENSE
-author:        Wen Kokke
-copyright:     (c) 2025 Wen Kokke
+author:        Eventlog Socket Contributors
+maintainer:    wen@well-typed.com
+copyright:     (c) 2025 Well-Typed
+category:      Test
 build-type:    Simple
 
 executable fibber-c-main
@@ -14,7 +18,7 @@ executable fibber-c-main
   default-language: Haskell2010
   build-depends:
     , base             >=4.14 && <5
-    , eventlog-socket
+    , eventlog-socket  >=0.1  && <0.2
 
   ghc-options:      -threaded -no-hs-main
 
