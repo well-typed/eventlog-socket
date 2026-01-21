@@ -43,7 +43,7 @@ main = do
         , test_oddball_StartAndStopHeapProfiling
         , test_oddball_RequestHeapProfile
         , test_oddball_Junk ("\0\0", "TOASTY")
-        , test_oddball_Junk ("\x1230", "DORK")
+        , test_oddball_Junk ("\x01DEAD", "DORK")
         , test_customCommand
         ]
 
