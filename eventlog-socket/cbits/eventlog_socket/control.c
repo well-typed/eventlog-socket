@@ -784,6 +784,93 @@ static void control_fd_wait_for_connection(void) {
   pthread_cond_wait(g_new_conn_cond_ptr, g_control_fd_mutex_ptr);
 }
 
+static control_fd_status_t control_fd_update(void) {
+
+  // Create the return value.
+  control_fd_status_t ret = CONTROL_FD_STATUS_ERROR;
+
+  // Acquire the lock on the connection file description.
+  pthread_mutex_lock(g_control_fd_mutex_ptr);
+
+  // Read current connection file description.
+  const int new_control_fd = *g_control_fd_ptr;
+  if (g_control_fd != new_control_fd) {
+    DEBUG_TRACE("Old connection fd: %d", g_control_fd);
+    DEBUG_TRACE("New connection fd: %d", new_control_fd);
+  }
+
+  // If there WAS NO connection and there IS NO connection, then...
+  if (g_control_fd == -1 && new_control_fd == -1) {
+    DEBUG_TRACE("%s", "There WAS NO connection and there IS NO connection.");
+    // ...wait to be notified of a new connection...
+    control_fd_wait_for_connection();
+    // ...release the lock...
+    pthread_mutex_unlock(g_control_fd_mutex_ptr);
+    // ...and re-enter the loop.
+    ret = CONTROL_FD_STATUS_RETRY;
+  }
+
+  // If there WAS NO connection but there IS A connection, then...
+  else if (g_control_fd == -1 && new_control_fd != -1) {
+    DEBUG_TRACE("%s", "There WAS NO connection but there IS A connection.");
+    // ...DON'T wait to be notified of a new connection...
+    // ...we may we have already missed the signal...
+    // ...reset the control server state...
+    control_fd_reset_to(new_control_fd);
+    // ...continue to try to handle a command.
+    ret = CONTROL_FD_STATUS_READY;
+  }
+
+  // If there WAS A connection but there IS NO connection, then...
+  else if (g_control_fd != -1 && new_control_fd == -1) {
+    DEBUG_TRACE("%s", "There WAS A connection but there IS NO connection.");
+    // ...reset the control server state...
+    control_fd_reset_to(new_control_fd);
+    // ...wait to be notified of a new connection...
+    control_fd_wait_for_connection();
+    // ...release the lock...
+    pthread_mutex_unlock(g_control_fd_mutex_ptr);
+    // ...and re-enter the loop.
+    ret = CONTROL_FD_STATUS_RETRY;
+  }
+
+  // If there WAS A connection and there IS A DIFFERENT connection, then...
+  else if (g_control_fd != -1 && new_control_fd != -1 &&
+           g_control_fd != new_control_fd) {
+    DEBUG_TRACE("%s",
+                "There WAS A connection and there IS A DIFFERENT connection.");
+    // ...DON'T wait to be notified of a new connection...
+    // ...we may we have already missed the signal...
+    // ...reset the control server state...
+    control_fd_reset_to(new_control_fd);
+    // ...continue to try to handle a command.
+    ret = CONTROL_FD_STATUS_READY;
+  }
+
+  // If there WAS A connection and there IS THE SAME connection, then...
+  else if (g_control_fd != -1 && new_control_fd != -1 &&
+           g_control_fd == new_control_fd) {
+    // ...continue to try to handle a command.
+    DEBUG_TRACE("%s",
+                "There WAS A connection and there IS THE SAME connection.");
+    // ...continue to try to handle a command.
+    ret = CONTROL_FD_STATUS_READY;
+  }
+
+  // These conditions should be covering, so throw an error otherwise.
+  else {
+    assert(false);
+  }
+
+  // Release the lock on the connection file description.
+  pthread_mutex_unlock(g_control_fd_mutex_ptr);
+
+  // Check that g_control_fd is up-to-date:
+  assert(g_control_fd == new_control_fd);
+
+  return ret;
+}
+
 static void *control_loop(void *arg) {
   (void)arg;
 
@@ -797,80 +884,18 @@ static void *control_loop(void *arg) {
   while (true) {
     DEBUG_TRACE("%s", "Starting new control iteration.");
 
-    // Acquire the lock on the connection file description.
-    pthread_mutex_lock(g_control_fd_mutex_ptr);
-
-    // Read current connection file description.
-    const int new_control_fd = *g_control_fd_ptr;
-    if (g_control_fd != new_control_fd) {
-      DEBUG_TRACE("Old connection fd: %d", g_control_fd);
-      DEBUG_TRACE("New connection fd: %d", new_control_fd);
-    }
-
-    // If there WAS NO connection and there IS NO connection, then...
-    if (g_control_fd == -1 && new_control_fd == -1) {
-      DEBUG_TRACE("%s", "There WAS NO connection and there IS NO connection.");
-      // ...wait to be notified of a new connection...
-      control_fd_wait_for_connection();
-      // ...release the lock...
-      pthread_mutex_unlock(g_control_fd_mutex_ptr);
-      // ...and re-enter the loop.
+    // Update the connection fd:
+    const control_fd_status_t update_fd_status = control_fd_update();
+    switch (update_fd_status) {
+    case CONTROL_FD_STATUS_READY:
+      break;
+    case CONTROL_FD_STATUS_CLOSED:
+    case CONTROL_FD_STATUS_ERROR:
+    case CONTROL_FD_STATUS_RETRY:
       continue;
+    case CONTROL_FD_STATUS_INTR:
+      return NULL;
     }
-
-    // If there WAS NO connection but there IS A connection, then...
-    else if (g_control_fd == -1 && new_control_fd != -1) {
-      DEBUG_TRACE("%s", "There WAS NO connection but there IS A connection.");
-      // ...DON'T wait to be notified of a new connection...
-      // ...we may we have already missed the signal...
-      // ...reset the control server state...
-      control_fd_reset_to(new_control_fd);
-      // ...continue to try to handle a command.
-    }
-
-    // If there WAS A connection but there IS NO connection, then...
-    else if (g_control_fd != -1 && new_control_fd == -1) {
-      DEBUG_TRACE("%s", "There WAS A connection but there IS NO connection.");
-      // ...reset the control server state...
-      control_fd_reset_to(new_control_fd);
-      // ...wait to be notified of a new connection...
-      control_fd_wait_for_connection();
-      // ...release the lock...
-      pthread_mutex_unlock(g_control_fd_mutex_ptr);
-      // ...and re-enter the loop.
-      continue;
-    }
-
-    // If there WAS A connection and there IS A DIFFERENT connection, then...
-    else if (g_control_fd != -1 && new_control_fd != -1 &&
-             g_control_fd != new_control_fd) {
-      DEBUG_TRACE(
-          "%s", "There WAS A connection and there IS A DIFFERENT connection.");
-      // ...DON'T wait to be notified of a new connection...
-      // ...we may we have already missed the signal...
-      // ...reset the control server state...
-      control_fd_reset_to(new_control_fd);
-      // ...continue to try to handle a command.
-    }
-
-    // If there WAS A connection and there IS THE SAME connection, then...
-    else if (g_control_fd != -1 && new_control_fd != -1 &&
-             g_control_fd == new_control_fd) {
-      // ...continue to try to handle a command.
-      DEBUG_TRACE("%s",
-                  "There WAS A connection and there IS THE SAME connection.");
-    }
-
-    // These conditions should be covering, so throw an error otherwise.
-    else {
-      assert(false);
-    }
-
-    // Release the lock on the connection file description.
-    pthread_mutex_unlock(g_control_fd_mutex_ptr);
-
-    // Check that g_control_fd is up-to-date:
-    assert(g_control_fd == new_control_fd);
 
     // Wait for input:
     const control_fd_status_t wait_fd_status = control_fd_wait_for_input();
