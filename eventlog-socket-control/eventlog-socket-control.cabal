@@ -27,9 +27,7 @@ common language
   ghc-options:        -Wall
   default-extensions:
     InstanceSigs
-    LambdaCase
-    TypeApplications
-    ViewPatterns
+    ImportQualifiedPost
 
   default-language:   Haskell2010
 
