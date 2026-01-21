@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define EVENTLOG_SOCKET_CONTROL_PROTOCOL_VERSION 0
+
 extern const EventLogWriter SocketEventLogWriter;
 
 typedef uint8_t eventlog_socket_control_namespace_id_t;

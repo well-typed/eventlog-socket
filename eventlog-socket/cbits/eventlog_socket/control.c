@@ -307,16 +307,19 @@ out:
 static int g_control_fd = -1;
 
 typedef enum {
-  CONTROL_READ_HEADER = 0,
-  CONTROL_READ_NAMESPACE_LEN = 1,
-  CONTROL_READ_NAMESPACE = 2,
-  CONTROL_READ_COMMAND_ID = 3,
+  CONTROL_READ_MAGIC,
+  CONTROL_READ_PROTOCOL_VERSION,
+  CONTROL_READ_NAMESPACE_LEN,
+  CONTROL_READ_NAMESPACE,
+  CONTROL_READ_COMMAND_ID,
 } control_read_state_tag_t;
 
 const char *control_read_state_tag_show(control_read_state_tag_t tag) {
   switch (tag) {
-  case CONTROL_READ_HEADER:
-    return "CONTROL_READ_HEADER";
+  case CONTROL_READ_MAGIC:
+    return "CONTROL_READ_MAGIC";
+  case CONTROL_READ_PROTOCOL_VERSION:
+    return "CONTROL_READ_PROTOCOL_VERSION";
   case CONTROL_READ_NAMESPACE_LEN:
     return "CONTROL_READ_NAMESPACE_LEN";
   case CONTROL_READ_NAMESPACE:
@@ -329,11 +332,14 @@ const char *control_read_state_tag_show(control_read_state_tag_t tag) {
 typedef struct {
   control_read_state_tag_t tag;
   union {
-    // if .tag == CONTROL_READ_HEADER
+    // if .tag == CONTROL_READ_MAGIC
     // the state stores:
     // * the position of the next header byte
     /// @invariant header_pos < CONTROL_MAGIC_LEN
     uint8_t header_pos;
+
+    // if .tag == CONTROL_READ_PROTOCOL_VERSION
+    // the state stores nothing.
 
     // if .tag == CONTROL_READ_NAMESPACE_LEN
     // the state stores nothing.
@@ -360,7 +366,7 @@ typedef struct {
 } control_read_state_t;
 
 control_read_state_t g_control_read_state = {
-    .tag = CONTROL_READ_HEADER,
+    .tag = CONTROL_READ_MAGIC,
     .header_pos = 0,
 };
 
@@ -409,7 +415,7 @@ static void control_read_enter_state(const control_read_state_tag_t tag,
 
   // this should only be called when restarting or moving to a different
   // state...
-  assert(tag == CONTROL_READ_HEADER || g_control_read_state.tag != tag);
+  assert(tag == CONTROL_READ_MAGIC || g_control_read_state.tag != tag);
 
   // if the parser is leaving CONTROL_READ_NAMESPACE, then...
   if (g_control_read_state.tag == CONTROL_READ_NAMESPACE) {
@@ -422,9 +428,9 @@ static void control_read_enter_state(const control_read_state_tag_t tag,
 
   // initialise the control state appropriately...
   switch (tag) {
-  case CONTROL_READ_HEADER: {
+  case CONTROL_READ_MAGIC: {
     // if restarting, handle current_byte...
-    if (tag == CONTROL_READ_HEADER && data != NULL &&
+    if (tag == CONTROL_READ_MAGIC && data != NULL &&
         *data == control_magic[0]) {
       // ...start at the second header byte...
       g_control_read_state.header_pos = 1;
@@ -432,6 +438,10 @@ static void control_read_enter_state(const control_read_state_tag_t tag,
       // ...start at the first header byte...
       g_control_read_state.header_pos = 0;
     }
+    break;
+  }
+  case CONTROL_READ_PROTOCOL_VERSION: {
+    assert(data == NULL);
     break;
   }
   case CONTROL_READ_NAMESPACE_LEN: {
@@ -466,7 +476,7 @@ static void control_handle_command_chunk(const size_t chunk_size,
     const uint8_t current_byte = chunk[chunk_index];
     switch (g_control_read_state.tag) {
     // the parser is currently reading the header...
-    case CONTROL_READ_HEADER: {
+    case CONTROL_READ_MAGIC: {
       // invariant: header_pos should be a valid index into control_magic
       assert(0 <= g_control_read_state.header_pos);
       assert(g_control_read_state.header_pos < CONTROL_MAGIC_LEN);
@@ -481,7 +491,7 @@ static void control_handle_command_chunk(const size_t chunk_size,
         // if header_pos moves out of control_magic...
         if (g_control_read_state.header_pos >= CONTROL_MAGIC_LEN) {
           // ...continue reading the namespace length...
-          control_read_enter_state(CONTROL_READ_NAMESPACE_LEN, NULL);
+          control_read_enter_state(CONTROL_READ_PROTOCOL_VERSION, NULL);
         }
         // ...continue processing with the _next_ byte...
         continue;
@@ -490,9 +500,24 @@ static void control_handle_command_chunk(const size_t chunk_size,
       else {
         // ...there has been a protocol error...
         // ...restart with the _current_ byte...
-        control_read_enter_state(CONTROL_READ_HEADER, &current_byte);
+        control_read_enter_state(CONTROL_READ_MAGIC, &current_byte);
         // ...continue processing with the _next_ byte...
         continue;
+      }
+    }
+    // the parser is currently reading the protocol version...
+    case CONTROL_READ_PROTOCOL_VERSION: {
+      DEBUG_TRACE("Matched protocol version byte %d", current_byte);
+      // if the message version matches the protocol version...
+      if (current_byte == EVENTLOG_SOCKET_CONTROL_PROTOCOL_VERSION) {
+        // ...then we should be able to parse the message...
+        // ...continue processing with the _next_ byte...
+        control_read_enter_state(CONTROL_READ_NAMESPACE_LEN, NULL);
+        continue;
+      } else {
+        // ...otherwise, let's not try and parse this message...
+        // ...restart with the _current_ byte...
+        control_read_enter_state(CONTROL_READ_MAGIC, &current_byte);
       }
     }
     // the parser is currently reading the namespace length...
@@ -504,7 +529,7 @@ static void control_handle_command_chunk(const size_t chunk_size,
         // todo: write an error to the eventlog
         DEBUG_ERROR("%s", "Received namespace length 0");
         // ...restart with the _current_ byte...
-        control_read_enter_state(CONTROL_READ_HEADER, &current_byte);
+        control_read_enter_state(CONTROL_READ_MAGIC, &current_byte);
         continue;
       } else {
         DEBUG_TRACE("Matched namespace_len byte %d", current_byte);
@@ -615,7 +640,7 @@ static void control_handle_command_chunk(const size_t chunk_size,
         DEBUG_ERROR("unknown namespace %s",
                     g_control_read_state.namespace_buffer);
         // ...restart with the _current_ byte...
-        control_read_enter_state(CONTROL_READ_HEADER, &current_byte);
+        control_read_enter_state(CONTROL_READ_MAGIC, &current_byte);
         // ...continue processing with the _next_ byte...
         continue;
       }
@@ -630,7 +655,7 @@ static void control_handle_command_chunk(const size_t chunk_size,
       // Handle the command.
       control_handle_command(command);
       // ...restart _without_ the current byte...
-      control_read_enter_state(CONTROL_READ_HEADER, NULL);
+      control_read_enter_state(CONTROL_READ_MAGIC, NULL);
       // ...continue processing with the _next_ byte...
       continue;
     }
