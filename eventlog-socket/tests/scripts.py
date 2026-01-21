@@ -3,14 +3,6 @@
 from typing import Callable
 import time
 
-CONTROL_MAGIC = bytes([0xF0, 0x9E, 0x97, 0x8C])
-CONTROL_PROTOCOL_VERSION = bytes([0x00])
-CONTROL_NAMESPACE_CORE = b"eventlog-socket"
-
-CUSTOM_COMMAND_NAMESPACE = b"custom-command"
-CUSTOM_COMMAND_ID = 0x00
-
-
 class ControlContext:
     """Simple wrapper providing helper methods to send control commands."""
 
@@ -22,32 +14,36 @@ class ControlContext:
 
 
 def control_send_command(
-    ctx: ControlContext, command_id: int, namespace: bytes = CONTROL_NAMESPACE_CORE
+    ctx: ControlContext, namespace: bytes, command_id: int
 ) -> None:
-    payload = (
-        CONTROL_MAGIC
-        + +CONTROL_PROTOCOL_VERSION
-        + bytes([len(namespace) & 0xFF])
-        + namespace
-        + bytes([command_id & 0xFF])
-    )
-    ctx.send(payload)
+    ctx.send(bytes([
+        # MAGIC
+        0xF0, 0x9E, 0x97, 0x8C,
+        # PROTOCOL_VERSION
+        0x00,
+        # NAMESPACE_LEN
+        len(namespace) & 0xFF,
+        # NAMESPACE
+        *namespace,
+        # COMMAND_ID
+        command_id,
+    ]))
 
 
 def start_heap_profiling(ctx: ControlContext) -> None:
-    control_send_command(ctx, 0x00)
+    control_send_command(ctx, b"eventlog-socket", 0x00)
 
 
 def stop_heap_profiling(ctx: ControlContext) -> None:
-    control_send_command(ctx, 0x01)
+    control_send_command(ctx, b"eventlog-socket", 0x01)
 
 
 def request_heap_profile(ctx: ControlContext) -> None:
-    control_send_command(ctx, 0x02)
+    control_send_command(ctx, b"eventlog-socket", 0x02)
 
 
 def send_custom_command(ctx: ControlContext) -> None:
-    control_send_command(ctx, CUSTOM_COMMAND_ID, namespace=CUSTOM_COMMAND_NAMESPACE)
+    control_send_command(ctx, b"custom-command", 0x00)
 
 
 def sleep(ctx: ControlContext, seconds: float) -> None:
