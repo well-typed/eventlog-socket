@@ -44,7 +44,6 @@
 // => b'\xf0\x9e\x97\x8c'
 //
 
-#define CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE 32
 #define CONTROL_MAGIC_LEN 4
 static const uint8_t control_magic[CONTROL_MAGIC_LEN] = {
     [0] = 0xF0,
@@ -725,8 +724,7 @@ static control_fd_status_t control_fd_read_chunk(const size_t chunk_size,
   DEBUG_TRACE("Receiving input from %d.", g_control_fd);
 
   // read a chunk from the file descriptor...
-  const ssize_t chunk_size_or_error = recv(
-      g_control_fd, chunk, CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE, 0);
+  const ssize_t chunk_size_or_error = recv(g_control_fd, chunk, chunk_size, 0);
   // if num_bytes_or_error == -1, an error occurred...
   if (chunk_size_or_error == -1) {
     // if errno is EINTR, the receive was interrupted...
@@ -878,6 +876,14 @@ static void *control_loop(void *arg) {
   assert(g_control_fd_mutex_ptr != NULL);
   assert(g_new_conn_cond_ptr != NULL);
 
+  // Allocate memory for chunks:
+  const long pagesize = sysconf(_SC_PAGESIZE);
+  if (pagesize == -1) {
+    DEBUG_ERRNO("sysconf(_SC_PAGESIZE) failed");
+  }
+  uint8_t *chunk;
+  posix_memalign((void **)&chunk, pagesize, pagesize);
+
   // Wait for the GHC RTS to become ready.
   control_wait_ghc_rts_ready();
 
@@ -894,7 +900,7 @@ static void *control_loop(void *arg) {
     case CONTROL_FD_STATUS_RETRY:
       continue;
     case CONTROL_FD_STATUS_INTR:
-      return NULL;
+      goto onexit;
     }
 
     // Wait for input:
@@ -907,26 +913,28 @@ static void *control_loop(void *arg) {
     case CONTROL_FD_STATUS_RETRY:
       continue;
     case CONTROL_FD_STATUS_INTR:
-      return NULL;
+      goto onexit;
     }
 
     // Read a command:
-    uint8_t chunk[CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE] = {0};
-    const control_fd_status_t read_fd_status = control_fd_read_chunk(
-        CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE, chunk);
+    const control_fd_status_t read_fd_status =
+        control_fd_read_chunk(pagesize, chunk);
     switch (read_fd_status) {
     case CONTROL_FD_STATUS_READY:
-      control_command_parser_handle_chunk(
-          CONTROL_COMMAND_PARSER_STATE_COMMAND_CHUNK_SIZE, chunk);
+      control_command_parser_handle_chunk(pagesize, chunk);
       break;
     case CONTROL_FD_STATUS_CLOSED:
     case CONTROL_FD_STATUS_ERROR:
     case CONTROL_FD_STATUS_RETRY:
       continue;
     case CONTROL_FD_STATUS_INTR:
-      return NULL;
+      goto onexit;
     }
   }
+  goto onexit;
+
+onexit:
+  free(chunk);
   return NULL;
 }
 
