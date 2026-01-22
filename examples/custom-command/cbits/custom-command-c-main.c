@@ -19,12 +19,13 @@ static void emit_custom_user_msg(void) {
   rts_unlock(cap);
 }
 
-static void demo_command_handler(const eventlog_socket_control_command_t command,
-                                 const void *user_data) {
+static void
+demo_command_handler(const eventlog_socket_control_namespace_t *const namespace,
+                     const eventlog_socket_control_command_id_t command_id,
+                     const void *user_data) {
   const char *label = (const char *)user_data;
   fprintf(stderr, "[custom-command] received namespace=%p id=0x%02x (%s)\n",
-          (void *)command.namespace, command.command_id,
-          label != NULL ? label : "no label");
+          (void *)namespace, command_id, label != NULL ? label : "no label");
   emit_custom_user_msg();
 }
 
@@ -42,15 +43,13 @@ void custom_command_register(void) {
   }
 
   // Register the ping command.
-  const eventlog_socket_control_command_t ping_command = {
-      .namespace = namespace, .command_id = CUSTOM_COMMAND_ID_PING};
   bool ok = eventlog_socket_control_register_command(
-      ping_command, demo_command_handler, (void *)label);
+      namespace, CUSTOM_COMMAND_ID_PING, demo_command_handler, (void *)label);
   if (!ok) {
     fprintf(stderr,
             "[custom-command] failed to register custom command "
             "namespace=%p id=0x%02x\n",
-            (void *)ping_command.namespace, ping_command.command_id);
+            (void *)namespace, CUSTOM_COMMAND_ID_PING);
     return;
   }
 }

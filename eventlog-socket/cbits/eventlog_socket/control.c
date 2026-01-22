@@ -208,30 +208,36 @@ struct control_command_store_entry {
 // Builtin control command handlers
 
 // Start heap profiling
-static void
-control_start_heap_profiling(const eventlog_socket_control_command_t command,
-                             const void *user_data) {
-  (void)command;
+static void control_start_heap_profiling(
+    const eventlog_socket_control_namespace_t *const namespace,
+    const eventlog_socket_control_command_id_t command_id,
+    const void *user_data) {
+  (void)namespace;
+  (void)command_id;
   (void)user_data;
   DEBUG_TRACE("%s", "control: startHeapProfiling");
   startHeapProfTimer();
 }
 
 // Stop heap profiling
-static void
-control_stop_heap_profiling(const eventlog_socket_control_command_t command,
-                            const void *user_data) {
-  (void)command;
+static void control_stop_heap_profiling(
+    const eventlog_socket_control_namespace_t *const namespace,
+    const eventlog_socket_control_command_id_t command_id,
+    const void *user_data) {
+  (void)namespace;
+  (void)command_id;
   (void)user_data;
   DEBUG_TRACE("%s", "control: stopHeapProfiling");
   stopHeapProfTimer();
 }
 
 // Request heap profil
-static void
-control_request_heap_profile(const eventlog_socket_control_command_t command,
-                             const void *user_data) {
-  (void)command;
+static void control_request_heap_profile(
+    const eventlog_socket_control_namespace_t *const namespace,
+    const eventlog_socket_control_command_id_t command_id,
+    const void *user_data) {
+  (void)namespace;
+  (void)command_id;
   (void)user_data;
   DEBUG_TRACE("%s", "control: requestHeapProfile");
   requestHeapCensus();
@@ -260,7 +266,8 @@ static control_command_store_entry_t *g_control_command_store =
 static pthread_mutex_t g_control_handlers_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 bool eventlog_socket_control_register_command(
-    eventlog_socket_control_command_t command,
+    const eventlog_socket_control_namespace_t *const namespace,
+    const eventlog_socket_control_command_id_t command_id,
     eventlog_socket_control_command_handler_t handler, const void *user_data) {
   if (handler == NULL) {
     return false;
@@ -269,12 +276,12 @@ bool eventlog_socket_control_register_command(
   control_command_store_entry_t *entry = g_control_command_store;
   assert(entry != NULL);
   do {
-    if (entry->namespace->namespace_id == command.namespace->namespace_id &&
-        entry->command_id == command.command_id) {
+    if (entry->namespace->namespace_id == namespace->namespace_id &&
+        entry->command_id == command_id) {
       DEBUG_ERROR(
           "warning: duplicate registration for namespace 0x%08x command "
           "0x%02x; keeping existing handler\n",
-          command.namespace->namespace_id, command.command_id);
+          namespace->namespace_id, command_id);
       pthread_mutex_unlock(&g_control_handlers_mutex);
       return false;
     }
@@ -283,8 +290,8 @@ bool eventlog_socket_control_register_command(
   assert(entry != NULL);
   assert(entry->next == NULL);
 
-  const control_command_store_entry_t next = {.namespace = command.namespace,
-                                              .command_id = command.command_id,
+  const control_command_store_entry_t next = {.namespace = namespace,
+                                              .command_id = command_id,
                                               .handler = handler,
                                               .user_data = user_data,
                                               .next = NULL};
@@ -373,17 +380,19 @@ typedef enum {
   CONTROL_FD_STATUS_INTR,
 } control_fd_status_t;
 
-static bool control_command_handle(eventlog_socket_control_command_t command) {
+static bool control_command_handle(
+    const eventlog_socket_control_namespace_t *const namespace,
+    const eventlog_socket_control_command_id_t command_id) {
   DEBUG_TRACE("Handle command in namespace %d with id %02x",
-              command.namespace->namespace_id, command.command_id);
+              namespace->namespace_id, command_id);
   eventlog_socket_control_command_handler_t *handler = NULL;
   const void *user_data = NULL;
 
   pthread_mutex_lock(&g_control_handlers_mutex);
   control_command_store_entry_t *entry = g_control_command_store;
   while (entry != NULL) {
-    if (entry->namespace->namespace_id == command.namespace->namespace_id &&
-        entry->command_id == command.command_id) {
+    if (entry->namespace->namespace_id == namespace->namespace_id &&
+        entry->command_id == command_id) {
       handler = entry->handler;
       user_data = entry->user_data;
       break;
@@ -393,11 +402,11 @@ static bool control_command_handle(eventlog_socket_control_command_t command) {
   pthread_mutex_unlock(&g_control_handlers_mutex);
 
   if (handler != NULL) {
-    handler(command, user_data);
+    handler(namespace, command_id, user_data);
     return true;
   } else {
     DEBUG_ERROR("control: unhandled command namespace=0x%02x id=0x%02x",
-                command.namespace->namespace_id, command.command_id);
+                namespace->namespace_id, command_id);
     return false;
   }
 }
@@ -656,13 +665,9 @@ control_command_parser_handle_chunk(const size_t chunk_size,
     }
     case CONTROL_COMMAND_PARSER_STATE_COMMAND_ID: {
       DEBUG_TRACE("matched command_id byte '%d'", current_byte);
-      // Create a command.
-      const eventlog_socket_control_command_t command = {
-          .namespace = g_control_command_parser_state.namespace,
-          .command_id = current_byte,
-      };
       // Handle the command.
-      control_command_handle(command);
+      control_command_handle(g_control_command_parser_state.namespace,
+                             current_byte);
       // ...restart _without_ the current byte...
       control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
                                          NULL);
