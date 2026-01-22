@@ -95,14 +95,14 @@ commands mirror the RTS heap profiling API:
 | -------------------------------- | ---- |
 | `startHeapProfiling`             | 0x00 |
 | `stopHeapProfiling`              | 0x01 |
-| `requestHeapProfile` (one-shot)  | 0x02 |
+| `requestHeapCensus`  (one-shot)  | 0x02 |
 
 For example, a simple Python client can request a sample like this:
 
 ```python
 sock.sendall(b"\xF0\x9E\x97\x8C" + bytes([0x00]))  # startHeapProfiling
 ...
-sock.sendall(b"\xF0\x9E\x97\x8C" + bytes([0x02]))  # requestHeapProfile
+sock.sendall(b"\xF0\x9E\x97\x8C" + bytes([0x02]))  # requestHeapCensus
 ```
 
 Garbage control traffic is ignored, so you can send commands opportunistically

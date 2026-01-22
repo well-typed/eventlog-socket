@@ -7,7 +7,7 @@ import Data.Functor ((<&>))
 import Data.Machine ((~>))
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Text as T
-import GHC.Eventlog.Socket.Control (CommandId (..), requestHeapProfile, startHeapProfiling, stopHeapProfiling, userCommand, userNamespace)
+import GHC.Eventlog.Socket.Control (CommandId (..), requestHeapCensus, startHeapProfiling, stopHeapProfiling, userCommand, userNamespace)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withTempDirectory)
@@ -150,7 +150,7 @@ test_oddball_RequestHeapProfile =
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> hasNoHeapProfSampleString
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendCommand socket requestHeapProfile
+                    &> sendCommand socket requestHeapCensus
                     -- validate that there is exactly one heap sample, and that
                     -- afterwards there are no further samples, either in this
                     -- or the next iteration.
@@ -173,7 +173,7 @@ test_oddball_Junk (junkBefore, junkAfter) =
                     hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                         &> hasNoHeapProfSampleString
                         ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                        &> sendCommandWithJunk socket junkBefore requestHeapProfile junkAfter
+                        &> sendCommandWithJunk socket junkBefore requestHeapCensus junkAfter
                         !> hasHeapProfSampleString
                         &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
                         &> hasNoHeapProfSampleString

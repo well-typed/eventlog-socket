@@ -17,7 +17,7 @@ module GHC.Eventlog.Socket.Control (
     userCommand,
     startHeapProfiling,
     stopHeapProfiling,
-    requestHeapProfile,
+    requestHeapCensus,
 ) where
 
 import Control.Exception (Exception (..), assert, throw)
@@ -222,5 +222,5 @@ startHeapProfiling = Command eventlogSocketNamespace (CommandId 0)
 stopHeapProfiling :: Command
 stopHeapProfiling = Command eventlogSocketNamespace (CommandId 1)
 
-requestHeapProfile :: Command
-requestHeapProfile = Command eventlogSocketNamespace (CommandId 2)
+requestHeapCensus :: Command
+requestHeapCensus = Command eventlogSocketNamespace (CommandId 2)
