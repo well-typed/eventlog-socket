@@ -23,9 +23,9 @@ typedef struct {
 typedef void eventlog_socket_control_command_handler_t(
     const eventlog_socket_control_command_t command, void *user_data);
 
-bool eventlog_socket_control_register_namespace(
-    uint8_t namespace_len, const char namespace[namespace_len + 1],
-    eventlog_socket_control_namespace_id_t *namespace_id_out);
+const eventlog_socket_control_namespace_id_t *
+eventlog_socket_control_register_namespace(uint8_t namespace_len,
+                                           const char namespace[namespace_len]);
 
 bool eventlog_socket_control_register_command(
     eventlog_socket_control_command_t command,

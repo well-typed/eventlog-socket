@@ -66,8 +66,9 @@ static const uint8_t control_magic[CONTROL_MAGIC_LEN] = {
 typedef struct control_namespace_store_entry control_namespace_store_entry_t;
 
 struct control_namespace_store_entry {
-  size_t namespace_len;
-  char *namespace;
+  const size_t namespace_len;
+  const char *const namespace;
+  const uint8_t namespace_id;
   control_namespace_store_entry_t *next;
 };
 
@@ -129,9 +130,9 @@ bool control_namespace_store_resolve(
   return false;
 }
 
-bool eventlog_socket_control_register_namespace(
-    const uint8_t namespace_len, const char namespace[namespace_len],
-    eventlog_socket_control_namespace_id_t *namespace_id_out) {
+const eventlog_socket_control_namespace_id_t *
+eventlog_socket_control_register_namespace(
+    const uint8_t namespace_len, const char namespace[namespace_len]) {
 
   // Acquire the lock on g_control_namespace_store.
   pthread_mutex_lock(&g_control_namespace_store_mutex);
@@ -149,7 +150,7 @@ bool eventlog_socket_control_register_namespace(
                                       namespace)) {
       // If so, return false.
       pthread_mutex_unlock(&g_control_namespace_store_mutex);
-      return false;
+      return NULL;
     }
     // Is this the last namespace_entry?
     if (namespace_entry->next == NULL) {
@@ -165,21 +166,23 @@ bool eventlog_socket_control_register_namespace(
   assert(namespace_entry != NULL);
   assert(namespace_entry->next == NULL);
   ++namespace_id;
-  control_namespace_store_entry_t *next =
-      malloc(sizeof(control_namespace_store_entry_t));
-  next->namespace_len = namespace_len;
-  next->namespace = malloc(namespace_len + 1);
-  next->namespace[namespace_len] = '\0';
-  strncpy(next->namespace, namespace, namespace_len);
-  namespace_entry->next = next;
+  char *const next_namespace = malloc(namespace_len + 1);
+  strncpy(next_namespace, namespace, namespace_len);
+  next_namespace[namespace_len] = '\0';
+  const control_namespace_store_entry_t next =
+      (control_namespace_store_entry_t){
+          .namespace_len = namespace_len,
+          .namespace = next_namespace,
+          .namespace_id = namespace_id,
+          .next = NULL,
+      };
+  namespace_entry->next = malloc(sizeof(control_namespace_store_entry_t));
+  memcpy(namespace_entry->next, &next, sizeof(control_namespace_store_entry_t));
   DEBUG_TRACE("Registered namespace '%s' under ID %d", namespace, namespace_id);
-
-  // Write out the new namespace_id.
-  *namespace_id_out = namespace_id;
 
   // Return success.
   pthread_mutex_unlock(&g_control_namespace_store_mutex);
-  return true;
+  return &namespace_entry->next->namespace_id;
 }
 
 /******************************************************************************
