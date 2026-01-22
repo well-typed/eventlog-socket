@@ -1,10 +1,15 @@
-/// @file control.c
-/// @brief
-/// This module defines the control thread. The control thread listens on the
-/// eventlog socket and responds to incoming data following the eventlog socket
-/// control protocol. This module provides several builtin commands under the
-/// `"eventlog-socket"` namespace, and permits users to register custom
-/// commands.
+/// @file      control.c
+/// @brief     The control thread.
+/// @details   This module defines the control thread, which listens on the
+///            eventlog socket and handles incoming control command requests.
+///            Control commands can be registered using the public C API.
+///            See `eventlog_socket_control_register_namespace`
+///            and `eventlog_socket_control_register_command`.
+/// @author    Wen Kokke
+/// @author    Matthew Pickering
+/// @version   0.1.1.0
+/// @date      2025-2026
+/// @copyright BSD-3-Clause License.
 ///
 
 #include <assert.h>
@@ -52,12 +57,13 @@
 // => b'\xf0\x9e\x97\x8c'
 //
 
-/// The length of the magic bytestring that starts a control protocol message.
+/// @brief The length of the magic bytestring that starts a control protocol
+/// message.
 ///
 /// See `g_control_magic`.
 #define CONTROL_MAGIC_LEN 4
 
-/// The magic bytestring that starts a control protocol message.
+/// @brief The magic bytestring that starts a control protocol message.
 static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
     [0] = 0xF0,
     [1] = 0x9E,
@@ -65,23 +71,23 @@ static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
     [3] = 0x8C,
 };
 
-/// The name of the builtin namespace.
+/// @brief The name of the builtin namespace.
 #define BUILTIN_NAMESPACE "eventlog-socket"
 
-/// The ID of the builtin `StartHeapProfiling` command.
+/// @brief The ID of the builtin `StartHeapProfiling` command.
 #define BUILTIN_COMMAND_ID_START_HEAP_PROFILING 0
 
-/// The ID of the builtin `StopHeapProfiling` command.
+/// @brief The ID of the builtin `StopHeapProfiling` command.
 #define BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING 1
 
-/// The ID of the builtin `RequestHeapCensus` command.
+/// @brief The ID of the builtin `RequestHeapCensus` command.
 #define BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS 2
 
 /******************************************************************************
  * Handlers for Builtin Commands
  ******************************************************************************/
 
-/// Handler for "StartHeapProfiling" command (eventlog-socket::0).
+/// @brief Handler for "StartHeapProfiling" command (eventlog-socket::0).
 static void control_start_heap_profiling(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id,
@@ -93,7 +99,7 @@ static void control_start_heap_profiling(
   DEBUG_TRACE("%s", "Started heap profiling.");
 }
 
-/// Handler for "StopHeapProfiling" command (eventlog-socket::1).
+/// @brief Handler for "StopHeapProfiling" command (eventlog-socket::1).
 static void control_stop_heap_profiling(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id,
@@ -105,7 +111,7 @@ static void control_stop_heap_profiling(
   DEBUG_TRACE("%s", "Stopped heap profiling.");
 }
 
-/// Handler for "RequestHeapCensus" command (eventlog-socket::2).
+/// @brief Handler for "RequestHeapCensus" command (eventlog-socket::2).
 static void control_request_heap_census(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id,
@@ -121,13 +127,13 @@ static void control_request_heap_census(
  * Namespace and Command Registry
  ******************************************************************************/
 
-/// An entry in the command registry.
+/// @brief An entry in the command registry.
 ///
 /// See `eventlog_socket_control_command`.
 typedef struct eventlog_socket_control_command
     eventlog_socket_control_command_t;
 
-/// An entry in the command registry.
+/// @brief An entry in the command registry.
 ///
 /// The command registry is a linked-list of `eventlog_socket_control_command`
 /// values. Each `eventlog_socket_control_command_t` entry should have a stable
@@ -145,13 +151,13 @@ struct eventlog_socket_control_command {
   eventlog_socket_control_command_t *next;
 };
 
-/// An entry in the namespace registry.
+/// @brief An entry in the namespace registry.
 ///
 /// See `eventlog_socket_control_namespace`.
 typedef struct eventlog_socket_control_namespace
     eventlog_socket_control_namespace_t;
 
-/// An entry in the namespace registry.
+/// @brief An entry in the namespace registry.
 ///
 /// The namespace registry is a linked-list of
 /// `eventlog_socket_control_namespace` values. Each
@@ -172,7 +178,7 @@ struct eventlog_socket_control_namespace {
   eventlog_socket_control_command_t *command_registry;
 };
 
-/// The global namespace registry.
+/// @brief The global namespace registry.
 ///
 /// See `eventlog_socket_control_namespace`.
 ///
@@ -203,16 +209,17 @@ eventlog_socket_control_namespace_t g_control_namespace_registry = {
         },
 };
 
-/// The mutex that guards the global namespace registry.
+/// @brief The mutex that guards the global namespace registry.
 ///
 /// See `g_control_namespace_registry`.
-pthread_mutex_t g_control_namespace_store_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t g_control_namespace_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/// Check if the given entry in the namespace registry matches a given name.
+/// @brief Check if the given entry in the namespace registry matches a given
+/// name.
 ///
 /// @pre namespace_entry != NULL
 bool control_namespace_store_match(
-    const eventlog_socket_control_namespace_t *namespace_entry,
+    const eventlog_socket_control_namespace_t *const namespace_entry,
     const size_t namespace_len, const char namespace[namespace_len]) {
   // if namespace_entry == NULL, then...
   if (namespace_entry == NULL) {
@@ -229,7 +236,7 @@ bool control_namespace_store_match(
   return namespace_cmp == 0;
 }
 
-/// Resolve a namespace by name.
+/// @brief Resolve a namespace by name.
 ///
 /// @return If the namespace is found, this function returns a stable pointer to
 /// it. Otherwise, it returns NULL. The returned pointer should not be freed.
@@ -238,7 +245,7 @@ control_namespace_store_resolve(const size_t namespace_len,
                                 const char namespace[namespace_len]) {
 
   // Acquire a lock on g_control_namespace_store.
-  pthread_mutex_lock(&g_control_namespace_store_mutex);
+  pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Initialise the namespace_entry pointer.
   eventlog_socket_control_namespace_t *namespace_entry =
@@ -249,14 +256,14 @@ control_namespace_store_resolve(const size_t namespace_len,
     if (control_namespace_store_match(namespace_entry, namespace_len,
                                       namespace)) {
       // Release the lock on g_control_namespace_store.
-      pthread_mutex_unlock(&g_control_namespace_store_mutex);
+      pthread_mutex_unlock(&g_control_namespace_registry_mutex);
       return namespace_entry;
     }
     // Otherwise, continue with the next namespace_entry.
     namespace_entry = namespace_entry->next;
   }
   // Release the lock on g_control_namespace_store.
-  pthread_mutex_unlock(&g_control_namespace_store_mutex);
+  pthread_mutex_unlock(&g_control_namespace_registry_mutex);
   return false;
 }
 
@@ -265,7 +272,7 @@ eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
     const uint8_t namespace_len, const char namespace[namespace_len]) {
 
   // Acquire the lock on g_control_namespace_store.
-  pthread_mutex_lock(&g_control_namespace_store_mutex);
+  pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Initialise the namespace_entry pointer.
   eventlog_socket_control_namespace_t *namespace_entry =
@@ -280,7 +287,7 @@ eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
     if (control_namespace_store_match(namespace_entry, namespace_len,
                                       namespace)) {
       // If so, return false.
-      pthread_mutex_unlock(&g_control_namespace_store_mutex);
+      pthread_mutex_unlock(&g_control_namespace_registry_mutex);
       return NULL;
     }
     // Is this the last namespace_entry?
@@ -312,13 +319,13 @@ eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
   DEBUG_TRACE("Registered namespace '%s' under ID %d", namespace, namespace_id);
 
   // Release the lock on g_control_namespace_store.
-  pthread_mutex_unlock(&g_control_namespace_store_mutex);
+  pthread_mutex_unlock(&g_control_namespace_registry_mutex);
 
   // Return the namespace entry.
   return namespace_entry->next;
 }
 
-/// Resolve a command by namespace and ID.
+/// @brief Resolve a command by namespace and ID.
 ///
 /// @return If the command is found, this function returns a stable pointer to
 /// it. Otherwise, it returns NULL. The returned pointer should not be freed.
@@ -327,7 +334,7 @@ const eventlog_socket_control_command_t *control_command_store_resolve(
     const eventlog_socket_control_command_id_t command_id) {
 
   // Acquire the lock on g_control_namespace_store.
-  pthread_mutex_lock(&g_control_namespace_store_mutex);
+  pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Traverse the command_store to find the command....
   eventlog_socket_control_command_t *command = namespace->command_registry;
@@ -336,7 +343,7 @@ const eventlog_socket_control_command_t *control_command_store_resolve(
     // If this is the command we're looking for, then...
     if (command->command_id == command_id) {
       // ...release the lock on g_control_namespace_store...
-      pthread_mutex_unlock(&g_control_namespace_store_mutex);
+      pthread_mutex_unlock(&g_control_namespace_registry_mutex);
       // ...and return the command.
       return command;
     }
@@ -345,7 +352,7 @@ const eventlog_socket_control_command_t *control_command_store_resolve(
   }
   // If the command was not found...
   // ...release the lock on g_control_namespace_store...
-  pthread_mutex_unlock(&g_control_namespace_store_mutex);
+  pthread_mutex_unlock(&g_control_namespace_registry_mutex);
   // ...and return NULL.
   return NULL;
 }
@@ -361,7 +368,7 @@ bool eventlog_socket_control_register_command(
               command_id, (void *)namespace);
 
   // Acquire the lock on g_control_namespace_store.
-  pthread_mutex_lock(&g_control_namespace_store_mutex);
+  pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Create the data for the new command_entry.
   const eventlog_socket_control_command_t next =
@@ -393,7 +400,7 @@ bool eventlog_socket_control_register_command(
         DEBUG_ERROR("Command 0x%02x already registered for namespace %p.",
                     command_id, (void *)namespace);
         // If so, return false.
-        pthread_mutex_unlock(&g_control_namespace_store_mutex);
+        pthread_mutex_unlock(&g_control_namespace_registry_mutex);
         return false;
       }
     } while (command_entry->next != NULL);
@@ -410,11 +417,11 @@ bool eventlog_socket_control_register_command(
   memcpy(command_entry, &next, sizeof(eventlog_socket_control_command_t));
 
   // Release the lock on g_control_namespace_store.
-  pthread_mutex_unlock(&g_control_namespace_store_mutex);
+  pthread_mutex_unlock(&g_control_namespace_registry_mutex);
   return true;
 }
 
-/// Call a command by namespace and ID.
+/// @brief Call a command by namespace and ID.
 static bool control_command_handle(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id) {
@@ -446,16 +453,17 @@ static bool control_command_handle(
  * Waiting for the GHC RTS
  ******************************************************************************/
 
-/// A global variable that tracks whether the GHC RTS is ready.
+/// @brief A global variable that tracks whether the GHC RTS is ready.
 static volatile bool g_ghc_rts_ready = false;
 
-/// The condition on which to wait for the signal that the GHC RTS is ready.
+/// @brief The condition on which to wait for the signal that the GHC RTS is
+/// ready.
 static pthread_cond_t g_ghc_rts_ready_cond = PTHREAD_COND_INITIALIZER;
 
-/// The mutex that corresponds to `g_ghc_rts_ready_cond`.
+/// @brief The mutex that corresponds to `g_ghc_rts_ready_cond`.
 static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/// Wait for the signal that the GHC RTS is ready.
+/// @brief Wait for the signal that the GHC RTS is ready.
 static void control_wait_ghc_rts_ready(void) {
   DEBUG_TRACE("%s", "Waiting for signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
@@ -480,7 +488,7 @@ void eventlog_socket_control_signal_ghc_rts_ready(void) {
  * Command Parser
  ******************************************************************************/
 
-/// The tag for the command parser state.
+/// @brief The tag for the command parser state.
 ///
 /// See `control_command_parser_state_t`.
 typedef enum {
@@ -498,7 +506,8 @@ typedef enum {
   CONTROL_COMMAND_PARSER_STATE_COMMAND_ID,
 } control_command_parser_state_tag_t;
 
-/// Show a value of type `control_command_parser_state_tag_t` as a string.
+/// @brief Show a value of type `control_command_parser_state_tag_t` as a
+/// string.
 const char *
 control_command_parser_state_tag_show(control_command_parser_state_tag_t tag) {
   switch (tag) {
@@ -515,7 +524,7 @@ control_command_parser_state_tag_show(control_command_parser_state_tag_t tag) {
   }
 }
 
-/// The command parser state.
+/// @brief The command parser state.
 typedef struct {
   /// The tag that determines which member of the union is set.
   control_command_parser_state_tag_t tag;
@@ -566,13 +575,13 @@ typedef struct {
   };
 } control_command_parser_state_t;
 
-/// The global command parser state.
+/// @brief The global command parser state.
 control_command_parser_state_t g_control_command_parser_state = {
     .tag = CONTROL_COMMAND_PARSER_STATE_MAGIC,
     .header_pos = 0,
 };
 
-/// Move the command parser to a new state.
+/// @brief Move the command parser to a new state.
 ///
 /// This function frees any resources held by the current state, changes the
 /// state tag, and initialises the new state. This function should not be used
@@ -589,7 +598,7 @@ control_command_parser_state_t g_control_command_parser_state = {
 /// function will use this byte to initialise the new state.
 static void
 control_command_parser_enter_state(const control_command_parser_state_tag_t tag,
-                                   const uint8_t *data) {
+                                   const uint8_t *const data) {
   DEBUG_TRACE(
       "%s -> %s",
       control_command_parser_state_tag_show(g_control_command_parser_state.tag),
@@ -650,7 +659,7 @@ control_command_parser_enter_state(const control_command_parser_state_tag_t tag,
   }
 }
 
-/// Parse a chunk.
+/// @brief Parse a chunk.
 ///
 /// This is the incremental command parser. It parses a chunk of bytes and
 /// updates the command parser state.
@@ -862,22 +871,28 @@ control_command_parser_handle_chunk(const size_t chunk_size,
  * Control Thread
  ******************************************************************************/
 
-/// A volatile view of the eventlog socket file descriptor.
+/// @brief The control thread reads chunks of this size from the eventlog
+/// socket.
+#define CHUNK_SIZE 256
+
+/// @brief A volatile view of the eventlog socket file descriptor.
 ///
 /// This file descriptor is *not* managed by the control thread.
 static const volatile int *g_control_fd_ptr = NULL;
 
-/// A pointer to the mutex that guards the eventlog socket file descriptor.
+/// @brief A pointer to the mutex that guards the eventlog socket file
+/// descriptor.
 ///
 /// See `g_control_fd_ptr`.
 static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
 
-/// A pointer to the condition used to signal a new connection on the eventlog
-/// socket file descriptor.
+/// @brief A pointer to the condition used to signal a new connection on the
+/// eventlog socket file descriptor.
+///
 /// This condition should be used with `g_control_fd_mutex_ptr`.
 static pthread_cond_t *g_new_conn_cond_ptr = NULL;
 
-/// A stable view the eventlog socket file descriptor.
+/// @brief A stable view the eventlog socket file descriptor.
 ///
 /// See `g_control_fd_ptr`.
 static int g_control_fd = -1;
@@ -891,7 +906,7 @@ static void control_fd_reset_to(const int new_control_fd) {
   // todo: reset parser state
 }
 
-/// Wait for a new connection.
+/// @brief Wait for a new connection.
 ///
 /// @pre The caller must have a lock on `g_control_fd_mutex_ptr`.
 /// @post The caller will have a lock on `g_control_fd_mutex_ptr`.
@@ -908,12 +923,7 @@ static void *control_loop(void *arg) {
   assert(g_new_conn_cond_ptr != NULL);
 
   // Allocate memory for chunks:
-  const long chunk_size = sysconf(_SC_PAGESIZE);
-  if (chunk_size == -1) {
-    DEBUG_ERRNO("sysconf(_SC_PAGESIZE) failed");
-  }
-  uint8_t *chunk;
-  posix_memalign((void **)&chunk, chunk_size, chunk_size);
+  uint8_t *const chunk = malloc(CHUNK_SIZE);
 
   // Wait for the GHC RTS to become ready.
   control_wait_ghc_rts_ready();
@@ -1005,9 +1015,10 @@ static void *control_loop(void *arg) {
     /* END: Wake up. */
 
     /* BEGIN: Wait for input. */
-    // The eventlog socket is marked as non-blocking. If we try to receive data,
-    // the `recv` function returns immediately. This works, but causes us to go
-    // through the control loop *very* quickly. Instead, we wait for input data.
+    // The eventlog socket is marked as non-blocking. If we try to receive
+    // data, the `recv` function returns immediately. This works, but causes
+    // us to go through the control loop *very* quickly. Instead, we wait for
+    // input data.
 
     // note: POLLHUP and POLLRDHUP are output only and are ignored input.
     struct pollfd pfds[1] = {{
@@ -1059,7 +1070,7 @@ static void *control_loop(void *arg) {
 
     // read a chunk:
     const ssize_t chunk_size_or_error =
-        recv(g_control_fd, chunk, chunk_size, 0);
+        recv(g_control_fd, chunk, CHUNK_SIZE, 0);
     // if num_bytes_or_error == -1, an error occurred...
     if (chunk_size_or_error == -1) {
       // if errno is EINTR, the receive was interrupted...
@@ -1103,8 +1114,9 @@ onexit:
 
 /* HIDDEN - see documentation in control.h */
 void HIDDEN eventlog_socket_control_start(
-    pthread_t *control_thread, const volatile int *const control_fd_ptr,
-    pthread_mutex_t *control_fd_mutex_ptr, pthread_cond_t *new_conn_cond_ptr) {
+    pthread_t *const control_thread, const volatile int *const control_fd_ptr,
+    pthread_mutex_t *const control_fd_mutex_ptr,
+    pthread_cond_t *const new_conn_cond_ptr) {
   DEBUG_TRACE("%s", "Starting control thread.");
   g_control_fd_ptr = control_fd_ptr;
   g_control_fd_mutex_ptr = control_fd_mutex_ptr;
