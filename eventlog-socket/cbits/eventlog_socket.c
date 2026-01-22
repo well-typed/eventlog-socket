@@ -647,10 +647,6 @@ static void eventlog_socket_init(const struct listener_config *config) {
                                 &g_new_conn_cond);
 }
 
-void eventlog_socket_signal_rts_ready(void) {
-  eventlog_socket_control_signal_ghc_rts_ready();
-}
-
 // Unix domain socket paths are limited to 108 bytes.
 // This is 107 characters and one null byte.
 #define UNIX_DOMAIN_SOCKET_PATH_MAX_LEN 108
@@ -728,7 +724,7 @@ int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf,
 
   // Signal that the RTS is ready so the eventlog writer can accept control
   // connections.
-  eventlog_socket_signal_rts_ready();
+  eventlog_socket_control_signal_ghc_rts_ready();
 
   {
     Capability *cap = rts_lock();
