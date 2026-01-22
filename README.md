@@ -14,7 +14,7 @@ executable my-app
   ...
   build-depends:
     ...
-    , eventlog-socket  >=0.1.0 && <0.2
+    , eventlog-socket  >=0.1 && <0.2
     ...
 ```
 
@@ -100,9 +100,9 @@ commands mirror the RTS heap profiling API:
 For example, a simple Python client can request a sample like this:
 
 ```python
-sock.sendall(b"\xF0\x9E\x97\x8C" + bytes([0x00]))  # startHeapProfiling
-...
-sock.sendall(b"\xF0\x9E\x97\x8C" + bytes([0x02]))  # requestHeapCensus
+sock.sendall(b"\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x00")  # startHeapProfiling
+sock.sendall(b"\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x01")  # stopHeapProfiling
+sock.sendall(b"\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x02")  # requestHeapCensus
 ```
 
 Garbage control traffic is ignored, so you can send commands opportunistically
