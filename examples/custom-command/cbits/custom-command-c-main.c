@@ -62,7 +62,7 @@ handle_pong(const eventlog_socket_control_namespace_t *const namespace,
 /// commands.
 void custom_command_initialize(void) {
   // Register the "custom-command" namespace.
-  const eventlog_socket_control_namespace_t *namespace =
+  eventlog_socket_control_namespace_t *namespace =
       eventlog_socket_control_register_namespace(
           strlen(CUSTOM_COMMAND_NAMESPACE), CUSTOM_COMMAND_NAMESPACE);
   if (namespace == NULL) {
