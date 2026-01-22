@@ -1,4 +1,12 @@
 /// @file control.c
+/// @brief
+/// This module defines the control thread. The control thread listens on the
+/// eventlog socket and responds to incoming data following the eventlog socket
+/// control protocol. This module provides several builtin commands under the
+/// `"eventlog-socket"` namespace, and permits users to register custom
+/// commands.
+///
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -910,8 +918,13 @@ static void *control_loop(void *arg) {
   // Wait for the GHC RTS to become ready.
   control_wait_ghc_rts_ready();
 
+  /* BEGIN: The main control loop. */
   while (true) {
     DEBUG_TRACE("%s", "Starting new control iteration.");
+
+    /* BEGIN: Wake up. */
+    // At the start of each control iteration, we update the eventlog socket
+    // file descriptor.
 
     // Acquire the lock on the connection file description.
     pthread_mutex_lock(g_control_fd_mutex_ptr);
@@ -989,8 +1002,13 @@ static void *control_loop(void *arg) {
 
     // Check that g_control_fd is up-to-date:
     assert(g_control_fd == new_control_fd);
+    /* END: Wake up. */
 
-    // wait for input:
+    /* BEGIN: Wait for input. */
+    // The eventlog socket is marked as non-blocking. If we try to receive data,
+    // the `recv` function returns immediately. This works, but causes us to go
+    // through the control loop *very* quickly. Instead, we wait for input data.
+
     // note: POLLHUP and POLLRDHUP are output only and are ignored input.
     struct pollfd pfds[1] = {{
         .fd = g_control_fd,
@@ -1034,6 +1052,10 @@ static void *control_loop(void *arg) {
       // ...so the file descriptor is ready with input...
       // ...continue with the main loop...
     }
+    /* END: Wait for input. */
+
+    /* BEGIN: Handle up to one chunk of input. */
+    // Once we know that there is some input, we read and handle one chunk.
 
     // read a chunk:
     const ssize_t chunk_size_or_error =
@@ -1069,7 +1091,9 @@ static void *control_loop(void *arg) {
       assert(chunk_size_or_error > 0);
       control_command_parser_handle_chunk(chunk_size_or_error, chunk);
     }
+    /* END: Handle up to one chunk of input. */
   }
+  /* END: The main control loop. */
   goto onexit;
 
 onexit:
