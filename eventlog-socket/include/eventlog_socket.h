@@ -11,25 +11,26 @@
 
 extern const EventLogWriter SocketEventLogWriter;
 
-typedef uint8_t eventlog_socket_control_namespace_id_t;
+typedef struct eventlog_socket_control_namespace
+    eventlog_socket_control_namespace_t;
 
 typedef uint8_t eventlog_socket_control_command_id_t;
 
 typedef struct {
-  eventlog_socket_control_namespace_id_t namespace_id;
-  eventlog_socket_control_command_id_t command_id;
+  const eventlog_socket_control_namespace_t *const namespace;
+  const eventlog_socket_control_command_id_t command_id;
 } eventlog_socket_control_command_t;
 
 typedef void eventlog_socket_control_command_handler_t(
-    const eventlog_socket_control_command_t command, void *user_data);
+    const eventlog_socket_control_command_t command, const void *user_data);
 
-const eventlog_socket_control_namespace_id_t *
+const eventlog_socket_control_namespace_t *
 eventlog_socket_control_register_namespace(uint8_t namespace_len,
                                            const char namespace[namespace_len]);
 
 bool eventlog_socket_control_register_command(
     eventlog_socket_control_command_t command,
-    eventlog_socket_control_command_handler_t *handler, void *user_data);
+    eventlog_socket_control_command_handler_t *handler, const void *user_data);
 
 void eventlog_socket_init_unix(const char *sock_path);
 void eventlog_socket_init_tcp(const char *host, const char *port);
