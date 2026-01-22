@@ -190,5 +190,7 @@ test_customCommand =
             assertEventlogWith' eventlogSocket $ \socket ->
                 hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`)
                     &> sendCommand socket (userCommand (userNamespace "custom-command") (CommandId 0))
-                    !> hasMatchingUserMessage ("custom command handled" ==)
+                    !> hasMatchingUserMessage ("handled ping" ==)
+                    &> sendCommand socket (userCommand (userNamespace "custom-command") (CommandId 1))
+                    !> hasMatchingUserMessage ("handled pong" ==)
                     &> (2 `times` hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`))
