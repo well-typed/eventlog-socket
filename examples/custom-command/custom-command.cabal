@@ -14,12 +14,8 @@ build-type:    Simple
 executable custom-command
   main-is:          Main.hs
   hs-source-dirs:   app
-  c-sources:
-    cbits/custom-command-c-main.c
-    cbits/custom-command-handler.c
-
+  c-sources:        cbits/custom-command-c-main.c
   include-dirs:     cbits
-  includes:         custom-command-handler.h
   default-language: Haskell2010
   build-depends:
     , base             >=4.14 && <5
