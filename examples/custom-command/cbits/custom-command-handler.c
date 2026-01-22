@@ -30,14 +30,12 @@ static void demo_command_handler(eventlog_socket_control_command_t command,
 
 void custom_command_register(void) {
   static const char *label = "demo ping";
-  // Register the namespace.
-  eventlog_socket_control_namespace_id_t *namespace_out =
-      malloc(sizeof(eventlog_socket_control_namespace_id_t));
 
   // Register the custom namespace.
-  const bool namespace_ok = eventlog_socket_control_register_namespace(
-      strlen(CUSTOM_NAMESPACE), CUSTOM_NAMESPACE, namespace_out);
-  if (!namespace_ok) {
+  const eventlog_socket_control_namespace_id_t *namespace_id =
+      eventlog_socket_control_register_namespace(strlen(CUSTOM_NAMESPACE),
+                                                 CUSTOM_NAMESPACE);
+  if (namespace_id == NULL) {
     fprintf(stderr, "[custom-command] failed to register namespace=%s\n",
             CUSTOM_NAMESPACE);
     return;
@@ -45,7 +43,7 @@ void custom_command_register(void) {
 
   // Register the ping command.
   const eventlog_socket_control_command_t ping_command = {
-      .namespace_id = *namespace_out, .command_id = CUSTOM_COMMAND_ID_PING};
+      .namespace_id = *namespace_id, .command_id = CUSTOM_COMMAND_ID_PING};
   bool ok = eventlog_socket_control_register_command(
       ping_command, demo_command_handler, (void *)label);
   if (!ok) {
