@@ -63,30 +63,25 @@ static const uint8_t control_magic[CONTROL_MAGIC_LEN] = {
  * namespace registry
  ******************************************************************************/
 
+typedef struct eventlog_socket_control_namespace
+    eventlog_socket_control_namespace_t;
+
 struct eventlog_socket_control_namespace {
-  const uint8_t namespace_id;
-};
-
-typedef struct control_namespace_store_entry control_namespace_store_entry_t;
-
-struct control_namespace_store_entry {
   const size_t namespace_len;
   const char *const namespace;
-  const eventlog_socket_control_namespace_t namespace_id;
-  control_namespace_store_entry_t *next;
+  eventlog_socket_control_namespace_t *next;
 };
 
-control_namespace_store_entry_t g_control_namespace_store = {
+eventlog_socket_control_namespace_t g_control_namespace_store = {
     .namespace = BUILTIN_NAMESPACE,
     .namespace_len = strlen(BUILTIN_NAMESPACE),
-    .namespace_id = {.namespace_id = BUILTIN_NAMESPACE_ID},
     .next = NULL,
 };
 
 pthread_mutex_t g_control_namespace_store_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 bool control_namespace_store_match(
-    const control_namespace_store_entry_t *namespace_entry,
+    const eventlog_socket_control_namespace_t *namespace_entry,
     const size_t namespace_len, const char namespace[namespace_len]) {
   // if namespace_entry == NULL, then...
   if (namespace_entry == NULL) {
@@ -111,7 +106,8 @@ control_namespace_store_resolve(const size_t namespace_len,
   pthread_mutex_lock(&g_control_namespace_store_mutex);
 
   // Initialise the namespace_entry pointer.
-  control_namespace_store_entry_t *namespace_entry = &g_control_namespace_store;
+  eventlog_socket_control_namespace_t *namespace_entry =
+      &g_control_namespace_store;
 
   while (namespace_entry != NULL) {
     // Is this the namespace you are looking for?
@@ -119,7 +115,7 @@ control_namespace_store_resolve(const size_t namespace_len,
                                       namespace)) {
       // Release the lock on g_control_namespace_store.
       pthread_mutex_unlock(&g_control_namespace_store_mutex);
-      return &namespace_entry->namespace_id;
+      return namespace_entry;
     }
     // Otherwise, continue with the next namespace_entry.
     namespace_entry = namespace_entry->next;
@@ -137,7 +133,8 @@ eventlog_socket_control_register_namespace(
   pthread_mutex_lock(&g_control_namespace_store_mutex);
 
   // Initialise the namespace_entry pointer.
-  control_namespace_store_entry_t *namespace_entry = &g_control_namespace_store;
+  eventlog_socket_control_namespace_t *namespace_entry =
+      &g_control_namespace_store;
 
   // Let's start counting namespace ids.
   uint8_t namespace_id = 0;
@@ -168,20 +165,20 @@ eventlog_socket_control_register_namespace(
   char *const next_namespace = malloc(namespace_len + 1);
   strncpy(next_namespace, namespace, namespace_len);
   next_namespace[namespace_len] = '\0';
-  const control_namespace_store_entry_t next =
-      (control_namespace_store_entry_t){
+  const eventlog_socket_control_namespace_t next =
+      (eventlog_socket_control_namespace_t){
           .namespace_len = namespace_len,
           .namespace = next_namespace,
-          .namespace_id = {.namespace_id = namespace_id},
           .next = NULL,
       };
-  namespace_entry->next = malloc(sizeof(control_namespace_store_entry_t));
-  memcpy(namespace_entry->next, &next, sizeof(control_namespace_store_entry_t));
+  namespace_entry->next = malloc(sizeof(eventlog_socket_control_namespace_t));
+  memcpy(namespace_entry->next, &next,
+         sizeof(eventlog_socket_control_namespace_t));
   DEBUG_TRACE("Registered namespace '%s' under ID %d", namespace, namespace_id);
 
   // Return success.
   pthread_mutex_unlock(&g_control_namespace_store_mutex);
-  return &namespace_entry->next->namespace_id;
+  return namespace_entry->next;
 }
 
 /******************************************************************************
@@ -246,17 +243,17 @@ static void control_request_heap_profile(
 // Registry of control command handlers
 static control_command_store_entry_t *g_control_command_store =
     &(control_command_store_entry_t){
-        .namespace = &g_control_namespace_store.namespace_id,
+        .namespace = &g_control_namespace_store,
         .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
         .handler = control_start_heap_profiling,
         .user_data = NULL,
         .next = &(control_command_store_entry_t){
-            .namespace = &g_control_namespace_store.namespace_id,
+            .namespace = &g_control_namespace_store,
             .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
             .handler = control_stop_heap_profiling,
             .user_data = NULL,
             .next = &(control_command_store_entry_t){
-                .namespace = &g_control_namespace_store.namespace_id,
+                .namespace = &g_control_namespace_store,
                 .command_id = BUILTIN_COMMAND_ID_REQUEST_HEAP_PROFILE,
                 .handler = control_request_heap_profile,
                 .user_data = NULL,
@@ -270,8 +267,8 @@ bool eventlog_socket_control_register_command(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id,
     eventlog_socket_control_command_handler_t handler, const void *user_data) {
-  DEBUG_TRACE("Received request to register command 0x%02x in namespace 0x%02x",
-              command_id, namespace->namespace_id);
+  DEBUG_TRACE("Received request to register command 0x%02x in namespace %p",
+              command_id, (void *)namespace);
   if (handler == NULL) {
     return false;
   }
@@ -279,10 +276,9 @@ bool eventlog_socket_control_register_command(
   control_command_store_entry_t *entry = g_control_command_store;
   assert(entry != NULL);
   do {
-    if (entry->namespace->namespace_id == namespace->namespace_id &&
-        entry->command_id == command_id) {
-      DEBUG_ERROR("Command 0x%02x already registered for namespace 0x%02x.",
-                  namespace->namespace_id, command_id);
+    if (entry->namespace == namespace && entry->command_id == command_id) {
+      DEBUG_ERROR("Command 0x%02x already registered for namespace %p.",
+                  command_id, (void *)namespace);
       pthread_mutex_unlock(&g_control_command_store_mutex);
       return false;
     }
@@ -298,8 +294,8 @@ bool eventlog_socket_control_register_command(
                                               .next = NULL};
   entry->next = malloc(sizeof(control_command_store_entry_t));
   memcpy(entry->next, &next, sizeof(control_command_store_entry_t));
-  DEBUG_TRACE("Registered command 0x%02x in namespace 0x%02x", command_id,
-              namespace->namespace_id);
+  DEBUG_TRACE("Registered command 0x%02x in namespace %p", command_id,
+              (void *)namespace);
   pthread_mutex_unlock(&g_control_command_store_mutex);
   return true;
 }
@@ -386,16 +382,15 @@ typedef enum {
 static bool control_command_handle(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id) {
-  DEBUG_TRACE("Handle command 0x%02x in namespace 0x%02x", command_id,
-              namespace->namespace_id);
+  DEBUG_TRACE("Handle command 0x%02x in namespace %p", command_id,
+              (void *)namespace);
   eventlog_socket_control_command_handler_t *handler = NULL;
   const void *user_data = NULL;
 
   pthread_mutex_lock(&g_control_command_store_mutex);
   control_command_store_entry_t *entry = g_control_command_store;
   while (entry != NULL) {
-    if (entry->namespace->namespace_id == namespace->namespace_id &&
-        entry->command_id == command_id) {
+    if (entry->namespace == namespace && entry->command_id == command_id) {
       handler = entry->handler;
       user_data = entry->user_data;
       break;
@@ -408,8 +403,8 @@ static bool control_command_handle(
     handler(namespace, command_id, user_data);
     return true;
   } else {
-    DEBUG_ERROR("control: unhandled command namespace=0x%02x id=0x%02x",
-                namespace->namespace_id, command_id);
+    DEBUG_ERROR("control: unhandled command 0x%02x in namespace %p", command_id,
+                (void *)namespace);
     return false;
   }
 }
@@ -611,9 +606,9 @@ control_command_parser_handle_chunk(const size_t chunk_size,
               g_control_command_parser_state.namespace_buffer);
       // if the namespace was successfully resolved, then...
       if (namespace != NULL) {
-        DEBUG_TRACE("resolved namespace '%s' to %d",
+        DEBUG_TRACE("resolved namespace '%s' to %p",
                     g_control_command_parser_state.namespace_buffer,
-                    namespace->namespace_id);
+                    (void *)namespace);
         // move chunk_index by the number of copied bytes less one,
         // because the chunk_index will be updated when we reenter the for loop.
         // note: the subtraction is safe because available_bytes > 0
