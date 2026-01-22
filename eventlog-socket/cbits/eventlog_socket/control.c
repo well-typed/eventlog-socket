@@ -63,18 +63,23 @@ static const uint8_t control_magic[CONTROL_MAGIC_LEN] = {
  * namespace registry
  ******************************************************************************/
 
+struct eventlog_socket_control_namespace {
+  const uint8_t namespace_id;
+};
+
 typedef struct control_namespace_store_entry control_namespace_store_entry_t;
 
 struct control_namespace_store_entry {
   const size_t namespace_len;
   const char *const namespace;
-  const uint8_t namespace_id;
+  const eventlog_socket_control_namespace_t namespace_id;
   control_namespace_store_entry_t *next;
 };
 
 control_namespace_store_entry_t g_control_namespace_store = {
     .namespace = BUILTIN_NAMESPACE,
     .namespace_len = strlen(BUILTIN_NAMESPACE),
+    .namespace_id = {.namespace_id = BUILTIN_NAMESPACE_ID},
     .next = NULL,
 };
 
@@ -98,9 +103,9 @@ bool control_namespace_store_match(
   return namespace_cmp == 0;
 }
 
-bool control_namespace_store_resolve(
-    const size_t namespace_len, const char namespace[namespace_len],
-    eventlog_socket_control_namespace_id_t *namespace_id_out) {
+const eventlog_socket_control_namespace_t *
+control_namespace_store_resolve(const size_t namespace_len,
+                                const char namespace[namespace_len]) {
 
   // Acquire a lock on g_control_namespace_store.
   pthread_mutex_lock(&g_control_namespace_store_mutex);
@@ -108,29 +113,23 @@ bool control_namespace_store_resolve(
   // Initialise the namespace_entry pointer.
   control_namespace_store_entry_t *namespace_entry = &g_control_namespace_store;
 
-  // Let's start counting namespace ids.
-  eventlog_socket_control_namespace_id_t namespace_id = 0;
-
   while (namespace_entry != NULL) {
     // Is this the namespace you are looking for?
     if (control_namespace_store_match(namespace_entry, namespace_len,
                                       namespace)) {
-      // Write out the namespace_id.
-      *namespace_id_out = namespace_id;
       // Release the lock on g_control_namespace_store.
       pthread_mutex_unlock(&g_control_namespace_store_mutex);
-      return true;
+      return &namespace_entry->namespace_id;
     }
     // Otherwise, continue with the next namespace_entry.
     namespace_entry = namespace_entry->next;
-    ++namespace_id;
   }
   // Release the lock on g_control_namespace_store.
   pthread_mutex_unlock(&g_control_namespace_store_mutex);
   return false;
 }
 
-const eventlog_socket_control_namespace_id_t *
+const eventlog_socket_control_namespace_t *
 eventlog_socket_control_register_namespace(
     const uint8_t namespace_len, const char namespace[namespace_len]) {
 
@@ -141,7 +140,7 @@ eventlog_socket_control_register_namespace(
   control_namespace_store_entry_t *namespace_entry = &g_control_namespace_store;
 
   // Let's start counting namespace ids.
-  eventlog_socket_control_namespace_id_t namespace_id = 0;
+  uint8_t namespace_id = 0;
 
   // Is the requested namespace already registered?
   do {
@@ -173,7 +172,7 @@ eventlog_socket_control_register_namespace(
       (control_namespace_store_entry_t){
           .namespace_len = namespace_len,
           .namespace = next_namespace,
-          .namespace_id = namespace_id,
+          .namespace_id = {.namespace_id = namespace_id},
           .next = NULL,
       };
   namespace_entry->next = malloc(sizeof(control_namespace_store_entry_t));
@@ -199,10 +198,10 @@ eventlog_socket_control_register_namespace(
 typedef struct control_command_store_entry control_command_store_entry_t;
 
 struct control_command_store_entry {
-  eventlog_socket_control_namespace_id_t namespace_id;
-  eventlog_socket_control_command_id_t command_id;
-  eventlog_socket_control_command_handler_t *handler;
-  void *user_data;
+  const eventlog_socket_control_namespace_t *const namespace;
+  const eventlog_socket_control_command_id_t command_id;
+  eventlog_socket_control_command_handler_t *const handler;
+  const void *user_data;
   control_command_store_entry_t *next;
 };
 
@@ -210,8 +209,8 @@ struct control_command_store_entry {
 
 // Start heap profiling
 static void
-control_start_heap_profiling(eventlog_socket_control_command_t command,
-                             void *user_data) {
+control_start_heap_profiling(const eventlog_socket_control_command_t command,
+                             const void *user_data) {
   (void)command;
   (void)user_data;
   DEBUG_TRACE("%s", "control: startHeapProfiling");
@@ -220,8 +219,8 @@ control_start_heap_profiling(eventlog_socket_control_command_t command,
 
 // Stop heap profiling
 static void
-control_stop_heap_profiling(eventlog_socket_control_command_t command,
-                            void *user_data) {
+control_stop_heap_profiling(const eventlog_socket_control_command_t command,
+                            const void *user_data) {
   (void)command;
   (void)user_data;
   DEBUG_TRACE("%s", "control: stopHeapProfiling");
@@ -230,8 +229,8 @@ control_stop_heap_profiling(eventlog_socket_control_command_t command,
 
 // Request heap profil
 static void
-control_request_heap_profile(eventlog_socket_control_command_t command,
-                             void *user_data) {
+control_request_heap_profile(const eventlog_socket_control_command_t command,
+                             const void *user_data) {
   (void)command;
   (void)user_data;
   DEBUG_TRACE("%s", "control: requestHeapProfile");
@@ -241,17 +240,17 @@ control_request_heap_profile(eventlog_socket_control_command_t command,
 // Registry of control command handlers
 static control_command_store_entry_t *g_control_command_store =
     &(control_command_store_entry_t){
-        .namespace_id = BUILTIN_NAMESPACE_ID,
+        .namespace = &g_control_namespace_store.namespace_id,
         .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
         .handler = control_start_heap_profiling,
         .user_data = NULL,
         .next = &(control_command_store_entry_t){
-            .namespace_id = BUILTIN_NAMESPACE_ID,
+            .namespace = &g_control_namespace_store.namespace_id,
             .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
             .handler = control_stop_heap_profiling,
             .user_data = NULL,
             .next = &(control_command_store_entry_t){
-                .namespace_id = BUILTIN_NAMESPACE_ID,
+                .namespace = &g_control_namespace_store.namespace_id,
                 .command_id = BUILTIN_COMMAND_ID_REQUEST_HEAP_PROFILE,
                 .handler = control_request_heap_profile,
                 .user_data = NULL,
@@ -262,42 +261,37 @@ static pthread_mutex_t g_control_handlers_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 bool eventlog_socket_control_register_command(
     eventlog_socket_control_command_t command,
-    eventlog_socket_control_command_handler_t handler, void *user_data) {
+    eventlog_socket_control_command_handler_t handler, const void *user_data) {
   if (handler == NULL) {
     return false;
   }
-
-  bool success = false;
   pthread_mutex_lock(&g_control_handlers_mutex);
   control_command_store_entry_t *entry = g_control_command_store;
-  while (entry != NULL) {
-    if (entry->namespace_id == command.namespace_id &&
+  assert(entry != NULL);
+  do {
+    if (entry->namespace->namespace_id == command.namespace->namespace_id &&
         entry->command_id == command.command_id) {
       DEBUG_ERROR(
           "warning: duplicate registration for namespace 0x%08x command "
           "0x%02x; keeping existing handler\n",
-          command.namespace_id, command.command_id);
-      goto out;
+          command.namespace->namespace_id, command.command_id);
+      pthread_mutex_unlock(&g_control_handlers_mutex);
+      return false;
     }
     entry = entry->next;
-  }
+  } while (entry->next != NULL);
+  assert(entry != NULL);
+  assert(entry->next == NULL);
 
-  entry = malloc(sizeof(control_command_store_entry_t));
-  if (entry == NULL) {
-    DEBUG_ERROR("%s", "control: failed to allocate handler entry");
-    goto out;
-  }
-  entry->namespace_id = command.namespace_id;
-  entry->command_id = command.command_id;
-  entry->handler = handler;
-  entry->user_data = user_data;
-  entry->next = g_control_command_store;
-  g_control_command_store = entry;
-  success = true;
-
-out:
+  const control_command_store_entry_t next = {.namespace = command.namespace,
+                                              .command_id = command.command_id,
+                                              .handler = handler,
+                                              .user_data = user_data,
+                                              .next = NULL};
+  entry->next = malloc(sizeof(control_command_store_entry_t));
+  memcpy(entry->next, &next, sizeof(control_command_store_entry_t));
   pthread_mutex_unlock(&g_control_handlers_mutex);
-  return success;
+  return true;
 }
 
 /******************************************************************************
@@ -362,7 +356,7 @@ typedef struct {
     // if .tag == CONTROL_COMMAND_PARSER_STATE_COMMAND
     // the state stores:
     // * the current namespace id
-    eventlog_socket_control_namespace_id_t command_namespace_id;
+    const eventlog_socket_control_namespace_t *namespace;
   };
 } control_command_parser_state_t;
 
@@ -380,15 +374,15 @@ typedef enum {
 } control_fd_status_t;
 
 static bool control_command_handle(eventlog_socket_control_command_t command) {
-  DEBUG_TRACE("Handle command in namespace %02x with id %02x",
-              command.namespace_id, command.command_id);
+  DEBUG_TRACE("Handle command in namespace %d with id %02x",
+              command.namespace->namespace_id, command.command_id);
   eventlog_socket_control_command_handler_t *handler = NULL;
-  void *user_data = NULL;
+  const void *user_data = NULL;
 
   pthread_mutex_lock(&g_control_handlers_mutex);
   control_command_store_entry_t *entry = g_control_command_store;
   while (entry != NULL) {
-    if (entry->namespace_id == command.namespace_id &&
+    if (entry->namespace->namespace_id == command.namespace->namespace_id &&
         entry->command_id == command.command_id) {
       handler = entry->handler;
       user_data = entry->user_data;
@@ -402,8 +396,8 @@ static bool control_command_handle(eventlog_socket_control_command_t command) {
     handler(command, user_data);
     return true;
   } else {
-    DEBUG_ERROR("control: unhandled command namespace=0x%08x id=0x%02x",
-                command.namespace_id, command.command_id);
+    DEBUG_ERROR("control: unhandled command namespace=0x%02x id=0x%02x",
+                command.namespace->namespace_id, command.command_id);
     return false;
   }
 }
@@ -465,8 +459,7 @@ control_command_parser_enter_state(const control_command_parser_state_tag_t tag,
     break;
   }
   case CONTROL_COMMAND_PARSER_STATE_COMMAND_ID: {
-    assert(data != NULL);
-    g_control_command_parser_state.command_namespace_id = *data;
+    assert(data == NULL);
     break;
   }
   }
@@ -600,22 +593,23 @@ control_command_parser_handle_chunk(const size_t chunk_size,
                   g_control_command_parser_state.namespace_buffer);
 
       // ...try to resolve the namespace...
-      uint8_t namespace_id = UCHAR_MAX;
-      const bool namespace_id_found = control_namespace_store_resolve(
-          g_control_command_parser_state.namespace_buffer_len,
-          g_control_command_parser_state.namespace_buffer, &namespace_id);
+      const eventlog_socket_control_namespace_t *namespace =
+          control_namespace_store_resolve(
+              g_control_command_parser_state.namespace_buffer_len,
+              g_control_command_parser_state.namespace_buffer);
       // if the namespace was successfully resolved, then...
-      if (namespace_id_found) {
+      if (namespace != NULL) {
         DEBUG_TRACE("resolved namespace '%s' to %d",
                     g_control_command_parser_state.namespace_buffer,
-                    namespace_id);
+                    namespace->namespace_id);
         // move chunk_index by the number of copied bytes less one,
         // because the chunk_index will be updated when we reenter the for loop.
         // note: the subtraction is safe because available_bytes > 0
         chunk_index += available_bytes - 1;
         // ...move to the next state...
         control_command_parser_enter_state(
-            CONTROL_COMMAND_PARSER_STATE_COMMAND_ID, &namespace_id);
+            CONTROL_COMMAND_PARSER_STATE_COMMAND_ID, NULL);
+        g_control_command_parser_state.namespace = namespace;
         // ...continue processing with the _next_ byte...
         continue;
       }
@@ -664,7 +658,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
       DEBUG_TRACE("matched command_id byte '%d'", current_byte);
       // Create a command.
       const eventlog_socket_control_command_t command = {
-          .namespace_id = g_control_command_parser_state.command_namespace_id,
+          .namespace = g_control_command_parser_state.namespace,
           .command_id = current_byte,
       };
       // Handle the command.
