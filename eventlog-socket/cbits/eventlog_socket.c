@@ -1,4 +1,4 @@
-// For POLLRDHUP
+// Required for `POLLRDHUP` (used in poll.h).
 #define _GNU_SOURCE
 
 #include <assert.h>

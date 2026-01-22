@@ -6,7 +6,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-/// Start the control thread.
+/// @brief Start the control thread.
 ///
 /// @param control_thread
 ///   The function writes the thread handle to this location.
