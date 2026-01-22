@@ -263,26 +263,27 @@ static control_command_store_entry_t *g_control_command_store =
                 .next = NULL,
             }}};
 
-static pthread_mutex_t g_control_handlers_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_control_command_store_mutex =
+    PTHREAD_MUTEX_INITIALIZER;
 
 bool eventlog_socket_control_register_command(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id,
     eventlog_socket_control_command_handler_t handler, const void *user_data) {
+  DEBUG_TRACE("Received request to register command 0x%02x in namespace 0x%02x",
+              command_id, namespace->namespace_id);
   if (handler == NULL) {
     return false;
   }
-  pthread_mutex_lock(&g_control_handlers_mutex);
+  pthread_mutex_lock(&g_control_command_store_mutex);
   control_command_store_entry_t *entry = g_control_command_store;
   assert(entry != NULL);
   do {
     if (entry->namespace->namespace_id == namespace->namespace_id &&
         entry->command_id == command_id) {
-      DEBUG_ERROR(
-          "warning: duplicate registration for namespace 0x%08x command "
-          "0x%02x; keeping existing handler\n",
-          namespace->namespace_id, command_id);
-      pthread_mutex_unlock(&g_control_handlers_mutex);
+      DEBUG_ERROR("Command 0x%02x already registered for namespace 0x%02x.",
+                  namespace->namespace_id, command_id);
+      pthread_mutex_unlock(&g_control_command_store_mutex);
       return false;
     }
     entry = entry->next;
@@ -297,7 +298,9 @@ bool eventlog_socket_control_register_command(
                                               .next = NULL};
   entry->next = malloc(sizeof(control_command_store_entry_t));
   memcpy(entry->next, &next, sizeof(control_command_store_entry_t));
-  pthread_mutex_unlock(&g_control_handlers_mutex);
+  DEBUG_TRACE("Registered command 0x%02x in namespace 0x%02x", command_id,
+              namespace->namespace_id);
+  pthread_mutex_unlock(&g_control_command_store_mutex);
   return true;
 }
 
@@ -383,12 +386,12 @@ typedef enum {
 static bool control_command_handle(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id) {
-  DEBUG_TRACE("Handle command in namespace %d with id %02x",
-              namespace->namespace_id, command_id);
+  DEBUG_TRACE("Handle command 0x%02x in namespace 0x%02x", command_id,
+              namespace->namespace_id);
   eventlog_socket_control_command_handler_t *handler = NULL;
   const void *user_data = NULL;
 
-  pthread_mutex_lock(&g_control_handlers_mutex);
+  pthread_mutex_lock(&g_control_command_store_mutex);
   control_command_store_entry_t *entry = g_control_command_store;
   while (entry != NULL) {
     if (entry->namespace->namespace_id == namespace->namespace_id &&
@@ -399,7 +402,7 @@ static bool control_command_handle(
     }
     entry = entry->next;
   }
-  pthread_mutex_unlock(&g_control_handlers_mutex);
+  pthread_mutex_unlock(&g_control_command_store_mutex);
 
   if (handler != NULL) {
     handler(namespace, command_id, user_data);
