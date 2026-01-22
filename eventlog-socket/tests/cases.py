@@ -68,7 +68,7 @@ class TestCase:
 
 HEAP_PROF_SAMPLE_0_PATTERN = "heap prof sample 0"
 HEAP_PROF_SAMPLE_1_PATTERN = "heap prof sample 1"
-CUSTOM_COMMAND_PATTERN = "custom command handled"
+CUSTOM_COMMAND_PATTERN = "handled ping"
 
 
 def eventlog_assertions_no_start(
