@@ -2,7 +2,9 @@
 
 module Main (main) where
 
+import qualified Data.Binary as B
 import Data.ByteString.Lazy (ByteString)
+import qualified Data.ByteString.Lazy as BSL
 import Data.Functor ((<&>))
 import Data.Machine ((~>))
 import Data.Maybe (catMaybes, fromMaybe)
@@ -40,8 +42,9 @@ main = do
         , test_oddball
         , test_oddball_NoAutomaticHeapSamples
         , test_oddball_Reconnect
+        , test_oddball_ResetOnReconnect
         , test_oddball_StartAndStopHeapProfiling
-        , test_oddball_RequestHeapProfile
+        , test_oddball_RequestHeapCensus
         , test_oddball_Junk ("\0\0", "TOASTY")
         , test_oddball_Junk ("\x01DEAD", "DORK")
         , test_customCommand
@@ -116,6 +119,27 @@ test_oddball_Reconnect =
             assertEventlogWith eventlogSocket $ hasHeapProfSampleString
 
 {- |
+Test that the command parsing state is reset on reconnect.
+-}
+test_oddball_ResetOnReconnect :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_ResetOnReconnect =
+    testCaseFor "test_oddball_ResetOnReconnect" $ \eventlogSocket -> do
+        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+        withProgram oddball $ do
+            -- Validate that the event stream contains at least one heap
+            -- profile sample twice, connecting to the socket each time.
+            let (requestHeapCensusPart1, requestHeapCensusPart2) = BSL.splitAt 6 (B.encode requestHeapCensus)
+            assertEventlogWith' eventlogSocket $ \socket ->
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> sendJunk socket requestHeapCensusPart1
+                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            assertEventlogWith' eventlogSocket $ \socket ->
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> sendJunk socket requestHeapCensusPart2
+                    !> hasNoHeapProfSampleString
+                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+
+{- |
 Test that the `StartHeapProfiling` and `StopHeapProfiling` commands are
 respected, i.e., that once the `StartHeapProfiling` command is sent, heap
 profile samples are received, and once the `StopHeapProfiling` command is
@@ -138,12 +162,12 @@ test_oddball_StartAndStopHeapProfiling =
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 
 {- |
-Test that the `RequestHeapProfile` signal is respected, i.e., that once the
-`RequestHeapProfile` command is sent, a heap profile is received.
+Test that the `RequestHeapCensus` signal is respected, i.e., that once the
+`RequestHeapCensus` command is sent, a heap profile is received.
 -}
-test_oddball_RequestHeapProfile :: (HasLogger) => EventlogSocket -> Maybe TestTree
-test_oddball_RequestHeapProfile =
-    testCaseFor "test_oddball_RequestHeapProfile" $ \eventlogSocket -> do
+test_oddball_RequestHeapCensus :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_RequestHeapCensus =
+    testCaseFor "test_oddball_RequestHeapCensus" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
         withProgram oddball $
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -160,7 +184,7 @@ test_oddball_RequestHeapProfile =
                     ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
 {- |
-Test that the `RequestHeapProfile` command is still respected after junk has
+Test that the `RequestHeapCensus` command is still respected after junk has
 been sent over the control socket.
 -}
 test_oddball_Junk :: (HasLogger) => (ByteString, ByteString) -> EventlogSocket -> Maybe TestTree
