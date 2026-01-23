@@ -902,8 +902,10 @@ static int g_control_fd = -1;
 /// @param new_control_fd The new eventlog socket file descriptor. May be `-1`.
 static void control_fd_reset_to(const int new_control_fd) {
   DEBUG_TRACE("%s", "Resetting control server state.");
+  // Reset eventlog socket file descriptor.
   g_control_fd = new_control_fd;
-  // todo: reset parser state
+  // Reset parser state.
+  control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC, NULL);
 }
 
 /// @brief Wait for a new connection.
