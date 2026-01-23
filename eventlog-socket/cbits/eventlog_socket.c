@@ -44,6 +44,31 @@ static int g_listen_fd = -1;
 static const char *g_sock_path = NULL;
 static int g_wake_pipe[2] = {-1, -1};
 
+// concurrency variables
+static pthread_t *g_listen_thread_ptr = NULL;
+static pthread_cond_t g_new_conn_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t *g_control_thread_ptr = NULL;
+// Global mutex guarding all shared state between RTS threads, the worker
+// thread, and the detached control receiver. Only client_fd and wt need
+// protection, but using a single mutex ensures we keep their updates
+// consistent.
+static pthread_mutex_t g_write_buffer_and_client_fd_mutex =
+    PTHREAD_MUTEX_INITIALIZER;
+
+// variables accessed by multiple threads and guarded by mutex:
+//  * client_fd: written by worker, writer_stop, and control receiver to signal
+//    when a client connects/disconnects. The lock ensures the fd value does not
+//    change while other threads inspect or write to it.
+//  * wt: queue of pending eventlog chunks. RTS writers append while the worker
+//    thread consumes; the lock ensures push/pop operations stay consistent.
+//
+// Note: RTS writes client_fd in writer_stop.
+static volatile int g_client_fd = -1;
+static write_buffer_t g_write_buffer = {
+    .head = NULL,
+    .last = NULL,
+};
+
 enum listener_kind {
   LISTENER_UNIX,
   LISTENER_TCP,
@@ -71,10 +96,12 @@ static bool listener_config_valid(const struct listener_config *config) {
   }
 }
 
-static void cleanup_socket(void) {
+static void cleanup(void) {
+  // Remove socket file.
   if (g_sock_path) {
     unlink(g_sock_path);
   }
+  // Close the wake pipes.
   if (g_wake_pipe[0] != -1) {
     close(g_wake_pipe[0]);
     g_wake_pipe[0] = -1;
@@ -82,6 +109,30 @@ static void cleanup_socket(void) {
   if (g_wake_pipe[1] != -1) {
     close(g_wake_pipe[1]);
     g_wake_pipe[1] = -1;
+  }
+  // Stop the control thread.
+  if (g_control_thread_ptr != NULL) {
+    DEBUG_DEBUG("%s", "Cancelling control thread.");
+    if (!pthread_cancel(*g_control_thread_ptr)) {
+      DEBUG_ERRNO("pthread_cancel() failed for control thread");
+    } else {
+      if (!pthread_join(*g_control_thread_ptr, NULL)) {
+        DEBUG_ERRNO("pthread_join() failed for control thread");
+      }
+    }
+    free((void *)g_control_thread_ptr);
+  }
+  // Stop the worker thread.
+  if (g_listen_thread_ptr != NULL) {
+    DEBUG_DEBUG("%s", "Cancelling worker thread.");
+    if (!pthread_cancel(*g_listen_thread_ptr)) {
+      DEBUG_ERRNO("pthread_cancel() failed for worker thread");
+    } else {
+      if (!pthread_join(*g_listen_thread_ptr, NULL)) {
+        DEBUG_ERRNO("pthread_join() failed for worker thread");
+      }
+    }
+    free((void *)g_listen_thread_ptr);
   }
 }
 
@@ -119,31 +170,6 @@ static void wake_worker(void) {
     DEBUG_ERRNO("write() failed");
   }
 }
-
-// concurrency variables
-static pthread_t g_listen_thread = {0};
-static pthread_cond_t g_new_conn_cond = PTHREAD_COND_INITIALIZER;
-static pthread_t g_control_thread = {0};
-// Global mutex guarding all shared state between RTS threads, the worker
-// thread, and the detached control receiver. Only client_fd and wt need
-// protection, but using a single mutex ensures we keep their updates
-// consistent.
-static pthread_mutex_t g_write_buffer_and_client_fd_mutex =
-    PTHREAD_MUTEX_INITIALIZER;
-
-// variables accessed by multiple threads and guarded by mutex:
-//  * client_fd: written by worker, writer_stop, and control receiver to signal
-//    when a client connects/disconnects. The lock ensures the fd value does not
-//    change while other threads inspect or write to it.
-//  * wt: queue of pending eventlog chunks. RTS writers append while the worker
-//    thread consumes; the lock ensures push/pop operations stay consistent.
-//
-// Note: RTS writes client_fd in writer_stop.
-static volatile int g_client_fd = -1;
-static write_buffer_t g_write_buffer = {
-    .head = NULL,
-    .last = NULL,
-};
 
 /*********************************************************************************
  * EventLogWriter
@@ -598,7 +624,9 @@ static void worker_start(const struct listener_config *config) {
     abort();
   }
 
-  int ret = pthread_create(&g_listen_thread, NULL, worker, NULL);
+  // start the worker thread
+  g_listen_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
+  int ret = pthread_create(g_listen_thread_ptr, NULL, worker, NULL);
   if (ret != 0) {
     DEBUG_ERRNO("pthread_create() failed");
     abort();
@@ -623,7 +651,7 @@ static void ensure_initialized(void) {
         abort();
       }
     }
-    atexit(cleanup_socket);
+    atexit(cleanup);
     g_initialized = true;
   }
 }
@@ -642,7 +670,8 @@ static void eventlog_socket_init(const struct listener_config *config) {
   worker_start(config);
 
   // start control thread
-  eventlog_socket_control_start(&g_control_thread, &g_client_fd,
+  g_control_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
+  eventlog_socket_control_start(g_control_thread_ptr, &g_client_fd,
                                 &g_write_buffer_and_client_fd_mutex,
                                 &g_new_conn_cond);
 }
@@ -789,7 +818,8 @@ static void eventlog_socket_start(const struct listener_config *config,
   worker_start(config);
 
   // start control thread
-  eventlog_socket_control_start(&g_control_thread, &g_client_fd,
+  g_control_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
+  eventlog_socket_control_start(g_control_thread_ptr, &g_client_fd,
                                 &g_write_buffer_and_client_fd_mutex,
                                 &g_new_conn_cond);
 
