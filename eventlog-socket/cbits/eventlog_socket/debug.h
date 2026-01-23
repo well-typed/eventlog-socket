@@ -1,6 +1,3 @@
-/* Source: https://github.com/bytebutt/c-debug-header */
-/* License: UNLICENSE */
-
 #ifndef EVENTLOG_SOCKET_DEBUG_H
 #define EVENTLOG_SOCKET_DEBUG_H
 
