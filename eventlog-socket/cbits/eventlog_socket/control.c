@@ -96,7 +96,7 @@ static void control_start_heap_profiling(
   (void)command_id;
   (void)user_data;
   startHeapProfTimer();
-  DEBUG_TRACE("%s", "Started heap profiling.");
+  DEBUG_DEBUG("%s", "Started heap profiling.");
 }
 
 /// @brief Handler for "StopHeapProfiling" command (eventlog-socket::1).
@@ -108,7 +108,7 @@ static void control_stop_heap_profiling(
   (void)command_id;
   (void)user_data;
   stopHeapProfTimer();
-  DEBUG_TRACE("%s", "Stopped heap profiling.");
+  DEBUG_DEBUG("%s", "Stopped heap profiling.");
 }
 
 /// @brief Handler for "RequestHeapCensus" command (eventlog-socket::2).
@@ -120,7 +120,7 @@ static void control_request_heap_census(
   (void)command_id;
   (void)user_data;
   requestHeapCensus();
-  DEBUG_TRACE("%s", "Requested heap census.");
+  DEBUG_DEBUG("%s", "Requested heap census.");
 }
 
 /******************************************************************************
@@ -166,7 +166,7 @@ typedef struct eventlog_socket_control_namespace
 /// are assigned a nonnull value, they must never change.
 struct eventlog_socket_control_namespace {
   /// The length of the user-provided namespace.
-  const size_t namespace_len;
+  const uint8_t namespace_len;
   /// The user-provided namespace.
   ///
   /// This must be a null-terminated string of length `namespace_len + 1`
@@ -278,9 +278,6 @@ eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
   eventlog_socket_control_namespace_t *namespace_entry =
       &g_control_namespace_registry;
 
-  // Let's start counting namespace ids.
-  uint8_t namespace_id = 0;
-
   // Is the requested namespace already registered?
   do {
     // Is this the namespace you are trying to register?
@@ -297,13 +294,11 @@ eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
     }
     // Otherwise, continue with the next entry.
     namespace_entry = namespace_entry->next;
-    ++namespace_id;
   } while (true);
 
   // Register the requested namespace.
   assert(namespace_entry != NULL);
   assert(namespace_entry->next == NULL);
-  ++namespace_id;
   char *const next_namespace = malloc(namespace_len + 1);
   strncpy(next_namespace, namespace, namespace_len);
   next_namespace[namespace_len] = '\0';
@@ -316,7 +311,7 @@ eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
   namespace_entry->next = malloc(sizeof(eventlog_socket_control_namespace_t));
   memcpy(namespace_entry->next, &next,
          sizeof(eventlog_socket_control_namespace_t));
-  DEBUG_TRACE("Registered namespace '%s' under ID %d", namespace, namespace_id);
+  DEBUG_DEBUG("Registered namespace %.*s", (int)namespace_len, namespace);
 
   // Release the lock on g_control_namespace_store.
   pthread_mutex_unlock(&g_control_namespace_registry_mutex);
@@ -364,8 +359,8 @@ bool eventlog_socket_control_register_command(
     eventlog_socket_control_command_handler_t command_handler,
     const void *command_data) {
 
-  DEBUG_TRACE("Received request to register command 0x%02x in namespace %p",
-              command_id, (void *)namespace);
+  DEBUG_TRACE("Received request to register command 0x%02x in namespace %.*s",
+              command_id, namespace->namespace_len, namespace->namespace);
 
   // Acquire the lock on g_control_namespace_store.
   pthread_mutex_lock(&g_control_namespace_registry_mutex);
@@ -412,8 +407,8 @@ bool eventlog_socket_control_register_command(
     command_entry = command_entry->next;
   }
   // Write the data for the new command_entry.
-  DEBUG_TRACE("Registered command 0x%02x in namespace %p", command_id,
-              (void *)namespace);
+  DEBUG_TRACE("Registered command 0x%02x in namespace %.*s", command_id,
+              namespace->namespace_len, namespace->namespace);
   memcpy(command_entry, &next, sizeof(eventlog_socket_control_command_t));
 
   // Release the lock on g_control_namespace_store.
@@ -425,8 +420,8 @@ bool eventlog_socket_control_register_command(
 static bool control_command_handle(
     const eventlog_socket_control_namespace_t *const namespace,
     const eventlog_socket_control_command_id_t command_id) {
-  DEBUG_TRACE("Handle command 0x%02x in namespace %p", command_id,
-              (void *)namespace);
+  DEBUG_TRACE("Handle command 0x%02x in namespace %.*s", command_id,
+              namespace->namespace_len, namespace->namespace);
 
   // Resolve the command.
   const eventlog_socket_control_command_t *command =
@@ -435,8 +430,8 @@ static bool control_command_handle(
   // If the command was not found, then...
   if (command == NULL) {
     // ...return false.
-    DEBUG_ERROR("Could not resolve command %s::0x%02x ", namespace->namespace,
-                command_id);
+    DEBUG_ERROR("Could not resolve command 0x%02x in namespace %.*s",
+                command_id, namespace->namespace_len, namespace->namespace);
     return false;
   }
   // Otherwise...
@@ -465,7 +460,7 @@ static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /// @brief Wait for the signal that the GHC RTS is ready.
 static void control_wait_ghc_rts_ready(void) {
-  DEBUG_TRACE("%s", "Waiting for signal that GHC RTS is ready.");
+  DEBUG_DEBUG("%s", "Waiting for signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
   while (!g_ghc_rts_ready) {
     pthread_cond_wait(&g_ghc_rts_ready_cond, &g_ghc_rts_ready_mutex);
@@ -475,7 +470,7 @@ static void control_wait_ghc_rts_ready(void) {
 
 /* PUBLIC - see eventlog_socket.h for documentation */
 void eventlog_socket_control_signal_ghc_rts_ready(void) {
-  DEBUG_TRACE("%s", "Sending signal that GHC RTS is ready.");
+  DEBUG_DEBUG("%s", "Sending signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
   if (!g_ghc_rts_ready) {
     g_ghc_rts_ready = true;
@@ -787,7 +782,8 @@ control_command_parser_handle_chunk(const size_t chunk_size,
 
       // otherwise, the namespace is complete...
       // note: this relies on the fact that the string is null-terminated!
-      DEBUG_TRACE("matched namespace '%s'",
+      DEBUG_TRACE("Matched namespace %.*s",
+                  g_control_command_parser_state.namespace_buffer_len,
                   g_control_command_parser_state.namespace_buffer);
 
       // ...try to resolve the namespace...
@@ -797,9 +793,9 @@ control_command_parser_handle_chunk(const size_t chunk_size,
               g_control_command_parser_state.namespace_buffer);
       // if the namespace was successfully resolved, then...
       if (namespace != NULL) {
-        DEBUG_TRACE("resolved namespace '%s' to %p",
-                    g_control_command_parser_state.namespace_buffer,
-                    (void *)namespace);
+        DEBUG_TRACE("Resolved namespace %.*s",
+                    g_control_command_parser_state.namespace_buffer_len,
+                    g_control_command_parser_state.namespace_buffer);
         // move chunk_index by the number of copied bytes less one,
         // because the chunk_index will be updated when we reenter the for loop.
         // note: the subtraction is safe because available_bytes > 0
@@ -843,7 +839,8 @@ control_command_parser_handle_chunk(const size_t chunk_size,
         //           + '\0'
         //
         // todo: write an error to the eventlog
-        DEBUG_ERROR("unknown namespace %s",
+        DEBUG_ERROR("unknown namespace %.*s",
+                    g_control_command_parser_state.namespace_buffer_len,
                     g_control_command_parser_state.namespace_buffer);
         // ...restart with the _current_ byte...
         control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
@@ -853,7 +850,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
       }
     }
     case CONTROL_COMMAND_PARSER_STATE_COMMAND_ID: {
-      DEBUG_TRACE("matched command_id byte '%d'", current_byte);
+      DEBUG_TRACE("Matched command_id byte 0x%02x", current_byte);
       // Handle the command.
       control_command_handle(g_control_command_parser_state.namespace,
                              current_byte);
@@ -901,7 +898,7 @@ static int g_control_fd = -1;
 ///
 /// @param new_control_fd The new eventlog socket file descriptor. May be `-1`.
 static void control_fd_reset_to(const int new_control_fd) {
-  DEBUG_TRACE("%s", "Resetting control server state.");
+  DEBUG_DEBUG("%s", "Resetting control server state.");
   // Reset eventlog socket file descriptor.
   g_control_fd = new_control_fd;
   // Reset parser state.
@@ -913,7 +910,7 @@ static void control_fd_reset_to(const int new_control_fd) {
 /// @pre The caller must have a lock on `g_control_fd_mutex_ptr`.
 /// @post The caller will have a lock on `g_control_fd_mutex_ptr`.
 static void control_fd_wait_for_connection(void) {
-  DEBUG_TRACE("%s", "Waiting to be notified of new connection.");
+  DEBUG_DEBUG("%s", "Waiting to be notified of new connection.");
   pthread_cond_wait(g_new_conn_cond_ptr, g_control_fd_mutex_ptr);
 }
 
@@ -1119,7 +1116,7 @@ void HIDDEN eventlog_socket_control_start(
     pthread_t *const control_thread, const volatile int *const control_fd_ptr,
     pthread_mutex_t *const control_fd_mutex_ptr,
     pthread_cond_t *const new_conn_cond_ptr) {
-  DEBUG_TRACE("%s", "Starting control thread.");
+  DEBUG_DEBUG("%s", "Starting control thread.");
   g_control_fd_ptr = control_fd_ptr;
   g_control_fd_mutex_ptr = control_fd_mutex_ptr;
   g_new_conn_cond_ptr = new_conn_cond_ptr;
