@@ -16,8 +16,12 @@ int main(int argc, char *argv[]) {
 
   // If GHC_EVENTLOG_UNIX_PATH is set...
   eventlog_socket_t eventlog_socket = {0};
-  if (eventlog_socket_from_env(&eventlog_socket)) {
-    eventlog_socket_init(&eventlog_socket, NULL);
+  eventlog_socket_opts_t eventlog_socket_opts = {0};
+  const eventlog_socket_from_env_status_t status =
+      eventlog_socket_from_env(&eventlog_socket, &eventlog_socket_opts);
+  if (status == EVENTLOG_SOCKET_FROM_ENV_OK ||
+      status == EVENTLOG_SOCKET_FROM_ENV_NOTFOUND) {
+    eventlog_socket_init(&eventlog_socket, &eventlog_socket_opts);
   }
 
   // Delegate to the helper that runs hs_main and the application closure.

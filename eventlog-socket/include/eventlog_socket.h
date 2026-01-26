@@ -29,6 +29,7 @@ typedef struct eventlog_socket_inet_addr {
 } eventlog_socket_inet_addr_t;
 
 typedef struct eventlog_socket_opts {
+  bool wait;
   int so_sndbuf;
 } eventlog_socket_opts_t;
 
@@ -42,9 +43,28 @@ typedef struct eventlog_socket {
   };
 } eventlog_socket_t;
 
+// note: does not free `eventlog_socket_t` itself
+void eventlog_socket_free(eventlog_socket_t *eventlog_socket);
+
+// writes default options
+void eventlog_socket_opts_init(eventlog_socket_opts_t *eventlog_socket_opts);
+
+// note: does not free `eventlog_socket_opts_free` itself
+void eventlog_socket_opts_free(eventlog_socket_opts_t *opts);
+
 extern const EventLogWriter SocketEventLogWriter;
 
-bool eventlog_socket_from_env(eventlog_socket_t *eventlog_socket_out);
+typedef enum {
+  EVENTLOG_SOCKET_FROM_ENV_OK,
+  EVENTLOG_SOCKET_FROM_ENV_NOTFOUND,
+  EVENTLOG_SOCKET_FROM_ENV_TOOLONG,
+  EVENTLOG_SOCKET_FROM_ENV_INVAL,
+} eventlog_socket_from_env_status_t;
+
+/// @par MT-Unsafe
+eventlog_socket_from_env_status_t
+eventlog_socket_from_env(eventlog_socket_t *eventlog_socket_out,
+                         eventlog_socket_opts_t *eventlog_socket_opts_out);
 
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
 // It spawns the worker immediately but defers handling of control messages
@@ -55,9 +75,6 @@ void eventlog_socket_init(const eventlog_socket_t *eventlog_socket,
 void eventlog_socket_init_unix(char *unix_path);
 
 void eventlog_socket_init_inet(char *inet_host, char *inet_port);
-
-/// @par MT-Unsafe
-int eventlog_socket_init_from_env(void);
 
 /// @pre The GHC RTS is ready.
 /// @pre The function `eventlog_socket_init` has been called.

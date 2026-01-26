@@ -770,72 +770,118 @@ void eventlog_socket_start(const eventlog_socket_t *eventlog_socket,
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-int eventlog_socket_init_from_env(void) {
-  // Determine the maximum length of a Unix domain socket path.
-  const size_t unix_path_max = get_unix_path_max();
-  char *ghc_eventlog_unix_socket = getenv("GHC_EVENTLOG_UNIX_PATH"); // NOLINT
-  if (ghc_eventlog_unix_socket != NULL) {
-    size_t ghc_eventlog_unix_socket_len =
-        strnlen(ghc_eventlog_unix_socket, unix_path_max);
-    if (ghc_eventlog_unix_socket_len >= unix_path_max) {
-      return -1;
-    } else {
-      eventlog_socket_init_unix(ghc_eventlog_unix_socket);
-    }
-  } else {
-    char *ghc_eventlog_tcp_host = getenv("GHC_EVENTLOG_INET_HOST"); // NOLINT
-    char *ghc_eventlog_tcp_port = getenv("GHC_EVENTLOG_INET_PORT"); // NOLINT
-    if (ghc_eventlog_tcp_host != NULL && ghc_eventlog_tcp_port != NULL) {
-      eventlog_socket_init_inet(ghc_eventlog_tcp_host, ghc_eventlog_tcp_port);
-    } else {
-      return 0;
-    }
+void eventlog_socket_opts_init(eventlog_socket_opts_t *eventlog_socket_opts) {
+  if (eventlog_socket_opts == NULL) {
+    return;
   }
-  char *ghc_eventlog_wait = getenv("GHC_EVENTLOG_WAIT"); // NOLINT
-  if (ghc_eventlog_wait != NULL) {
-    eventlog_socket_wait();
-  }
-  return 0;
+  eventlog_socket_opts->wait = false;
+  // todo: any value <=1024 should be ignored
+  eventlog_socket_opts->so_sndbuf = 0;
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-bool eventlog_socket_from_env(eventlog_socket_t *eventlog_socket_out) {
-  // Allocate space for the output:
-  eventlog_socket_t eventlog_socket = {0};
+void eventlog_socket_free(eventlog_socket_t *eventlog_socket) {
+  if (eventlog_socket == NULL) {
+    return;
+  }
+  switch (eventlog_socket->tag) {
+  case EVENTLOG_SOCKET_UNIX:
+    if (eventlog_socket->unix_addr.unix_path != NULL) {
+      free(eventlog_socket->unix_addr.unix_path);
+    }
+    break;
+  case EVENTLOG_SOCKET_INET:
+    if (eventlog_socket->inet_addr.inet_host != NULL) {
+      free(eventlog_socket->inet_addr.inet_host);
+    }
+    if (eventlog_socket->inet_addr.inet_port != NULL) {
+      free(eventlog_socket->inet_addr.inet_port);
+    }
+    break;
+  }
+}
 
-  // Determine the maximum length of a Unix domain socket path.
-  const size_t unix_path_max = get_unix_path_max();
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_opts_free(eventlog_socket_opts_t *eventlog_socket_opts) {
+  (void)eventlog_socket_opts;
+  // The `eventlog_socket_opts_t` may be extended without a breaking change in
+  // the package version. Hence, this function is included in case any future
+  // version of this type includes malloc'd memory.
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+eventlog_socket_from_env_status_t
+eventlog_socket_from_env(eventlog_socket_t *eventlog_socket_out,
+                         eventlog_socket_opts_t *eventlog_socket_opts_out) {
+  // Check that eventlog_socket_out is nonnull.
+  if (eventlog_socket_out == NULL) {
+    return EVENTLOG_SOCKET_FROM_ENV_INVAL;
+  }
 
   // Try to construct a Unix domain socket address:
-  char *ghc_eventlog_unix_socket = getenv("GHC_EVENTLOG_UNIX_PATH"); // NOLINT
-  if (ghc_eventlog_unix_socket != NULL) {
-    size_t ghc_eventlog_unix_socket_len =
-        strnlen(ghc_eventlog_unix_socket, unix_path_max);
-    if (ghc_eventlog_unix_socket_len <= unix_path_max) {
-      // Write the configuration:
-      eventlog_socket.tag = EVENTLOG_SOCKET_UNIX;
-      eventlog_socket.unix_addr.unix_path = ghc_eventlog_unix_socket;
-      memcpy(eventlog_socket_out, &eventlog_socket, sizeof(eventlog_socket_t));
-      return true;
-    } else {
-      return false;
+  char *unix_path = getenv("GHC_EVENTLOG_UNIX_PATH"); // NOLINT
+  if (unix_path != NULL) {
+    // Determine the maximum length of a Unix domain socket path.
+    const size_t unix_path_max = get_unix_path_max();
+
+    // Check that unix_path does not exceed the maximum unix_path length:
+    const size_t unix_path_len = strlen(unix_path);
+    if (unix_path_len > unix_path_max) {
+      return EVENTLOG_SOCKET_FROM_ENV_TOOLONG;
     }
+
+    // Copy unix_path:
+    char *unix_path_copy = malloc(unix_path_len);
+    strncpy(unix_path_copy, unix_path, unix_path_len);
+
+    // Write the configuration:
+    eventlog_socket_t eventlog_socket = {0};
+    eventlog_socket.tag = EVENTLOG_SOCKET_UNIX;
+    eventlog_socket.unix_addr.unix_path = unix_path;
+    memcpy(eventlog_socket_out, &eventlog_socket, sizeof(eventlog_socket_t));
   }
+
   // Try to construct a TCP/IP address:
   else {
-    char *ghc_eventlog_inet_host = getenv("GHC_EVENTLOG_INET_HOST"); // NOLINT
-    char *ghc_eventlog_inet_port = getenv("GHC_EVENTLOG_INET_PORT"); // NOLINT
-    if (ghc_eventlog_inet_host != NULL && ghc_eventlog_inet_port != NULL) {
+    char *inet_host = getenv("GHC_EVENTLOG_INET_HOST"); // NOLINT
+    char *inet_port = getenv("GHC_EVENTLOG_INET_PORT"); // NOLINT
+    if (inet_host != NULL && inet_port != NULL) {
+      // Copy inet_host:
+      const size_t inet_host_len = strlen(inet_host);
+      char *inet_host_copy = malloc(inet_host_len);
+      strncpy(inet_host_copy, inet_host, inet_host_len);
+      // Copy inet_port:
+      const size_t inet_port_len = strlen(inet_port);
+      char *inet_port_copy = malloc(inet_port_len);
+      strncpy(inet_port_copy, inet_port, inet_port_len);
       // Write the configuration:
+      eventlog_socket_t eventlog_socket = {0};
       eventlog_socket.tag = EVENTLOG_SOCKET_INET;
-      eventlog_socket.inet_addr.inet_host = ghc_eventlog_inet_host;
-      eventlog_socket.inet_addr.inet_port = ghc_eventlog_inet_port;
+      eventlog_socket.inet_addr.inet_host = inet_host_copy;
+      eventlog_socket.inet_addr.inet_port = inet_port_copy;
       memcpy(eventlog_socket_out, &eventlog_socket, sizeof(eventlog_socket_t));
-      return true;
     } else {
-      return false;
+      return EVENTLOG_SOCKET_FROM_ENV_NOTFOUND;
     }
   }
+
+  // If an output address was provided for the options:
+  if (eventlog_socket_opts_out != NULL) {
+    eventlog_socket_opts_t eventlog_socket_opts = {
+        .wait = false,
+        .so_sndbuf = 0,
+    };
+
+    // Try to construct the options:
+    char *ghc_eventlog_wait = getenv("GHC_EVENTLOG_WAIT"); // NOLINT
+    eventlog_socket_opts.wait = ghc_eventlog_wait != NULL;
+
+    // Write the options:
+    memcpy(eventlog_socket_opts_out, &eventlog_socket_opts,
+           sizeof(eventlog_socket_opts_t));
+  }
+
+  return EVENTLOG_SOCKET_FROM_ENV_OK;
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
