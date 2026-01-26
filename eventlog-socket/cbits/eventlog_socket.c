@@ -69,33 +69,6 @@ static write_buffer_t g_write_buffer = {
     .last = NULL,
 };
 
-enum listener_kind {
-  LISTENER_UNIX,
-  LISTENER_TCP,
-};
-
-struct listener_config {
-  enum listener_kind kind;
-  const char *sock_path;
-  const char *tcp_host;
-  const char *tcp_port;
-};
-
-static bool listener_config_valid(const struct listener_config *config) {
-  if (config == NULL) {
-    return false;
-  }
-
-  switch (config->kind) {
-  case LISTENER_UNIX:
-    return config->sock_path != NULL;
-  case LISTENER_TCP:
-    return config->tcp_port != NULL;
-  default:
-    return false;
-  }
-}
-
 static void cleanup(void) {
   // Remove socket file.
   if (g_sock_path) {
@@ -136,17 +109,18 @@ static void cleanup(void) {
   }
 }
 
+#define EVENTLOG_SOCKET_WORKER_CHUNK_SIZE 32
+
 static void drain_worker_wake(void) {
   if (g_wake_pipe[0] == -1) {
     return;
   }
-
-  uint8_t buf[32];
+  uint8_t chunk[EVENTLOG_SOCKET_WORKER_CHUNK_SIZE];
   while (true) {
-    ssize_t ret = read(g_wake_pipe[0], buf, sizeof(buf));
-    if (ret > 0) {
+    const ssize_t success_or_error = read(g_wake_pipe[0], chunk, sizeof(chunk));
+    if (success_or_error > 0) {
       continue;
-    } else if (ret == 0) {
+    } else if (success_or_error == 0) {
       break;
     } else if (errno == EINTR) {
       continue;
@@ -164,9 +138,9 @@ static void wake_worker(void) {
     return;
   }
 
-  uint8_t byte = 1;
-  ssize_t ret = write(g_wake_pipe[1], &byte, sizeof(byte));
-  if (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+  const uint8_t byte = 1;
+  const ssize_t success_or_error = write(g_wake_pipe[1], &byte, sizeof(byte));
+  if (success_or_error == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
     DEBUG_ERRNO("write() failed");
   }
 }
@@ -274,7 +248,7 @@ const EventLogWriter SocketEventLogWriter = {.initEventLogWriter = writer_init,
  * Main worker (in own thread)
  *********************************************************************************/
 
-static void listen_iteration(void) {
+static void worker_step_listen(void) {
   bool start_eventlog = false;
 
   if (listen(g_listen_fd, LISTEN_BACKLOG) == -1) {
@@ -283,23 +257,23 @@ static void listen_iteration(void) {
   }
 
   struct sockaddr_storage remote;
-  socklen_t len = sizeof(remote);
+  socklen_t remote_len = sizeof(remote);
 
-  struct pollfd pfd_accept = {
+  struct pollfd pfds[1] = {{
       .fd = g_listen_fd,
       .events = POLLIN,
       .revents = 0,
-  };
+  }};
 
   DEBUG_TRACE("listen_iteration: waiting for accept on fd %d", g_listen_fd);
 
   // poll until we can accept
   while (true) {
-    int ret = poll(&pfd_accept, 1, POLL_LISTEN_TIMEOUT);
-    if (ret == -1) {
+    const int ready_or_error = poll(pfds, 1, POLL_LISTEN_TIMEOUT);
+    if (ready_or_error == -1) {
       DEBUG_ERRNO("poll() failed");
       return;
-    } else if (ret == 0) {
+    } else if (ready_or_error == 0) {
       DEBUG_TRACE("%s", "accept poll timed out");
     } else {
       // got connection
@@ -309,19 +283,20 @@ static void listen_iteration(void) {
   }
 
   // accept
-  int fd = accept(g_listen_fd, (struct sockaddr *)&remote, &len);
-  if (fd == -1) {
+  const int client_fd =
+      accept(g_listen_fd, (struct sockaddr *)&remote, &remote_len);
+  if (client_fd == -1) {
     DEBUG_ERRNO("accept() failed");
     return;
   }
-  DEBUG_TRACE("accepted new connection fd=%d", fd);
+  DEBUG_TRACE("accepted new connection fd=%d", client_fd);
 
   // set socket into non-blocking mode
-  int flags = fcntl(fd, F_GETFL);
+  const int flags = fcntl(client_fd, F_GETFL);
   if (flags == -1) {
     DEBUG_ERRNO("fnctl() failed for F_GETFL");
   }
-  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+  if (fcntl(client_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
     DEBUG_ERRNO("fnctl() failed for F_SETFL");
   }
 
@@ -336,8 +311,8 @@ static void listen_iteration(void) {
   // with an empty queue or not at all. Keep the lock held through the condition
   // broadcast so the predicate update stays atomic on every platform.
   pthread_mutex_lock(&g_write_buffer_and_client_fd_mutex);
-  DEBUG_TRACE("publishing client_fd=%d (previous=%d)", fd, g_client_fd);
-  g_client_fd = fd;
+  DEBUG_TRACE("publishing client_fd=%d (previous=%d)", client_fd, g_client_fd);
+  g_client_fd = client_fd;
   pthread_cond_broadcast(&g_new_conn_cond);
   pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
 
@@ -352,7 +327,7 @@ static void listen_iteration(void) {
 // nothing to write iteration.
 //
 // we poll only for whether the connection is closed.
-static void nonwrite_iteration(int fd) {
+static void worker_step_nonwrite(int fd) {
   DEBUG_TRACE("(%d)", fd);
 
   // Wait for socket to disconnect or for pending data.
@@ -368,8 +343,8 @@ static void nonwrite_iteration(int fd) {
     nfds = 2;
   }
 
-  int ret = poll(pfds, nfds, -1);
-  if (ret == -1) {
+  const int ready_or_error = poll(pfds, nfds, -1);
+  if (ready_or_error == -1) {
     if (errno == EINTR) {
       return;
     }
@@ -396,17 +371,17 @@ static void nonwrite_iteration(int fd) {
 // write iteration.
 //
 // we poll for both: can we write, and whether the connection is closed.
-static void write_iteration(int fd) {
+static void worker_step_write(int fd) {
   DEBUG_TRACE("(%d)", fd);
 
   // Wait for socket to disconnect
-  struct pollfd pfd = {
+  struct pollfd pfds[1] = {{
       .fd = fd,
       .events = POLLOUT | POLLRDHUP,
       .revents = 0,
-  };
+  }};
 
-  const int num_ready_or_err = poll(&pfd, 1, POLL_WRITE_TIMEOUT);
+  const int num_ready_or_err = poll(pfds, 1, POLL_WRITE_TIMEOUT);
   if (num_ready_or_err == -1 && errno != EAGAIN) {
     // error
     DEBUG_ERRNO("poll() failed");
@@ -417,7 +392,7 @@ static void write_iteration(int fd) {
   }
 
   // reset client_fd on RDHUP.
-  if (pfd.revents & POLLHUP) {
+  if (pfds[0].revents & POLLHUP) {
     DEBUG_TRACE("(%d) POLLRDHUP", fd);
 
     // reset client_fd
@@ -430,7 +405,7 @@ static void write_iteration(int fd) {
     return;
   }
 
-  if (pfd.revents & POLLOUT) {
+  if (pfds[0].revents & POLLOUT) {
     DEBUG_TRACE("(%d) POLLOUT", fd);
 
     // RTS writers also access wt, so consume queued buffers under the mutex.
@@ -473,23 +448,23 @@ static void write_iteration(int fd) {
   }
 }
 
-static void iteration(void) {
+static void worker_step(void) {
   // Snapshot shared state under lock so worker decisions (listen vs write)
   // align with the current connection/queue state.
   pthread_mutex_lock(&g_write_buffer_and_client_fd_mutex);
-  int fd = g_client_fd;
-  bool empty = g_write_buffer.head == NULL;
-  DEBUG_TRACE("fd = %d, wt.head = %p", fd, (void *)g_write_buffer.head);
+  const int client = g_client_fd;
+  const bool write_buffer_empty = g_write_buffer.head == NULL;
+  DEBUG_TRACE("fd = %d, wt.head = %p", client, (void *)g_write_buffer.head);
   pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
 
-  if (fd != -1) {
-    if (empty) {
-      nonwrite_iteration(fd);
+  if (client != -1) {
+    if (write_buffer_empty) {
+      worker_step_nonwrite(client);
     } else {
-      write_iteration(fd);
+      worker_step_write(client);
     }
   } else {
-    listen_iteration();
+    worker_step_listen();
   }
 }
 
@@ -499,53 +474,57 @@ static void iteration(void) {
  * connection).
  * - or we don't have, then we poll for accept.
  */
-static void *worker(void *arg) {
+static void *worker_loop(void *arg) {
   (void)arg;
   while (true) {
-    iteration();
+    worker_step();
   }
-
   return NULL; // unreachable
 }
 
-/*********************************************************************************
- * Initialization
- *********************************************************************************/
-
 // Initialize the Unix-domain listener socket and bind it to the provided path.
 // This function does not start any threads; open_socket() completes the setup.
-static void init_unix_listener(const char *sock_path) {
-  DEBUG_TRACE("init Unix listener: %s", sock_path);
+static void
+worker_socket_init_unix(const eventlog_socket_unix_addr_t *const unix_addr,
+                        const eventlog_socket_opts_t *const opts) {
+  DEBUG_TRACE("init Unix listener: %s", unix_addr->unix_path);
 
   g_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
   // Record the sock_path so it can be unlinked at exit
-  g_sock_path = strdup(sock_path);
+  g_sock_path = strdup(unix_addr->unix_path);
 
   // set socket linger
-  const struct linger so_linger = {
-      .l_onoff = true,
-      .l_linger = 10,
-  };
-  const int so_linger_success_or_error = setsockopt(
-      g_listen_fd, SOL_SOCKET, SO_LINGER, &so_linger, sizeof(so_linger));
-  if (so_linger_success_or_error != 0) {
-    DEBUG_ERRNO("setsockopt() failed for SO_LINGER");
+  {
+    const struct linger so_linger = {
+        .l_onoff = true,
+        .l_linger = 10,
+    };
+    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_LINGER, &so_linger,
+                   sizeof(so_linger)) != 0) {
+      DEBUG_ERRNO("setsockopt() failed for SO_LINGER");
+    }
   }
 
   // set socket receive low water mark
-  const int so_rcvlowat = 1;
-  const int so_rcvlowat_success_or_error = setsockopt(
-      g_listen_fd, SOL_SOCKET, SO_RCVLOWAT, &so_rcvlowat, sizeof(so_rcvlowat));
-  if (so_rcvlowat_success_or_error != 0) {
+  if (setsockopt(g_listen_fd, SOL_SOCKET, SO_RCVLOWAT, &(int){1},
+                 sizeof(int)) != 0) {
     DEBUG_ERRNO("setsockopt() failed for SO_RCVLOWAT");
+  }
+
+  // set socket send buffer size
+  if (opts != NULL && opts->so_sndbuf > 0) {
+    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_SNDBUF, &opts->so_sndbuf,
+                   sizeof(opts->so_sndbuf)) != 0) {
+      DEBUG_ERRNO("setsockopt() failed for SO_SNDBUF");
+    }
   }
 
   struct sockaddr_un local;
   memset(&local, 0, sizeof(local));
   local.sun_family = AF_UNIX;
-  strncpy(local.sun_path, sock_path, sizeof(local.sun_path) - 1);
-  unlink(sock_path);
+  strncpy(local.sun_path, unix_addr->unix_path, sizeof(local.sun_path) - 1);
+  unlink(unix_addr->unix_path);
   if (bind(g_listen_fd, (struct sockaddr *)&local,
            sizeof(struct sockaddr_un)) == -1) {
     DEBUG_ERRNO("bind() failed");
@@ -556,7 +535,9 @@ static void init_unix_listener(const char *sock_path) {
 // Initialize a TCP listener bound to the specified host/port combination.
 // Either host or port may be NULL, in which case the defaults used by
 // getaddrinfo (INADDR_ANY / unspecified port) apply.
-static void init_tcp_listener(const char *host, const char *port) {
+static void
+worker_socket_init_inet(const eventlog_socket_inet_addr_t *const inet_addr,
+                        const eventlog_socket_opts_t *const opts) {
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -564,7 +545,8 @@ static void init_tcp_listener(const char *host, const char *port) {
   hints.ai_flags = AI_PASSIVE;
 
   struct addrinfo *res = NULL;
-  int ret = getaddrinfo(host, port, &hints, &res);
+  int ret =
+      getaddrinfo(inet_addr->inet_host, inet_addr->inet_port, &hints, &res);
   if (ret != 0) {
     DEBUG_ERROR("getaddrinfo() failed: %s", gai_strerror(ret));
     abort();
@@ -577,13 +559,24 @@ static void init_tcp_listener(const char *host, const char *port) {
       continue;
     }
 
-    int reuse = 1;
-    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
-                   sizeof(reuse)) == -1) {
+    // set socket reuse address
+    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &(int){1},
+                   sizeof(int)) != 0) {
       DEBUG_ERRNO("setsockopt() failed for SO_REUSEADDR");
       close(g_listen_fd);
       g_listen_fd = -1;
       continue;
+    }
+
+    // set socket send buffer size
+    if (opts != NULL && opts->so_sndbuf > 0) {
+      if (setsockopt(g_listen_fd, SOL_SOCKET, SO_SNDBUF, &opts->so_sndbuf,
+                     sizeof(opts->so_sndbuf)) != 0) {
+        DEBUG_ERRNO("setsockopt() failed for SO_SNDBUF");
+        close(g_listen_fd);
+        g_listen_fd = -1;
+        continue;
+      }
     }
 
     if (bind(g_listen_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
@@ -610,41 +603,14 @@ static void init_tcp_listener(const char *host, const char *port) {
   }
 }
 
-static void worker_start(const struct listener_config *config) {
-  DEBUG_TRACE("%s", "Starting worker thread.");
-  switch (config->kind) {
-  case LISTENER_UNIX:
-    init_unix_listener(config->sock_path);
-    break;
-  case LISTENER_TCP:
-    init_tcp_listener(config->tcp_host, config->tcp_port);
-    break;
-  default:
-    DEBUG_ERROR("%s", "unknown listener kind");
-    abort();
-  }
-
-  // start the worker thread
-  g_listen_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
-  int ret = pthread_create(g_listen_thread_ptr, NULL, worker, NULL);
-  if (ret != 0) {
-    DEBUG_ERRNO("pthread_create() failed");
-    abort();
-  }
-}
-
-/*********************************************************************************
- * Public interface
- *********************************************************************************/
-
-static void ensure_initialized(void) {
+static void worker_init(void) {
   if (!g_initialized) {
     if (pipe(g_wake_pipe) == -1) {
       DEBUG_ERRNO("pipe() failed");
       abort();
     }
     for (int i = 0; i < 2; i++) {
-      int flags = fcntl(g_wake_pipe[i], F_GETFL, 0);
+      const int flags = fcntl(g_wake_pipe[i], F_GETFL, 0);
       if (flags == -1 ||
           fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
         DEBUG_ERRNO("fcntl() failed for F_SETFL");
@@ -656,18 +622,51 @@ static void ensure_initialized(void) {
   }
 }
 
-// Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
-// It spawns the worker immediately but defers handling of control messages
-// until eventlog_socket_ready() is invoked after RTS initialization.
-static void eventlog_socket_init(const struct listener_config *config) {
-  ensure_initialized();
-
-  if (!listener_config_valid(config)) {
-    return;
+static void worker_start(const eventlog_socket_t *const eventlog_socket,
+                         const eventlog_socket_opts_t *const opts) {
+  DEBUG_TRACE("%s", "Starting worker thread.");
+  switch (eventlog_socket->tag) {
+  case EVENTLOG_SOCKET_UNIX:
+    worker_socket_init_unix(&eventlog_socket->unix_addr, opts);
+    break;
+  case EVENTLOG_SOCKET_INET:
+    worker_socket_init_inet(&eventlog_socket->inet_addr, opts);
+    break;
+  default:
+    DEBUG_ERROR("%s", "unknown listener kind");
+    abort();
   }
 
+  // start the worker thread
+  g_listen_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
+  int ret = pthread_create(g_listen_thread_ptr, NULL, worker_loop, NULL);
+  if (ret != 0) {
+    DEBUG_ERRNO("pthread_create() failed");
+    abort();
+  }
+}
+
+/*********************************************************************************
+ * Internal Helpers
+ *********************************************************************************/
+
+/// @brief Get the maximum length of a Unix domain socket path.
+static size_t get_unix_path_max(void) {
+  const struct sockaddr_un test_unix_path_max;
+  return sizeof(test_unix_path_max.sun_path);
+}
+
+/*********************************************************************************
+ * Public interface
+ *********************************************************************************/
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_init(const eventlog_socket_t *const eventlog_socket,
+                          const eventlog_socket_opts_t *const opts) {
+  worker_init();
+
   // start worker thread
-  worker_start(config);
+  worker_start(eventlog_socket, opts);
 
   // start control thread
   g_control_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
@@ -676,56 +675,7 @@ static void eventlog_socket_init(const struct listener_config *config) {
                                 &g_new_conn_cond);
 }
 
-// Unix domain socket paths are limited to 108 bytes.
-// This is 107 characters and one null byte.
-#define UNIX_DOMAIN_SOCKET_PATH_MAX_LEN 108
-
-int eventlog_socket_init_from_env(void) {
-  const char *ghc_eventlog_unix_socket = getenv("GHC_EVENTLOG_UNIX_SOCKET");
-  if (ghc_eventlog_unix_socket != NULL) {
-    const size_t ghc_eventlog_unix_socket_len =
-        strnlen(ghc_eventlog_unix_socket, UNIX_DOMAIN_SOCKET_PATH_MAX_LEN + 1);
-    if (ghc_eventlog_unix_socket_len >= UNIX_DOMAIN_SOCKET_PATH_MAX_LEN) {
-      return -1;
-    } else {
-      eventlog_socket_init_unix(ghc_eventlog_unix_socket);
-    }
-  } else {
-    const char *ghc_eventlog_tcp_host = getenv("GHC_EVENTLOG_TCP_HOST");
-    const char *ghc_eventlog_tcp_port = getenv("GHC_EVENTLOG_TCP_PORT");
-    if (ghc_eventlog_tcp_host != NULL && ghc_eventlog_tcp_port != NULL) {
-      eventlog_socket_init_tcp(ghc_eventlog_tcp_host, ghc_eventlog_tcp_port);
-    } else {
-      return 0;
-    }
-  }
-  const char *ghc_eventlog_wait = getenv("GHC_EVENTLOG_WAIT");
-  if (ghc_eventlog_wait != NULL) {
-    eventlog_socket_wait();
-  }
-  return 1;
-}
-
-void eventlog_socket_init_unix(const char *sock_path) {
-  struct listener_config config = {
-      .kind = LISTENER_UNIX,
-      .sock_path = sock_path,
-      .tcp_host = NULL,
-      .tcp_port = NULL,
-  };
-  eventlog_socket_init(&config);
-}
-
-void eventlog_socket_init_tcp(const char *host, const char *port) {
-  struct listener_config config = {
-      .kind = LISTENER_TCP,
-      .sock_path = NULL,
-      .tcp_host = host,
-      .tcp_port = port,
-  };
-  eventlog_socket_init(&config);
-}
-
+/* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_wait(void) {
   // Condition variable pairs with the mutex so reader threads can wait for the
   // worker to publish a connected client_fd atomically.
@@ -744,17 +694,19 @@ void eventlog_socket_wait(void) {
   pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
 }
 
-int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf,
-                            StgClosure *main_closure) {
+/* PUBLIC - see documentation in eventlog_socket.h */
+int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
+                                 StgClosure *main_closure) {
   SchedulerStatus status;
   int exit_status;
 
-  hs_init_ghc(&argc, &argv, conf);
+  // Initialize the GHC RTS.
+  hs_init_ghc(&argc, &argv, rts_config);
 
-  // Signal that the RTS is ready so the eventlog writer can accept control
-  // connections.
-  eventlog_socket_control_signal_ghc_rts_ready();
+  // Tell the control thread that the GHC RTS is initialised.
+  control_signal_ghc_rts_ready();
 
+  // Evaluate the Haskell main closure.
   {
     Capability *cap = rts_lock();
     rts_evalLazyIO(&cap, main_closure, NULL);
@@ -762,6 +714,7 @@ int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf,
     rts_unlock(cap);
   }
 
+  // Handle the return status.
   switch (status) {
   case Killed:
     errorBelch("main thread exited (uncaught exception)");
@@ -781,85 +734,156 @@ int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf,
     barf("main thread completed with invalid status");
   }
 
+  // Shut down the GHC RTS and exit.
   shutdownHaskellAndExit(exit_status, 0 /* !fastExit */);
 }
 
-// Use this from an already-running RTS: it reconfigures eventlogging to use
-// SocketEventLogWriter and restarts the log when a client connects.
-static void eventlog_socket_start(const struct listener_config *config,
-                                  bool wait) {
-  ensure_initialized();
-
-  if (!listener_config_valid(config)) {
-    return;
-  }
-
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_attach(void) {
+  // Check if this version of the GHC RTS supports the eventlog.
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
     DEBUG_ERROR("%s", "eventlog is not supported.");
     return;
   }
 
-  // we stop existing logging
+  // Stop the existing eventlog writer.
   if (eventLogStatus() == EVENTLOG_RUNNING) {
     endEventLogging();
   }
 
-  // ... and restart with outer socket writer,
-  // which is no-op so far.
-  //
-  // This trickery is to avoid
-  //
-  //     printAndClearEventLog: could not flush event log
-  //
-  // warning messages from showing up in stderr.
+  // Attach the `SocketEventLogWriter` eventlog writer.
   startEventLogging(&SocketEventLogWriter);
 
-  // start worker thread
-  worker_start(config);
+  // Tell the control thread that the GHC RTS is initialised.
+  control_signal_ghc_rts_ready();
+}
 
-  // start control thread
-  g_control_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
-  eventlog_socket_control_start(g_control_thread_ptr, &g_client_fd,
-                                &g_write_buffer_and_client_fd_mutex,
-                                &g_new_conn_cond);
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_start(const eventlog_socket_t *eventlog_socket,
+                           const eventlog_socket_opts_t *opts) {
 
-  // Presume that the RTS is already running and we're ready if you're directly
-  // using this function.
-  eventlog_socket_control_signal_ghc_rts_ready();
-  if (wait) {
-    switch (config->kind) {
-    case LISTENER_UNIX:
-      DEBUG_TRACE("Waiting for connection to %s...", config->sock_path);
-      break;
-    case LISTENER_TCP: {
-      const char *host = config->tcp_host ? config->tcp_host : "*";
-      DEBUG_TRACE("Waiting for TCP connection on %s:%s...\n", host,
-                  config->tcp_port);
-      break;
+  // Initialize eventlog_socket.
+  eventlog_socket_init(eventlog_socket, opts);
+
+  // Attache the eventlog writer to the GHC RTS.
+  eventlog_socket_attach();
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+int eventlog_socket_init_from_env(void) {
+  // Determine the maximum length of a Unix domain socket path.
+  const size_t unix_path_max = get_unix_path_max();
+  char *ghc_eventlog_unix_socket = getenv("GHC_EVENTLOG_UNIX_PATH"); // NOLINT
+  if (ghc_eventlog_unix_socket != NULL) {
+    size_t ghc_eventlog_unix_socket_len =
+        strnlen(ghc_eventlog_unix_socket, unix_path_max);
+    if (ghc_eventlog_unix_socket_len >= unix_path_max) {
+      return -1;
+    } else {
+      eventlog_socket_init_unix(ghc_eventlog_unix_socket);
     }
-    default:
-      break;
+  } else {
+    char *ghc_eventlog_tcp_host = getenv("GHC_EVENTLOG_INET_HOST"); // NOLINT
+    char *ghc_eventlog_tcp_port = getenv("GHC_EVENTLOG_INET_PORT"); // NOLINT
+    if (ghc_eventlog_tcp_host != NULL && ghc_eventlog_tcp_port != NULL) {
+      eventlog_socket_init_inet(ghc_eventlog_tcp_host, ghc_eventlog_tcp_port);
+    } else {
+      return 0;
     }
+  }
+  char *ghc_eventlog_wait = getenv("GHC_EVENTLOG_WAIT"); // NOLINT
+  if (ghc_eventlog_wait != NULL) {
     eventlog_socket_wait();
+  }
+  return 0;
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+bool eventlog_socket_from_env(eventlog_socket_t *eventlog_socket_out) {
+  // Allocate space for the output:
+  eventlog_socket_t eventlog_socket = {0};
+
+  // Determine the maximum length of a Unix domain socket path.
+  const size_t unix_path_max = get_unix_path_max();
+
+  // Try to construct a Unix domain socket address:
+  char *ghc_eventlog_unix_socket = getenv("GHC_EVENTLOG_UNIX_PATH"); // NOLINT
+  if (ghc_eventlog_unix_socket != NULL) {
+    size_t ghc_eventlog_unix_socket_len =
+        strnlen(ghc_eventlog_unix_socket, unix_path_max);
+    if (ghc_eventlog_unix_socket_len <= unix_path_max) {
+      // Write the configuration:
+      eventlog_socket.tag = EVENTLOG_SOCKET_UNIX;
+      eventlog_socket.unix_addr.unix_path = ghc_eventlog_unix_socket;
+      memcpy(eventlog_socket_out, &eventlog_socket, sizeof(eventlog_socket_t));
+      return true;
+    } else {
+      return false;
+    }
+  }
+  // Try to construct a TCP/IP address:
+  else {
+    char *ghc_eventlog_inet_host = getenv("GHC_EVENTLOG_INET_HOST"); // NOLINT
+    char *ghc_eventlog_inet_port = getenv("GHC_EVENTLOG_INET_PORT"); // NOLINT
+    if (ghc_eventlog_inet_host != NULL && ghc_eventlog_inet_port != NULL) {
+      // Write the configuration:
+      eventlog_socket.tag = EVENTLOG_SOCKET_INET;
+      eventlog_socket.inet_addr.inet_host = ghc_eventlog_inet_host;
+      eventlog_socket.inet_addr.inet_port = ghc_eventlog_inet_port;
+      memcpy(eventlog_socket_out, &eventlog_socket, sizeof(eventlog_socket_t));
+      return true;
+    } else {
+      return false;
+    }
   }
 }
 
-void eventlog_socket_start_unix(const char *sock_path, bool wait) {
-  struct listener_config config = {
-      .kind = LISTENER_UNIX,
-      .sock_path = sock_path,
-      .tcp_host = NULL,
-      .tcp_port = NULL,
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_start_unix(char *unix_path) {
+  const eventlog_socket_t eventlog_socket = {
+      .tag = EVENTLOG_SOCKET_UNIX,
+      .unix_addr =
+          {
+              .unix_path = unix_path,
+          },
   };
-  eventlog_socket_start(&config, wait);
+  eventlog_socket_start(&eventlog_socket, NULL);
 }
 
-void eventlog_socket_start_tcp(const char *host, const char *port, bool wait) {
-  struct listener_config config = {
-      .kind = LISTENER_TCP,
-      .sock_path = NULL,
-      .tcp_host = host,
-      .tcp_port = port,
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_start_inet(char *inet_host, char *inet_port) {
+  const eventlog_socket_t eventlog_socket = {
+      .tag = EVENTLOG_SOCKET_INET,
+      .inet_addr =
+          {
+              .inet_host = inet_host,
+              .inet_port = inet_port,
+          },
   };
-  eventlog_socket_start(&config, wait);
+  eventlog_socket_start(&eventlog_socket, NULL);
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_init_unix(char *unix_path) {
+  const eventlog_socket_t eventlog_socket = {
+      .tag = EVENTLOG_SOCKET_UNIX,
+      .unix_addr =
+          {
+              .unix_path = unix_path,
+          },
+  };
+  eventlog_socket_init(&eventlog_socket, NULL);
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_init_inet(char *inet_host, char *inet_port) {
+  eventlog_socket_t eventlog_socket = {
+      .tag = EVENTLOG_SOCKET_INET,
+      .inet_addr =
+          {
+              .inet_host = inet_host,
+              .inet_port = inet_port,
+          },
+  };
+  eventlog_socket_init(&eventlog_socket, NULL);
 }

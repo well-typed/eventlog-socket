@@ -33,15 +33,15 @@ A type representing the supported eventlog socket modes.
 -}
 data EventlogSocket
     = EventlogUnixSocket
-        { unixSocketPath :: FilePath
+        { unixPath :: FilePath
         -- ^ Unix socket path, e.g., @"/tmp/ghc_eventlog.sock"@.
         --
         --         __Warning:__ Unix socket paths are limited to 107 characters.
         }
     | EventlogTcpSocket
-        { tcpHost :: String
+        { inetHost :: String
         -- ^ TCP host or interface, e.g. @"127.0.0.1"@.
-        , tcpPort :: !Word16
+        , inetPort :: !Word16
         -- ^ TCP port, e.g., @4242@.
         }
     deriving (Show)
@@ -68,8 +68,10 @@ startFromEnv :: IO ()
 startFromEnv =
     lookupEventlogSocket
         >>= traverse_
-            ( \eventlogSocket ->
-                lookupWaitMode >>= startWith eventlogSocket
+            ( \eventlogSocket -> do
+                startWith eventlogSocket
+                lookupWaitMode >>= \waitMode ->
+                    when waitMode wait
             )
 
 {- |
@@ -92,25 +94,25 @@ lookupEventlogSocket =
 {- |
 Lookup the `UnixSocket` from the environment.
 
-This reads the `unixSocketPath` from the @GHC_EVENTLOG_UNIX_SOCKET@ environment variable.
+This reads the `unixSocketPath` from the @GHC_EVENTLOG_UNIX_PATH@ environment variable.
 -}
 lookupEventlogUnixSocket :: IO (Maybe EventlogSocket)
 lookupEventlogUnixSocket =
-    lookupEnv "GHC_EVENTLOG_UNIX_SOCKET"
+    lookupEnv "GHC_EVENTLOG_UNIX_PATH"
         >>= traverse (pure . EventlogUnixSocket)
 
 {- |
 Lookup the `TcpSocket` from the environment.
 
-This reads the `tcpHost` from the @GHC_EVENTLOG_TCP_HOST@ and the `tcpPort` from the @GHC_EVENTLOG_TCP_PORT@ environment variable.
+This reads the host name from the @GHC_EVENTLOG_INET_HOST@ and the port number from the @GHC_EVENTLOG_INET_PORT@ environment variable.
 
-__Warning:__ @GHC_EVENTLOG_TCP_PORT@ must be number in the range @0-65535@.
+__Warning:__ @GHC_EVENTLOG_INET_PORT@ must be number in the range @0-65535@.
 
 @since 0.1.1.0
 -}
 lookupEventlogTcpSocket :: IO (Maybe EventlogSocket)
 lookupEventlogTcpSocket =
-    (,) <$> lookupEnv "GHC_EVENTLOG_TCP_HOST" <*> lookupEnv "GHC_EVENTLOG_TCP_PORT" >>= \case
+    (,) <$> lookupEnv "GHC_EVENTLOG_INET_HOST" <*> lookupEnv "GHC_EVENTLOG_INET_PORT" >>= \case
         (Just tcpHost, Just tcpPortString)
             | Just tcpPort <- readMaybe tcpPortString ->
                 pure . Just $ EventlogTcpSocket tcpHost tcpPort
@@ -122,18 +124,17 @@ If the second argument is `True`, the function waits for another process to conn
 
 @since 0.1.1.0
 -}
-startWith :: EventlogSocket -> Bool -> IO ()
-startWith eventlogSocket shouldWait =
-    case eventlogSocket of
-        EventlogUnixSocket unixSocketPath -> do
-            when (length unixSocketPath >= 108) $
-                throwIO (UnixSocketPathTooLong unixSocketPath)
-            withCString unixSocketPath $ \cUnixSocketPath ->
-                c_start_unix cUnixSocketPath shouldWait
-        EventlogTcpSocket tcpHost tcpPort ->
-            withCString tcpHost $ \hostPtr ->
-                withCString (show tcpPort) $ \portPtr ->
-                    c_start_tcp hostPtr portPtr shouldWait
+startWith :: EventlogSocket -> IO ()
+startWith = \case
+    EventlogUnixSocket unixSocketPath -> do
+        when (length unixSocketPath >= 108) $
+            throwIO (UnixSocketPathTooLong unixSocketPath)
+        withCString unixSocketPath $ \cUnixSocketPath ->
+            eventlog_socket_start_unix cUnixSocketPath
+    EventlogTcpSocket tcpHost tcpPort ->
+        withCString tcpHost $ \hostPtr ->
+            withCString (show tcpPort) $ \portPtr ->
+                eventlog_socket_start_inet hostPtr portPtr
 
 {- |
 Start an @eventlog-socket@ writer on a Unix domain socket and wait.
@@ -142,7 +143,7 @@ Start an @eventlog-socket@ writer on a Unix domain socket and wait.
 -}
 startWait :: FilePath -> IO ()
 startWait unixSocketPath =
-    startWith (EventlogUnixSocket unixSocketPath) True
+    startWith (EventlogUnixSocket unixSocketPath) >> wait
 
 {- |
 Start an @eventlog-socket@ writer on a Unix domain socket.
@@ -151,7 +152,7 @@ Start an @eventlog-socket@ writer on a Unix domain socket.
 -}
 start :: FilePath -> IO ()
 start unixSocketPath =
-    startWith (EventlogUnixSocket unixSocketPath) False
+    startWith (EventlogUnixSocket unixSocketPath)
 
 {- |
 Wait for another process to connect to the eventlog socket.
@@ -159,13 +160,13 @@ Wait for another process to connect to the eventlog socket.
 @since 0.1.0.0
 -}
 wait :: IO ()
-wait = c_wait
+wait = eventlog_socket_wait
 
 foreign import capi safe "eventlog_socket.h eventlog_socket_start_unix"
-    c_start_unix :: CString -> Bool -> IO ()
+    eventlog_socket_start_unix :: CString -> IO ()
 
-foreign import capi safe "eventlog_socket.h eventlog_socket_start_tcp"
-    c_start_tcp :: CString -> CString -> Bool -> IO ()
+foreign import capi safe "eventlog_socket.h eventlog_socket_start_inet"
+    eventlog_socket_start_inet :: CString -> CString -> IO ()
 
 foreign import capi safe "eventlog_socket.h eventlog_socket_wait"
-    c_wait :: IO ()
+    eventlog_socket_wait :: IO ()

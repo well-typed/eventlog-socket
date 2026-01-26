@@ -123,13 +123,13 @@ class TestRunner:
         if self.testCase.socket_type == "unix":
             sock_path = Path(f"/tmp/{target}_eventlog.sock")
             self.socket_path = sock_path
-            self.env["GHC_EVENTLOG_UNIX_SOCKET"] = str(sock_path)
+            self.env["GHC_EVENTLOG_UNIX_PATH"] = str(sock_path)
             self.env["GHC_EVENTLOG_WAIT"] = "true"
         elif self.testCase.socket_type == "tcp":
             host = self.tcp_host
             port = str(self.tcp_port)
-            self.env["GHC_EVENTLOG_TCP_HOST"] = host
-            self.env["GHC_EVENTLOG_TCP_PORT"] = port
+            self.env["GHC_EVENTLOG_INET_HOST"] = host
+            self.env["GHC_EVENTLOG_INET_PORT"] = port
             self.env["GHC_EVENTLOG_WAIT"] = "true"
         else:
             raise ValueError(f"Unknown socket type {self.testCase.socket_type}")

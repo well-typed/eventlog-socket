@@ -60,7 +60,7 @@ handle_pong(const eventlog_socket_control_namespace_t *const namespace,
 
 /// Register the "custom-command" namespace and the ping and pong custom
 /// commands.
-void custom_command_initialize(void) {
+void custom_command_init(void) {
   // Register the "custom-command" namespace.
   eventlog_socket_control_namespace_t *namespace =
       eventlog_socket_control_register_namespace(
@@ -91,17 +91,17 @@ void custom_command_initialize(void) {
 }
 
 int main(int argc, char *argv[]) {
-  RtsConfig conf = defaultRtsConfig;
-  conf.eventlog_writer = &SocketEventLogWriter;
-  conf.rts_opts_enabled = RtsOptsAll;
-  conf.rts_opts = "-l";
+  RtsConfig rts_config = defaultRtsConfig;
+  rts_config.eventlog_writer = &SocketEventLogWriter;
+  rts_config.rts_opts_enabled = RtsOptsAll;
+  rts_config.rts_opts = "-l";
 
-  custom_command_initialize();
+  custom_command_init();
 
   eventlog_socket_init_from_env();
 
   eventlog_socket_wait();
 
   extern StgClosure ZCMain_main_closure;
-  eventlog_socket_hs_main(argc, argv, conf, &ZCMain_main_closure);
+  eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure);
 }

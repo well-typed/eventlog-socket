@@ -230,9 +230,9 @@ shouldInherit = (`elem` ["PATH"]) . fst
 eventlogSocketEnv :: EventlogSocket -> [(String, String)]
 eventlogSocketEnv = \case
     EventlogUnixSocket{..} ->
-        [("GHC_EVENTLOG_UNIX_SOCKET", unixSocketPath)]
+        [("GHC_EVENTLOG_UNIX_PATH", unixPath)]
     EventlogTcpSocket{..} ->
-        [("GHC_EVENTLOG_TCP_HOST", tcpHost), ("GHC_EVENTLOG_TCP_PORT", show tcpPort)]
+        [("GHC_EVENTLOG_INET_HOST", inetHost), ("GHC_EVENTLOG_INET_PORT", show inetPort)]
 
 --------------------------------------------------------------------------------
 -- Eventlog Validation
@@ -330,17 +330,17 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
                     let newSocket = S.socket S.AF_UNIX S.Stream S.defaultProtocol
                     let closeSocket socket = S.close socket
                     bracket newSocket closeSocket $ \socket -> do
-                        debugInfo $ "Trying to connect to Unix socket at " <> unixSocketPath
-                        S.connect socket (S.SockAddrUnix unixSocketPath)
-                        debugInfo $ "Connected to Unix socket at " <> unixSocketPath
+                        debugInfo $ "Trying to connect to Unix socket at " <> unixPath
+                        S.connect socket (S.SockAddrUnix unixPath)
+                        debugInfo $ "Connected to Unix socket at " <> unixPath
                         action socket
                 EventlogTcpSocket{..} -> do
-                    let tcpHints =
+                    let addrInfo =
                             S.defaultHints
                                 { S.addrFamily = S.AF_INET
                                 , S.addrSocketType = S.Stream
                                 }
-                    addr <- NE.head <$> S.getAddrInfo (Just tcpHints) (Just tcpHost) (Just . show $ tcpPort)
+                    addr <- NE.head <$> S.getAddrInfo (Just addrInfo) (Just inetHost) (Just . show $ inetPort)
                     let newSocket = S.socket (S.addrFamily addr) (S.addrSocketType addr) (S.addrProtocol addr)
                     let closeSocket socket = S.gracefulClose socket timeoutMSec
                     bracket newSocket closeSocket $ \socket -> do
@@ -807,8 +807,8 @@ data TestInfo = TestInfo
     { testName :: TestName
     }
 
-tcpPortCounter :: MVar Word16
-tcpPortCounter = unsafePerformIO (newMVar 0)
+inetPortCounter :: MVar Word16
+inetPortCounter = unsafePerformIO (newMVar 0)
 
 testCaseForUnix ::
     (HasLogger) =>
@@ -832,21 +832,21 @@ testCaseFor testName test = \case
          in let ?testInfo = TestInfo{testName = testName'}
              in Just $ testCase testName' $ do
                     debug Header
-                    let (directory, fileName) = splitFileName unixSocketPath
-                    let unixSocketPath' = directory </> testName <> "_" <> fileName
-                    debugInfo $ "Using Unix socket: " <> unixSocketPath'
-                    test $ EventlogUnixSocket unixSocketPath'
+                    let (directory, fileName) = splitFileName unixPath
+                    let unixPath' = directory </> testName <> "_" <> fileName
+                    debugInfo $ "Using Unix socket: " <> unixPath'
+                    test $ EventlogUnixSocket unixPath'
                     debug Footer
     EventlogTcpSocket{..} ->
         let testName' = testName <> "_Tcp"
          in let ?testInfo = TestInfo{testName = testName'}
              in Just $ testCase testName' $ do
                     debug Header
-                    tcpPortOffset <- modifyMVar tcpPortCounter $ \currentTcpPortOffset -> do
+                    inetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
                         let nextTcpPortOffset = currentTcpPortOffset + 1
                         pure (nextTcpPortOffset, currentTcpPortOffset)
-                    let tcpPort' = tcpPort + tcpPortOffset
-                    test $ EventlogTcpSocket tcpHost tcpPort'
+                    let inetPort' = inetPort + inetPortOffset
+                    test $ EventlogTcpSocket inetHost inetPort'
                     debug Footer
 
 type HasLogger = (?logger :: Logger, HasCallStack)
