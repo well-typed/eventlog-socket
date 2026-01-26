@@ -11,16 +11,71 @@
  * Eventlog Writer
  ******************************************************************************/
 
+typedef enum {
+  EVENTLOG_SOCKET_UNIX,
+  EVENTLOG_SOCKET_INET,
+} eventlog_socket_tag_t;
+
+typedef struct eventlog_socket_unix_addr {
+  /// The path to the Unix domain socket.
+  char *unix_path;
+} eventlog_socket_unix_addr_t;
+
+typedef struct eventlog_socket_inet_addr {
+  /// The host name.
+  char *inet_host;
+  /// The port number.
+  char *inet_port;
+} eventlog_socket_inet_addr_t;
+
+typedef struct eventlog_socket_opts {
+  int so_sndbuf;
+} eventlog_socket_opts_t;
+
+typedef struct eventlog_socket {
+  eventlog_socket_tag_t tag;
+  union {
+    /// The address for an `EVENTLOG_SOCKET_UNIX` socket.
+    eventlog_socket_unix_addr_t unix_addr;
+    /// The address for an `EVENTLOG_SOCKET_INET` socket.
+    eventlog_socket_inet_addr_t inet_addr;
+  };
+} eventlog_socket_t;
+
 extern const EventLogWriter SocketEventLogWriter;
 
-void eventlog_socket_init_unix(const char *sock_path);
-void eventlog_socket_init_tcp(const char *host, const char *port);
+bool eventlog_socket_from_env(eventlog_socket_t *eventlog_socket_out);
+
+// Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
+// It spawns the worker immediately but defers handling of control messages
+// until eventlog_socket_ready() is invoked after RTS initialization.
+void eventlog_socket_init(const eventlog_socket_t *eventlog_socket,
+                          const eventlog_socket_opts_t *opts);
+
+void eventlog_socket_init_unix(char *unix_path);
+
+void eventlog_socket_init_inet(char *inet_host, char *inet_port);
+
+/// @par MT-Unsafe
 int eventlog_socket_init_from_env(void);
+
+/// @pre The GHC RTS is ready.
+/// @pre The function `eventlog_socket_init` has been called.
+void eventlog_socket_attach(void);
+
+// Use this from an already-running RTS: it reconfigures eventlogging to use
+// SocketEventLogWriter and restarts the log when a client connects.
+void eventlog_socket_start(const eventlog_socket_t *eventlog_socket,
+                           const eventlog_socket_opts_t *opts);
+
+void eventlog_socket_start_unix(char *unix_path);
+
+void eventlog_socket_start_inet(char *inet_host, char *inet_port);
+
 void eventlog_socket_wait(void);
-void eventlog_socket_start_unix(const char *sock_path, bool wait);
-void eventlog_socket_start_tcp(const char *host, const char *port, bool wait);
-int eventlog_socket_hs_main(int argc, char *argv[], RtsConfig conf,
-                            StgClosure *main_closure);
+
+int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
+                                 StgClosure *main_closure);
 
 /******************************************************************************
  * Control Commands
@@ -70,15 +125,5 @@ bool eventlog_socket_control_register_command(
     eventlog_socket_control_command_id_t command_id,
     eventlog_socket_control_command_handler_t command_handler,
     const void *command_data);
-
-/// Signal that the GHC RTS is ready.
-///
-/// Since control command handlers may call function from the GHC RTS API, no
-/// control commands are executed until the GHC RTS is ready. You do not need to
-/// call this function if you're starting eventlog socket using the Haskell API
-/// or via `eventlog_socket_start`.
-///
-/// @pre The GHC RTS is ready.
-void eventlog_socket_control_signal_ghc_rts_ready(void);
 
 #endif /* EVENGLOG_SOCKET_H */

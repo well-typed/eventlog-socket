@@ -468,8 +468,8 @@ static void control_wait_ghc_rts_ready(void) {
   pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
 }
 
-/* PUBLIC - see eventlog_socket.h for documentation */
-void eventlog_socket_control_signal_ghc_rts_ready(void) {
+/* HIDDEN - see control.h for documentation */
+void HIDDEN control_signal_ghc_rts_ready(void) {
   DEBUG_DEBUG("%s", "Sending signal that GHC RTS is ready.");
   pthread_mutex_lock(&g_ghc_rts_ready_mutex);
   if (!g_ghc_rts_ready) {

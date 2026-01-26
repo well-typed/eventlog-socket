@@ -25,4 +25,14 @@ void HIDDEN eventlog_socket_control_start(pthread_t *control_thread,
                                           pthread_mutex_t *control_fd_mutex_ptr,
                                           pthread_cond_t *new_conn_cond_ptr);
 
+/// Signal that the GHC RTS is ready.
+///
+/// Since control command handlers may call function from the GHC RTS API, no
+/// control commands are executed until the GHC RTS is ready. You do not need to
+/// call this function if you're starting eventlog socket using the Haskell API
+/// or via `eventlog_socket_start`.
+///
+/// @pre The GHC RTS is ready.
+void HIDDEN control_signal_ghc_rts_ready(void);
+
 #endif /* EVENTLOG_SOCKET_CONTROL_H */

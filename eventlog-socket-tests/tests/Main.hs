@@ -20,7 +20,7 @@ import Text.Read (readMaybe)
 main :: IO ()
 main = do
     -- Allow the user to overwrite the TCP port:
-    tcpPort <- (fromMaybe 4242 . (readMaybe =<<)) <$> lookupEnv "GHC_EVENTLOG_TCP_PORT"
+    tcpPort <- (fromMaybe 4242 . (readMaybe =<<)) <$> lookupEnv "GHC_EVENTLOG_INET_PORT"
 
     -- Create:
     withLogger $ do
