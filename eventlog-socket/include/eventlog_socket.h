@@ -18,28 +18,28 @@ typedef enum EventlogSocketTag {
 
 typedef struct EventlogSocketUnixAddr {
   /// The path to the Unix domain socket.
-  char *unix_path;
+  char *esa_unix_path;
 } EventlogSocketUnixAddr;
 
 typedef struct EventlogSocketInetAddr {
   /// The host name.
-  char *inet_host;
+  char *esa_inet_host;
   /// The port number.
-  char *inet_port;
+  char *esa_inet_port;
 } EventlogSocketInetAddr;
 
 typedef struct EventlogSocketOpts {
-  bool wait;
-  int so_sndbuf;
+  bool eso_wait;
+  int eso_sndbuf;
 } EventlogSocketOpts;
 
 typedef struct EventlogSocketAddr {
-  EventlogSocketTag tag;
+  EventlogSocketTag esa_tag;
   union {
     /// The address for an `EVENTLOG_SOCKET_UNIX` socket.
-    EventlogSocketUnixAddr unix_addr;
+    EventlogSocketUnixAddr esa_unix_addr;
     /// The address for an `EVENTLOG_SOCKET_INET` socket.
-    EventlogSocketInetAddr inet_addr;
+    EventlogSocketInetAddr esa_inet_addr;
   };
 } EventlogSocketAddr;
 

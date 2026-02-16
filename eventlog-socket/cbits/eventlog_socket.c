@@ -487,12 +487,12 @@ static void *worker_loop(void *arg) {
 static void
 worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
                         const EventlogSocketOpts *const opts) {
-  DEBUG_TRACE("init Unix listener: %s", unix_addr->unix_path);
+  DEBUG_TRACE("init Unix listener: %s", unix_addr->esa_unix_path);
 
   g_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
   // Record the sock_path so it can be unlinked at exit
-  g_sock_path = strdup(unix_addr->unix_path);
+  g_sock_path = strdup(unix_addr->esa_unix_path);
 
   // set socket linger
   {
@@ -513,9 +513,9 @@ worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
   }
 
   // set socket send buffer size
-  if (opts != NULL && opts->so_sndbuf > 0) {
-    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_SNDBUF, &opts->so_sndbuf,
-                   sizeof(opts->so_sndbuf)) != 0) {
+  if (opts != NULL && opts->eso_sndbuf > 0) {
+    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_SNDBUF, &opts->eso_sndbuf,
+                   sizeof(opts->eso_sndbuf)) != 0) {
       DEBUG_ERRNO("setsockopt() failed for SO_SNDBUF");
     }
   }
@@ -523,8 +523,8 @@ worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
   struct sockaddr_un local;
   memset(&local, 0, sizeof(local));
   local.sun_family = AF_UNIX;
-  strncpy(local.sun_path, unix_addr->unix_path, sizeof(local.sun_path) - 1);
-  unlink(unix_addr->unix_path);
+  strncpy(local.sun_path, unix_addr->esa_unix_path, sizeof(local.sun_path) - 1);
+  unlink(unix_addr->esa_unix_path);
   if (bind(g_listen_fd, (struct sockaddr *)&local,
            sizeof(struct sockaddr_un)) == -1) {
     DEBUG_ERRNO("bind() failed");
@@ -545,8 +545,8 @@ worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
   hints.ai_flags = AI_PASSIVE;
 
   struct addrinfo *res = NULL;
-  int ret =
-      getaddrinfo(inet_addr->inet_host, inet_addr->inet_port, &hints, &res);
+  int ret = getaddrinfo(inet_addr->esa_inet_host, inet_addr->esa_inet_port,
+                        &hints, &res);
   if (ret != 0) {
     DEBUG_ERROR("getaddrinfo() failed: %s", gai_strerror(ret));
     abort();
@@ -569,9 +569,9 @@ worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
     }
 
     // set socket send buffer size
-    if (opts != NULL && opts->so_sndbuf > 0) {
-      if (setsockopt(g_listen_fd, SOL_SOCKET, SO_SNDBUF, &opts->so_sndbuf,
-                     sizeof(opts->so_sndbuf)) != 0) {
+    if (opts != NULL && opts->eso_sndbuf > 0) {
+      if (setsockopt(g_listen_fd, SOL_SOCKET, SO_SNDBUF, &opts->eso_sndbuf,
+                     sizeof(opts->eso_sndbuf)) != 0) {
         DEBUG_ERRNO("setsockopt() failed for SO_SNDBUF");
         close(g_listen_fd);
         g_listen_fd = -1;
@@ -625,12 +625,12 @@ static void worker_init(void) {
 static void worker_start(const EventlogSocketAddr *const eventlog_socket,
                          const EventlogSocketOpts *const opts) {
   DEBUG_TRACE("%s", "Starting worker thread.");
-  switch (eventlog_socket->tag) {
+  switch (eventlog_socket->esa_tag) {
   case EVENTLOG_SOCKET_UNIX:
-    worker_socket_init_unix(&eventlog_socket->unix_addr, opts);
+    worker_socket_init_unix(&eventlog_socket->esa_unix_addr, opts);
     break;
   case EVENTLOG_SOCKET_INET:
-    worker_socket_init_inet(&eventlog_socket->inet_addr, opts);
+    worker_socket_init_inet(&eventlog_socket->esa_inet_addr, opts);
     break;
   default:
     DEBUG_ERROR("%s", "unknown listener kind");
@@ -774,9 +774,9 @@ void eventlog_socket_opts_init(EventlogSocketOpts *eventlog_socket_opts) {
   if (eventlog_socket_opts == NULL) {
     return;
   }
-  eventlog_socket_opts->wait = false;
+  eventlog_socket_opts->eso_wait = false;
   // todo: any value <=1024 should be ignored
-  eventlog_socket_opts->so_sndbuf = 0;
+  eventlog_socket_opts->eso_sndbuf = 0;
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
@@ -784,18 +784,18 @@ void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket) {
   if (eventlog_socket == NULL) {
     return;
   }
-  switch (eventlog_socket->tag) {
+  switch (eventlog_socket->esa_tag) {
   case EVENTLOG_SOCKET_UNIX:
-    if (eventlog_socket->unix_addr.unix_path != NULL) {
-      free(eventlog_socket->unix_addr.unix_path);
+    if (eventlog_socket->esa_unix_addr.esa_unix_path != NULL) {
+      free(eventlog_socket->esa_unix_addr.esa_unix_path);
     }
     break;
   case EVENTLOG_SOCKET_INET:
-    if (eventlog_socket->inet_addr.inet_host != NULL) {
-      free(eventlog_socket->inet_addr.inet_host);
+    if (eventlog_socket->esa_inet_addr.esa_inet_host != NULL) {
+      free(eventlog_socket->esa_inet_addr.esa_inet_host);
     }
-    if (eventlog_socket->inet_addr.inet_port != NULL) {
-      free(eventlog_socket->inet_addr.inet_port);
+    if (eventlog_socket->esa_inet_addr.esa_inet_port != NULL) {
+      free(eventlog_socket->esa_inet_addr.esa_inet_port);
     }
     break;
   }
@@ -836,8 +836,8 @@ eventlog_socket_addr_from_env(EventlogSocketAddr *eventlog_socket_out,
 
     // Write the configuration:
     EventlogSocketAddr eventlog_socket = {0};
-    eventlog_socket.tag = EVENTLOG_SOCKET_UNIX;
-    eventlog_socket.unix_addr.unix_path = unix_path;
+    eventlog_socket.esa_tag = EVENTLOG_SOCKET_UNIX;
+    eventlog_socket.esa_unix_addr.esa_unix_path = unix_path;
     memcpy(eventlog_socket_out, &eventlog_socket, sizeof(EventlogSocketAddr));
   }
 
@@ -856,9 +856,9 @@ eventlog_socket_addr_from_env(EventlogSocketAddr *eventlog_socket_out,
       strncpy(inet_port_copy, inet_port, inet_port_len);
       // Write the configuration:
       EventlogSocketAddr eventlog_socket = {0};
-      eventlog_socket.tag = EVENTLOG_SOCKET_INET;
-      eventlog_socket.inet_addr.inet_host = inet_host_copy;
-      eventlog_socket.inet_addr.inet_port = inet_port_copy;
+      eventlog_socket.esa_tag = EVENTLOG_SOCKET_INET;
+      eventlog_socket.esa_inet_addr.esa_inet_host = inet_host_copy;
+      eventlog_socket.esa_inet_addr.esa_inet_port = inet_port_copy;
       memcpy(eventlog_socket_out, &eventlog_socket, sizeof(EventlogSocketAddr));
     } else {
       return EVENTLOG_SOCKET_FROM_ENV_NOTFOUND;
@@ -868,13 +868,13 @@ eventlog_socket_addr_from_env(EventlogSocketAddr *eventlog_socket_out,
   // If an output address was provided for the options:
   if (eventlog_socket_opts_out != NULL) {
     EventlogSocketOpts eventlog_socket_opts = {
-        .wait = false,
-        .so_sndbuf = 0,
+        .eso_wait = false,
+        .eso_sndbuf = 0,
     };
 
     // Try to construct the options:
     char *ghc_eventlog_wait = getenv("GHC_EVENTLOG_WAIT"); // NOLINT
-    eventlog_socket_opts.wait = ghc_eventlog_wait != NULL;
+    eventlog_socket_opts.eso_wait = ghc_eventlog_wait != NULL;
 
     // Write the options:
     memcpy(eventlog_socket_opts_out, &eventlog_socket_opts,
@@ -887,10 +887,10 @@ eventlog_socket_addr_from_env(EventlogSocketAddr *eventlog_socket_out,
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_start_unix(char *unix_path) {
   const EventlogSocketAddr eventlog_socket = {
-      .tag = EVENTLOG_SOCKET_UNIX,
-      .unix_addr =
+      .esa_tag = EVENTLOG_SOCKET_UNIX,
+      .esa_unix_addr =
           {
-              .unix_path = unix_path,
+              .esa_unix_path = unix_path,
           },
   };
   eventlog_socket_start(&eventlog_socket, NULL);
@@ -899,11 +899,11 @@ void eventlog_socket_start_unix(char *unix_path) {
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_start_inet(char *inet_host, char *inet_port) {
   const EventlogSocketAddr eventlog_socket = {
-      .tag = EVENTLOG_SOCKET_INET,
-      .inet_addr =
+      .esa_tag = EVENTLOG_SOCKET_INET,
+      .esa_inet_addr =
           {
-              .inet_host = inet_host,
-              .inet_port = inet_port,
+              .esa_inet_host = inet_host,
+              .esa_inet_port = inet_port,
           },
   };
   eventlog_socket_start(&eventlog_socket, NULL);
@@ -912,10 +912,10 @@ void eventlog_socket_start_inet(char *inet_host, char *inet_port) {
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_init_unix(char *unix_path) {
   const EventlogSocketAddr eventlog_socket = {
-      .tag = EVENTLOG_SOCKET_UNIX,
-      .unix_addr =
+      .esa_tag = EVENTLOG_SOCKET_UNIX,
+      .esa_unix_addr =
           {
-              .unix_path = unix_path,
+              .esa_unix_path = unix_path,
           },
   };
   eventlog_socket_init(&eventlog_socket, NULL);
@@ -924,11 +924,11 @@ void eventlog_socket_init_unix(char *unix_path) {
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_init_inet(char *inet_host, char *inet_port) {
   EventlogSocketAddr eventlog_socket = {
-      .tag = EVENTLOG_SOCKET_INET,
-      .inet_addr =
+      .esa_tag = EVENTLOG_SOCKET_INET,
+      .esa_inet_addr =
           {
-              .inet_host = inet_host,
-              .inet_port = inet_port,
+              .esa_inet_host = inet_host,
+              .esa_inet_port = inet_port,
           },
   };
   eventlog_socket_init(&eventlog_socket, NULL);
