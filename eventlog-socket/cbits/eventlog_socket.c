@@ -811,10 +811,10 @@ void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketFromEnvStatus
-eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_out,
+eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
                          EventlogSocketOpts *eventlog_socket_opts_out) {
   // Check that eventlog_socket_out is nonnull.
-  if (eventlog_socket_out == NULL) {
+  if (eventlog_socket_addr_out == NULL) {
     return EVENTLOG_SOCKET_FROM_ENV_INVAL;
   }
 
@@ -833,12 +833,14 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_out,
     // Copy unix_path:
     char *unix_path_copy = malloc(unix_path_len);
     strncpy(unix_path_copy, unix_path, unix_path_len);
+    DEBUG_DEBUG("unix_path: %s", unix_path_copy);
 
     // Write the configuration:
     EventlogSocketAddr eventlog_socket = {0};
     eventlog_socket.esa_tag = EVENTLOG_SOCKET_UNIX;
-    eventlog_socket.esa_unix_addr.esa_unix_path = unix_path;
-    memcpy(eventlog_socket_out, &eventlog_socket, sizeof(EventlogSocketAddr));
+    eventlog_socket.esa_unix_addr.esa_unix_path = unix_path_copy;
+    memcpy(eventlog_socket_addr_out, &eventlog_socket,
+           sizeof(EventlogSocketAddr));
   }
 
   // Try to construct a TCP/IP address:
@@ -850,16 +852,19 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_out,
       const size_t inet_host_len = strlen(inet_host);
       char *inet_host_copy = malloc(inet_host_len);
       strncpy(inet_host_copy, inet_host, inet_host_len);
+      DEBUG_DEBUG("inet_host: %s", inet_host_copy);
       // Copy inet_port:
       const size_t inet_port_len = strlen(inet_port);
       char *inet_port_copy = malloc(inet_port_len);
       strncpy(inet_port_copy, inet_port, inet_port_len);
+      DEBUG_DEBUG("inet_port: %s", inet_port_copy);
       // Write the configuration:
       EventlogSocketAddr eventlog_socket = {0};
       eventlog_socket.esa_tag = EVENTLOG_SOCKET_INET;
       eventlog_socket.esa_inet_addr.esa_inet_host = inet_host_copy;
       eventlog_socket.esa_inet_addr.esa_inet_port = inet_port_copy;
-      memcpy(eventlog_socket_out, &eventlog_socket, sizeof(EventlogSocketAddr));
+      memcpy(eventlog_socket_addr_out, &eventlog_socket,
+             sizeof(EventlogSocketAddr));
     } else {
       return EVENTLOG_SOCKET_FROM_ENV_NOTFOUND;
     }
