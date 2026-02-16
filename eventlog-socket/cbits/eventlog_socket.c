@@ -827,7 +827,7 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     // Check that unix_path does not exceed the maximum unix_path length:
     const size_t unix_path_len = strlen(unix_path);
     if (unix_path_len > unix_path_max) {
-      return EVENTLOG_SOCKET_FROM_ENV_TOOLONG;
+      return EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG;
     }
 
     // Copy unix_path:
@@ -847,7 +847,9 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
   else {
     char *inet_host = getenv("GHC_EVENTLOG_INET_HOST"); // NOLINT
     char *inet_port = getenv("GHC_EVENTLOG_INET_PORT"); // NOLINT
-    if (inet_host != NULL && inet_port != NULL) {
+    const bool has_inet_host = inet_host != NULL;
+    const bool has_inet_port = inet_port != NULL;
+    if (has_inet_host && has_inet_port) {
       // Copy inet_host:
       const size_t inet_host_len = strlen(inet_host);
       char *inet_host_copy = malloc(inet_host_len);
@@ -865,17 +867,17 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
       eventlog_socket.esa_inet_addr.esa_inet_port = inet_port_copy;
       memcpy(eventlog_socket_addr_out, &eventlog_socket,
              sizeof(EventlogSocketAddr));
-    } else {
-      return EVENTLOG_SOCKET_FROM_ENV_NOTFOUND;
+    } else if (has_inet_host && !has_inet_port) {
+      return EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING;
+    } else if (!has_inet_host && has_inet_port) {
+      return EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING;
     }
   }
 
   // If an output address was provided for the options:
   if (eventlog_socket_opts_out != NULL) {
-    EventlogSocketOpts eventlog_socket_opts = {
-        .eso_wait = false,
-        .eso_sndbuf = 0,
-    };
+    EventlogSocketOpts eventlog_socket_opts = {0};
+    eventlog_socket_opts_init(&eventlog_socket_opts);
 
     // Try to construct the options:
     char *ghc_eventlog_wait = getenv("GHC_EVENTLOG_WAIT"); // NOLINT
