@@ -98,7 +98,7 @@ int main(int argc, char *argv[]) {
 
   EventlogSocketAddr eventlog_socket = {0};
   EventlogSocketOpts eventlog_socket_opts = {0};
-  eventlog_socket_addr_from_env(&eventlog_socket, &eventlog_socket_opts);
+  eventlog_socket_from_env(&eventlog_socket, &eventlog_socket_opts);
   eventlog_socket_init(&eventlog_socket, &eventlog_socket_opts);
 
   eventlog_socket_wait();
