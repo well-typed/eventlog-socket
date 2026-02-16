@@ -11,66 +11,66 @@
  * Eventlog Writer
  ******************************************************************************/
 
-typedef enum {
+typedef enum EventlogSocketTag {
   EVENTLOG_SOCKET_UNIX,
   EVENTLOG_SOCKET_INET,
-} eventlog_socket_tag_t;
+} EventlogSocketTag;
 
-typedef struct eventlog_socket_unix_addr {
+typedef struct EventlogSocketUnixAddr {
   /// The path to the Unix domain socket.
   char *unix_path;
-} eventlog_socket_unix_addr_t;
+} EventlogSocketUnixAddr;
 
-typedef struct eventlog_socket_inet_addr {
+typedef struct EventlogSocketInetAddr {
   /// The host name.
   char *inet_host;
   /// The port number.
   char *inet_port;
-} eventlog_socket_inet_addr_t;
+} EventlogSocketInetAddr;
 
-typedef struct eventlog_socket_opts {
+typedef struct EventlogSocketOpts {
   bool wait;
   int so_sndbuf;
-} eventlog_socket_opts_t;
+} EventlogSocketOpts;
 
-typedef struct eventlog_socket {
-  eventlog_socket_tag_t tag;
+typedef struct EventlogSocket {
+  EventlogSocketTag tag;
   union {
     /// The address for an `EVENTLOG_SOCKET_UNIX` socket.
-    eventlog_socket_unix_addr_t unix_addr;
+    EventlogSocketUnixAddr unix_addr;
     /// The address for an `EVENTLOG_SOCKET_INET` socket.
-    eventlog_socket_inet_addr_t inet_addr;
+    EventlogSocketInetAddr inet_addr;
   };
-} eventlog_socket_t;
+} EventlogSocket;
 
-// note: does not free `eventlog_socket_t` itself
-void eventlog_socket_free(eventlog_socket_t *eventlog_socket);
+// note: does not free `EventlogSocket` itself
+void eventlog_socket_free(EventlogSocket *eventlog_socket);
 
 // writes default options
-void eventlog_socket_opts_init(eventlog_socket_opts_t *eventlog_socket_opts);
+void eventlog_socket_opts_init(EventlogSocketOpts *eventlog_socket_opts);
 
 // note: does not free `eventlog_socket_opts_free` itself
-void eventlog_socket_opts_free(eventlog_socket_opts_t *opts);
+void eventlog_socket_opts_free(EventlogSocketOpts *opts);
 
 extern const EventLogWriter SocketEventLogWriter;
 
-typedef enum {
+typedef enum EventlogSocketFromEnvStatus {
   EVENTLOG_SOCKET_FROM_ENV_OK,
   EVENTLOG_SOCKET_FROM_ENV_NOTFOUND,
   EVENTLOG_SOCKET_FROM_ENV_TOOLONG,
   EVENTLOG_SOCKET_FROM_ENV_INVAL,
-} eventlog_socket_from_env_status_t;
+} EventlogSocketFromEnvStatus;
 
 /// @par MT-Unsafe
-eventlog_socket_from_env_status_t
-eventlog_socket_from_env(eventlog_socket_t *eventlog_socket_out,
-                         eventlog_socket_opts_t *eventlog_socket_opts_out);
+EventlogSocketFromEnvStatus
+eventlog_socket_from_env(EventlogSocket *eventlog_socket_out,
+                         EventlogSocketOpts *eventlog_socket_opts_out);
 
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
 // It spawns the worker immediately but defers handling of control messages
 // until eventlog_socket_ready() is invoked after RTS initialization.
-void eventlog_socket_init(const eventlog_socket_t *eventlog_socket,
-                          const eventlog_socket_opts_t *opts);
+void eventlog_socket_init(const EventlogSocket *eventlog_socket,
+                          const EventlogSocketOpts *opts);
 
 void eventlog_socket_init_unix(char *unix_path);
 
@@ -82,8 +82,8 @@ void eventlog_socket_attach(void);
 
 // Use this from an already-running RTS: it reconfigures eventlogging to use
 // SocketEventLogWriter and restarts the log when a client connects.
-void eventlog_socket_start(const eventlog_socket_t *eventlog_socket,
-                           const eventlog_socket_opts_t *opts);
+void eventlog_socket_start(const EventlogSocket *eventlog_socket,
+                           const EventlogSocketOpts *opts);
 
 void eventlog_socket_start_unix(char *unix_path);
 
@@ -105,30 +105,28 @@ int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
 /// A control command namespace.
 ///
 /// See `eventlog_socket_control_register_namespace`.
-typedef struct eventlog_socket_control_namespace
-    eventlog_socket_control_namespace_t;
+typedef struct EventlogSocketControlNamespace EventlogSocketControlNamespace;
 
 /// A control command ID.
 ///
 /// Individual commands are identified by numbers (0-255).
-typedef uint8_t eventlog_socket_control_command_id_t;
+typedef uint8_t EventlogSocketControlCommandId;
 
 /// A control command handler.
 ///
 /// This function is called when the corresponding control command message is
 /// received on the eventlog socket. The `command_data` parameter will contain
 /// the pointer provided to `eventlog_socket_control_register_command`.
-typedef void eventlog_socket_control_command_handler_t(
-    const eventlog_socket_control_namespace_t *const namespace,
-    const eventlog_socket_control_command_id_t command_id,
-    const void *command_data);
+typedef void EventlogSocketControlCommandHandler(
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *command_data);
 
 /// Register a new namespace.
 ///
 /// @return If there is no existing namespace with the given name, this function
 /// registers a new namespace and returns a stable pointer to it. Otherwise, it
 /// returns NULL. The returned pointer should not be freed.
-eventlog_socket_control_namespace_t *
+EventlogSocketControlNamespace *
 eventlog_socket_control_register_namespace(uint8_t namespace_len,
                                            const char namespace[namespace_len]);
 
@@ -138,9 +136,9 @@ eventlog_socket_control_register_namespace(uint8_t namespace_len,
 /// given ID, this function registers a new command and returns true. Otherwise,
 /// it returns false.
 bool eventlog_socket_control_register_command(
-    eventlog_socket_control_namespace_t *namespace,
-    eventlog_socket_control_command_id_t command_id,
-    eventlog_socket_control_command_handler_t command_handler,
+    EventlogSocketControlNamespace *namespace,
+    EventlogSocketControlCommandId command_id,
+    EventlogSocketControlCommandHandler command_handler,
     const void *command_data);
 
 #endif /* EVENGLOG_SOCKET_H */

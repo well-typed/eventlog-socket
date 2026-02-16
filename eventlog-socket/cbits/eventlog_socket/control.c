@@ -89,9 +89,8 @@ static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
 
 /// @brief Handler for "StartHeapProfiling" command (eventlog-socket::0).
 static void control_start_heap_profiling(
-    const eventlog_socket_control_namespace_t *const namespace,
-    const eventlog_socket_control_command_id_t command_id,
-    const void *user_data) {
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
   (void)command_id;
   (void)user_data;
@@ -101,9 +100,8 @@ static void control_start_heap_profiling(
 
 /// @brief Handler for "StopHeapProfiling" command (eventlog-socket::1).
 static void control_stop_heap_profiling(
-    const eventlog_socket_control_namespace_t *const namespace,
-    const eventlog_socket_control_command_id_t command_id,
-    const void *user_data) {
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
   (void)command_id;
   (void)user_data;
@@ -113,9 +111,8 @@ static void control_stop_heap_profiling(
 
 /// @brief Handler for "RequestHeapCensus" command (eventlog-socket::2).
 static void control_request_heap_census(
-    const eventlog_socket_control_namespace_t *const namespace,
-    const eventlog_socket_control_command_id_t command_id,
-    const void *user_data) {
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
   (void)command_id;
   (void)user_data;
@@ -130,41 +127,39 @@ static void control_request_heap_census(
 /// @brief An entry in the command registry.
 ///
 /// See `eventlog_socket_control_command`.
-typedef struct eventlog_socket_control_command
-    eventlog_socket_control_command_t;
+typedef struct EventlogSocketControlCommand EventlogSocketControlCommand;
 
 /// @brief An entry in the command registry.
 ///
-/// The command registry is a linked-list of `eventlog_socket_control_command`
-/// values. Each `eventlog_socket_control_command_t` entry should have a stable
-/// address. Once `eventlog_socket_control_namespace_t::command_registry` or
-/// `eventlog_socket_control_command::next` are assigned a nonnull value, they
+/// The command registry is a linked-list of `EventlogSocketControlCommand`
+/// values. Each `EventlogSocketControlCommand` entry should have a stable
+/// address. Once `EventlogSocketControlNamespace::command_registry` or
+/// `EventlogSocketControlCommand::next` are assigned a nonnull value, they
 /// must never change.
-struct eventlog_socket_control_command {
+struct EventlogSocketControlCommand {
   /// The user-provided command ID.
-  const eventlog_socket_control_command_id_t command_id;
+  const EventlogSocketControlCommandId command_id;
   /// The user-provided command handler.
-  eventlog_socket_control_command_handler_t *const command_handler;
+  EventlogSocketControlCommandHandler *const command_handler;
   /// The user-provided data for the command handler.
   const void *command_data;
   /// The pointer to the next entry in the command registry.
-  eventlog_socket_control_command_t *next;
+  EventlogSocketControlCommand *next;
 };
 
 /// @brief An entry in the namespace registry.
 ///
 /// See `eventlog_socket_control_namespace`.
-typedef struct eventlog_socket_control_namespace
-    eventlog_socket_control_namespace_t;
+typedef struct EventlogSocketControlNamespace EventlogSocketControlNamespace;
 
 /// @brief An entry in the namespace registry.
 ///
 /// The namespace registry is a linked-list of
 /// `eventlog_socket_control_namespace` values. Each
-/// `eventlog_socket_control_command_t` entry should have a stable address. Once
+/// `EventlogSocketControlCommand` entry should have a stable address. Once
 /// `g_control_namespace_registry` or `eventlog_socket_control_namespace::next`
 /// are assigned a nonnull value, they must never change.
-struct eventlog_socket_control_namespace {
+struct EventlogSocketControlNamespace {
   /// The length of the user-provided namespace.
   const uint8_t namespace_len;
   /// The user-provided namespace.
@@ -173,9 +168,9 @@ struct eventlog_socket_control_namespace {
   /// (including the null byte).
   const char *const namespace;
   /// The pointer to the next entry in the namespace registry.
-  eventlog_socket_control_namespace_t *next;
+  EventlogSocketControlNamespace *next;
   /// The pointer to the first entry in the command registry for this namespace.
-  eventlog_socket_control_command_t *command_registry;
+  EventlogSocketControlCommand *command_registry;
 };
 
 /// @brief The global namespace registry.
@@ -183,22 +178,22 @@ struct eventlog_socket_control_namespace {
 /// See `eventlog_socket_control_namespace`.
 ///
 /// This is initialised with the builtin namespace and the builtin commands.
-eventlog_socket_control_namespace_t g_control_namespace_registry = {
+EventlogSocketControlNamespace g_control_namespace_registry = {
     .namespace = BUILTIN_NAMESPACE,
     .namespace_len = strlen(BUILTIN_NAMESPACE),
     .next = NULL,
     .command_registry =
-        &(eventlog_socket_control_command_t){
+        &(EventlogSocketControlCommand){
             .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
             .command_handler = control_start_heap_profiling,
             .command_data = NULL,
             .next =
-                &(eventlog_socket_control_command_t){
+                &(EventlogSocketControlCommand){
                     .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
                     .command_handler = control_stop_heap_profiling,
                     .command_data = NULL,
                     .next =
-                        &(eventlog_socket_control_command_t){
+                        &(EventlogSocketControlCommand){
                             .command_id =
                                 BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS,
                             .command_handler = control_request_heap_census,
@@ -219,7 +214,7 @@ pthread_mutex_t g_control_namespace_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 ///
 /// @pre namespace_entry != NULL
 bool control_namespace_store_match(
-    const eventlog_socket_control_namespace_t *const namespace_entry,
+    const EventlogSocketControlNamespace *const namespace_entry,
     const size_t namespace_len, const char namespace[namespace_len]) {
   // if namespace_entry == NULL, then...
   if (namespace_entry == NULL) {
@@ -240,7 +235,7 @@ bool control_namespace_store_match(
 ///
 /// @return If the namespace is found, this function returns a stable pointer to
 /// it. Otherwise, it returns NULL. The returned pointer should not be freed.
-const eventlog_socket_control_namespace_t *
+const EventlogSocketControlNamespace *
 control_namespace_store_resolve(const size_t namespace_len,
                                 const char namespace[namespace_len]) {
 
@@ -248,7 +243,7 @@ control_namespace_store_resolve(const size_t namespace_len,
   pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Initialise the namespace_entry pointer.
-  eventlog_socket_control_namespace_t *namespace_entry =
+  EventlogSocketControlNamespace *namespace_entry =
       &g_control_namespace_registry;
 
   while (namespace_entry != NULL) {
@@ -268,14 +263,14 @@ control_namespace_store_resolve(const size_t namespace_len,
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
+EventlogSocketControlNamespace *eventlog_socket_control_register_namespace(
     const uint8_t namespace_len, const char namespace[namespace_len]) {
 
   // Acquire the lock on g_control_namespace_store.
   pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Initialise the namespace_entry pointer.
-  eventlog_socket_control_namespace_t *namespace_entry =
+  EventlogSocketControlNamespace *namespace_entry =
       &g_control_namespace_registry;
 
   // Is the requested namespace already registered?
@@ -302,15 +297,13 @@ eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
   char *const next_namespace = malloc(namespace_len + 1);
   strncpy(next_namespace, namespace, namespace_len);
   next_namespace[namespace_len] = '\0';
-  const eventlog_socket_control_namespace_t next =
-      (eventlog_socket_control_namespace_t){
-          .namespace_len = namespace_len,
-          .namespace = next_namespace,
-          .next = NULL,
-      };
-  namespace_entry->next = malloc(sizeof(eventlog_socket_control_namespace_t));
-  memcpy(namespace_entry->next, &next,
-         sizeof(eventlog_socket_control_namespace_t));
+  const EventlogSocketControlNamespace next = (EventlogSocketControlNamespace){
+      .namespace_len = namespace_len,
+      .namespace = next_namespace,
+      .next = NULL,
+  };
+  namespace_entry->next = malloc(sizeof(EventlogSocketControlNamespace));
+  memcpy(namespace_entry->next, &next, sizeof(EventlogSocketControlNamespace));
   DEBUG_DEBUG("Registered namespace %.*s", (int)namespace_len, namespace);
 
   // Release the lock on g_control_namespace_store.
@@ -324,15 +317,15 @@ eventlog_socket_control_namespace_t *eventlog_socket_control_register_namespace(
 ///
 /// @return If the command is found, this function returns a stable pointer to
 /// it. Otherwise, it returns NULL. The returned pointer should not be freed.
-const eventlog_socket_control_command_t *control_command_store_resolve(
-    const eventlog_socket_control_namespace_t *const namespace,
-    const eventlog_socket_control_command_id_t command_id) {
+const EventlogSocketControlCommand *control_command_store_resolve(
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id) {
 
   // Acquire the lock on g_control_namespace_store.
   pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Traverse the command_store to find the command....
-  eventlog_socket_control_command_t *command = namespace->command_registry;
+  EventlogSocketControlCommand *command = namespace->command_registry;
 
   while (command != NULL) {
     // If this is the command we're looking for, then...
@@ -354,9 +347,9 @@ const eventlog_socket_control_command_t *control_command_store_resolve(
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 bool eventlog_socket_control_register_command(
-    eventlog_socket_control_namespace_t *const namespace,
-    const eventlog_socket_control_command_id_t command_id,
-    eventlog_socket_control_command_handler_t command_handler,
+    EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id,
+    EventlogSocketControlCommandHandler command_handler,
     const void *command_data) {
 
   DEBUG_TRACE("Received request to register command 0x%02x in namespace %.*s",
@@ -366,22 +359,20 @@ bool eventlog_socket_control_register_command(
   pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Create the data for the new command_entry.
-  const eventlog_socket_control_command_t next =
-      (eventlog_socket_control_command_t){
-          .command_id = command_id,
-          .command_handler = command_handler,
-          .command_data = command_data,
-          .next = NULL,
-      };
+  const EventlogSocketControlCommand next = (EventlogSocketControlCommand){
+      .command_id = command_id,
+      .command_handler = command_handler,
+      .command_data = command_data,
+      .next = NULL,
+  };
 
   // Initialise the command_entry pointer.
-  eventlog_socket_control_command_t *command_entry;
+  EventlogSocketControlCommand *command_entry;
 
   // If there are no commands in the command_store, then...
   if (namespace->command_registry == NULL) {
     // Allocate memory for the new command_entry.
-    namespace->command_registry =
-        malloc(sizeof(eventlog_socket_control_command_t));
+    namespace->command_registry = malloc(sizeof(EventlogSocketControlCommand));
     command_entry = namespace->command_registry;
   }
   // Otherwise, traverse the command_store to the last position...
@@ -403,13 +394,13 @@ bool eventlog_socket_control_register_command(
     assert(command_entry->next == NULL);
 
     // Allocate memory for the new command_entry.
-    command_entry->next = malloc(sizeof(eventlog_socket_control_command_t));
+    command_entry->next = malloc(sizeof(EventlogSocketControlCommand));
     command_entry = command_entry->next;
   }
   // Write the data for the new command_entry.
   DEBUG_TRACE("Registered command 0x%02x in namespace %.*s", command_id,
               namespace->namespace_len, namespace->namespace);
-  memcpy(command_entry, &next, sizeof(eventlog_socket_control_command_t));
+  memcpy(command_entry, &next, sizeof(EventlogSocketControlCommand));
 
   // Release the lock on g_control_namespace_store.
   pthread_mutex_unlock(&g_control_namespace_registry_mutex);
@@ -417,14 +408,14 @@ bool eventlog_socket_control_register_command(
 }
 
 /// @brief Call a command by namespace and ID.
-static bool control_command_handle(
-    const eventlog_socket_control_namespace_t *const namespace,
-    const eventlog_socket_control_command_id_t command_id) {
+static bool
+control_command_handle(const EventlogSocketControlNamespace *const namespace,
+                       const EventlogSocketControlCommandId command_id) {
   DEBUG_TRACE("Handle command 0x%02x in namespace %.*s", command_id,
               namespace->namespace_len, namespace->namespace);
 
   // Resolve the command.
-  const eventlog_socket_control_command_t *command =
+  const EventlogSocketControlCommand *command =
       control_command_store_resolve(namespace, command_id);
 
   // If the command was not found, then...
@@ -485,8 +476,8 @@ void HIDDEN control_signal_ghc_rts_ready(void) {
 
 /// @brief The tag for the command parser state.
 ///
-/// See `control_command_parser_state_t`.
-typedef enum {
+/// See `ControlCommandParserState`.
+typedef enum ControlCommandParserStateTag {
   /// The command parser is expecting some byte from the magic bytestring.
   ///
   /// See `g_control_magic`.
@@ -499,12 +490,11 @@ typedef enum {
   CONTROL_COMMAND_PARSER_STATE_NAMESPACE,
   /// The command parser is expecting the command ID.
   CONTROL_COMMAND_PARSER_STATE_COMMAND_ID,
-} control_command_parser_state_tag_t;
+} ControlCommandParserStateTag;
 
-/// @brief Show a value of type `control_command_parser_state_tag_t` as a
+/// @brief Show a value of type `ControlCommandParserStateTag` as a
 /// string.
-const char *
-control_command_parser_state_tag_show(control_command_parser_state_tag_t tag) {
+const char *ControlCommandParserStateag_show(ControlCommandParserStateTag tag) {
   switch (tag) {
   case CONTROL_COMMAND_PARSER_STATE_MAGIC:
     return "CONTROL_COMMAND_PARSER_STATE_MAGIC";
@@ -522,7 +512,7 @@ control_command_parser_state_tag_show(control_command_parser_state_tag_t tag) {
 /// @brief The command parser state.
 typedef struct {
   /// The tag that determines which member of the union is set.
-  control_command_parser_state_tag_t tag;
+  ControlCommandParserStateTag tag;
 
   /// The untagged command parser state. The value of `tag` determines which
   /// member is set.
@@ -566,12 +556,12 @@ typedef struct {
     };
 
     /// The resolved namespace for the command.
-    const eventlog_socket_control_namespace_t *namespace;
+    const EventlogSocketControlNamespace *namespace;
   };
-} control_command_parser_state_t;
+} ControlCommandParserState;
 
 /// @brief The global command parser state.
-control_command_parser_state_t g_control_command_parser_state = {
+ControlCommandParserState g_control_command_parser_state = {
     .tag = CONTROL_COMMAND_PARSER_STATE_MAGIC,
     .header_pos = 0,
 };
@@ -592,12 +582,12 @@ control_command_parser_state_t g_control_command_parser_state = {
 /// pointer to the namespace length may be provided as the second argument. This
 /// function will use this byte to initialise the new state.
 static void
-control_command_parser_enter_state(const control_command_parser_state_tag_t tag,
+control_command_parser_enter_state(const ControlCommandParserStateTag tag,
                                    const uint8_t *const data) {
   DEBUG_TRACE(
       "%s -> %s",
-      control_command_parser_state_tag_show(g_control_command_parser_state.tag),
-      control_command_parser_state_tag_show(tag));
+      ControlCommandParserStateag_show(g_control_command_parser_state.tag),
+      ControlCommandParserStateag_show(tag));
 
   // this should only be called when restarting or moving to a different
   // state...
@@ -787,7 +777,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
                   g_control_command_parser_state.namespace_buffer);
 
       // ...try to resolve the namespace...
-      const eventlog_socket_control_namespace_t *namespace =
+      const EventlogSocketControlNamespace *namespace =
           control_namespace_store_resolve(
               g_control_command_parser_state.namespace_buffer_len,
               g_control_command_parser_state.namespace_buffer);

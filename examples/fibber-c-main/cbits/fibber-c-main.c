@@ -15,9 +15,9 @@ int main(int argc, char *argv[]) {
   rts_config.rts_opts_enabled = RtsOptsAll;
 
   // If GHC_EVENTLOG_UNIX_PATH is set...
-  eventlog_socket_t eventlog_socket = {0};
-  eventlog_socket_opts_t eventlog_socket_opts = {0};
-  const eventlog_socket_from_env_status_t status =
+  EventlogSocket eventlog_socket = {0};
+  EventlogSocketOpts eventlog_socket_opts = {0};
+  const EventlogSocketFromEnvStatus status =
       eventlog_socket_from_env(&eventlog_socket, &eventlog_socket_opts);
   if (status == EVENTLOG_SOCKET_FROM_ENV_OK ||
       status == EVENTLOG_SOCKET_FROM_ENV_NOTFOUND) {
