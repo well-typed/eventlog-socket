@@ -819,7 +819,7 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
   }
 
   // Try to construct a Unix domain socket address:
-  char *unix_path = getenv("GHC_EVENTLOG_UNIX_PATH"); // NOLINT
+  char *unix_path = getenv(EVENTLOG_SOCKET_ENV_UNIX_PATH); // NOLINT
   if (unix_path != NULL) {
     // Determine the maximum length of a Unix domain socket path.
     const size_t unix_path_max = get_unix_path_max();
@@ -845,8 +845,8 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 
   // Try to construct a TCP/IP address:
   else {
-    char *inet_host = getenv("GHC_EVENTLOG_INET_HOST"); // NOLINT
-    char *inet_port = getenv("GHC_EVENTLOG_INET_PORT"); // NOLINT
+    char *inet_host = getenv(EVENTLOG_SOCKET_ENV_INET_HOST); // NOLINT
+    char *inet_port = getenv(EVENTLOG_SOCKET_ENV_INET_PORT); // NOLINT
     const bool has_inet_host = inet_host != NULL;
     const bool has_inet_port = inet_port != NULL;
     if (has_inet_host && has_inet_port) {
@@ -880,7 +880,7 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     eventlog_socket_opts_init(&eventlog_socket_opts);
 
     // Try to construct the options:
-    char *ghc_eventlog_wait = getenv("GHC_EVENTLOG_WAIT"); // NOLINT
+    char *ghc_eventlog_wait = getenv(EVENTLOG_SOCKET_ENV_WAIT); // NOLINT
     eventlog_socket_opts.eso_wait = ghc_eventlog_wait != NULL;
 
     // Write the options:

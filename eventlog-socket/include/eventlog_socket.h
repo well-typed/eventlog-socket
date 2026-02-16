@@ -62,6 +62,22 @@ typedef enum EventlogSocketFromEnvStatus {
   EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING,
 } EventlogSocketFromEnvStatus;
 
+/// The environment variable used by `eventlog_socket_from_env`
+/// to determine the path to the Unix domain socket.
+#define EVENTLOG_SOCKET_ENV_UNIX_PATH "GHC_EVENTLOG_UNIX_PATH"
+
+/// The environment variable used by `eventlog_socket_from_env`
+/// to determine the host name for a TCP/IPv4 socket.
+#define EVENTLOG_SOCKET_ENV_INET_HOST "GHC_EVENTLOG_INET_HOST"
+
+/// The environment variable used by `eventlog_socket_from_env`
+/// to determine the port number for a TCP/IPv4 socket.
+#define EVENTLOG_SOCKET_ENV_INET_PORT "GHC_EVENTLOG_INET_PORT"
+
+/// The environment variable used by `eventlog_socket_from_env`
+/// to determine whether or not to wait.
+#define EVENTLOG_SOCKET_ENV_WAIT "GHC_EVENTLOG_WAIT"
+
 /// @par MT-Unsafe
 EventlogSocketFromEnvStatus
 eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
