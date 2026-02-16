@@ -35,10 +35,9 @@ static void write_user_message(char *message) {
 }
 
 /// Handler for the ping command.
-static void
-handle_ping(const eventlog_socket_control_namespace_t *const namespace,
-            const eventlog_socket_control_command_id_t command_id,
-            const void *user_data) {
+static void handle_ping(const EventlogSocketControlNamespace *const namespace,
+                        const EventlogSocketControlCommandId command_id,
+                        const void *user_data) {
   const char *label = user_data == NULL ? "-" : user_data;
   DEBUG_INFO(
       "[custom-command] handle_ping (namespace=%p, command=0x%02x, label=%s)",
@@ -47,10 +46,9 @@ handle_ping(const eventlog_socket_control_namespace_t *const namespace,
 }
 
 /// Handler for the pong command.
-static void
-handle_pong(const eventlog_socket_control_namespace_t *const namespace,
-            const eventlog_socket_control_command_id_t command_id,
-            const void *user_data) {
+static void handle_pong(const EventlogSocketControlNamespace *const namespace,
+                        const EventlogSocketControlCommandId command_id,
+                        const void *user_data) {
   const char *label = user_data == NULL ? "-" : user_data;
   DEBUG_INFO(
       "[custom-command] handle_pong (namespace=%p, command=0x%02x, label=%s)",
@@ -62,7 +60,7 @@ handle_pong(const eventlog_socket_control_namespace_t *const namespace,
 /// commands.
 void custom_command_init(void) {
   // Register the "custom-command" namespace.
-  eventlog_socket_control_namespace_t *namespace =
+  EventlogSocketControlNamespace *namespace =
       eventlog_socket_control_register_namespace(
           strlen(CUSTOM_COMMAND_NAMESPACE), CUSTOM_COMMAND_NAMESPACE);
   if (namespace == NULL) {
@@ -98,8 +96,8 @@ int main(int argc, char *argv[]) {
 
   custom_command_init();
 
-  eventlog_socket_t eventlog_socket = {0};
-  eventlog_socket_opts_t eventlog_socket_opts = {0};
+  EventlogSocket eventlog_socket = {0};
+  EventlogSocketOpts eventlog_socket_opts = {0};
   eventlog_socket_from_env(&eventlog_socket, &eventlog_socket_opts);
   eventlog_socket_init(&eventlog_socket, &eventlog_socket_opts);
 
