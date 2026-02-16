@@ -79,6 +79,18 @@ typedef enum EventlogSocketFromEnvStatus {
 #define EVENTLOG_SOCKET_ENV_WAIT "GHC_EVENTLOG_WAIT"
 
 /// @par MT-Unsafe
+/// @pre The value of `eventlog_socket_addr_out` is nonnull.
+/// @post
+///   If the return value is either `EVENTLOG_SOCKET_FROM_ENV_OK` or
+//    `EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG`, then
+///   `eventlog_socket_addr_out` and `eventlog_socket_opts_out` point to valid
+///   data, which must be freed using the functions `eventlog_socket_addr_free`
+///   and `eventlog_socket_opts_free`, respectively.
+/// @post
+//    If the return value is `EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG`,
+///   then the Unix domain socket path exceeds the platform limit, and the
+///   data pointed to by `eventlog_socket_addr_out` should not be passed to
+///   `eventlog_socket_init` or `eventlog_socket_start`.
 EventlogSocketFromEnvStatus
 eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
                          EventlogSocketOpts *eventlog_socket_opts_out);

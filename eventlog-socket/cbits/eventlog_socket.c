@@ -86,10 +86,10 @@ static void cleanup(void) {
   // Stop the control thread.
   if (g_control_thread_ptr != NULL) {
     DEBUG_DEBUG("%s", "Cancelling control thread.");
-    if (!pthread_cancel(*g_control_thread_ptr)) {
+    if (pthread_cancel(*g_control_thread_ptr) != 0) {
       DEBUG_ERRNO("pthread_cancel() failed for control thread");
     } else {
-      if (!pthread_join(*g_control_thread_ptr, NULL)) {
+      if (pthread_join(*g_control_thread_ptr, NULL) != 0) {
         DEBUG_ERRNO("pthread_join() failed for control thread");
       }
     }
@@ -98,10 +98,10 @@ static void cleanup(void) {
   // Stop the worker thread.
   if (g_listen_thread_ptr != NULL) {
     DEBUG_DEBUG("%s", "Cancelling worker thread.");
-    if (!pthread_cancel(*g_listen_thread_ptr)) {
+    if (pthread_cancel(*g_listen_thread_ptr) != 0) {
       DEBUG_ERRNO("pthread_cancel() failed for worker thread");
     } else {
-      if (!pthread_join(*g_listen_thread_ptr, NULL)) {
+      if (pthread_join(*g_listen_thread_ptr, NULL) != 0) {
         DEBUG_ERRNO("pthread_join() failed for worker thread");
       }
     }
@@ -813,9 +813,13 @@ void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
 EventlogSocketFromEnvStatus
 eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
                          EventlogSocketOpts *eventlog_socket_opts_out) {
+  // Allocate a variable for the status.
+  EventlogSocketFromEnvStatus status = EVENTLOG_SOCKET_FROM_ENV_OK;
+
   // Check that eventlog_socket_out is nonnull.
   if (eventlog_socket_addr_out == NULL) {
-    return EVENTLOG_SOCKET_FROM_ENV_INVAL;
+    status = EVENTLOG_SOCKET_FROM_ENV_INVAL;
+    goto exit;
   }
 
   // Try to construct a Unix domain socket address:
@@ -827,7 +831,7 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     // Check that unix_path does not exceed the maximum unix_path length:
     const size_t unix_path_len = strlen(unix_path);
     if (unix_path_len > unix_path_max) {
-      return EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG;
+      status = EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG;
     }
 
     // Copy unix_path:
@@ -868,9 +872,11 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
       memcpy(eventlog_socket_addr_out, &eventlog_socket,
              sizeof(EventlogSocketAddr));
     } else if (has_inet_host && !has_inet_port) {
-      return EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING;
+      status = EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING;
+      goto exit;
     } else if (!has_inet_host && has_inet_port) {
-      return EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING;
+      status = EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING;
+      goto exit;
     }
   }
 
@@ -888,7 +894,8 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
            sizeof(EventlogSocketOpts));
   }
 
-  return EVENTLOG_SOCKET_FROM_ENV_OK;
+exit:
+  return status;
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
