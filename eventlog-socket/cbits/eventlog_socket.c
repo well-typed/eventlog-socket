@@ -622,7 +622,7 @@ static void worker_init(void) {
   }
 }
 
-static void worker_start(const EventlogSocket *const eventlog_socket,
+static void worker_start(const EventlogSocketAddr *const eventlog_socket,
                          const EventlogSocketOpts *const opts) {
   DEBUG_TRACE("%s", "Starting worker thread.");
   switch (eventlog_socket->tag) {
@@ -661,7 +661,7 @@ static size_t get_unix_path_max(void) {
  *********************************************************************************/
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_init(const EventlogSocket *const eventlog_socket,
+void eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket,
                           const EventlogSocketOpts *const opts) {
   worker_init();
 
@@ -759,7 +759,7 @@ void eventlog_socket_attach(void) {
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_start(const EventlogSocket *eventlog_socket,
+void eventlog_socket_start(const EventlogSocketAddr *eventlog_socket,
                            const EventlogSocketOpts *opts) {
 
   // Initialize eventlog_socket.
@@ -780,7 +780,7 @@ void eventlog_socket_opts_init(EventlogSocketOpts *eventlog_socket_opts) {
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_free(EventlogSocket *eventlog_socket) {
+void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket) {
   if (eventlog_socket == NULL) {
     return;
   }
@@ -811,8 +811,8 @@ void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketFromEnvStatus
-eventlog_socket_from_env(EventlogSocket *eventlog_socket_out,
-                         EventlogSocketOpts *eventlog_socket_opts_out) {
+eventlog_socket_addr_from_env(EventlogSocketAddr *eventlog_socket_out,
+                              EventlogSocketOpts *eventlog_socket_opts_out) {
   // Check that eventlog_socket_out is nonnull.
   if (eventlog_socket_out == NULL) {
     return EVENTLOG_SOCKET_FROM_ENV_INVAL;
@@ -835,10 +835,10 @@ eventlog_socket_from_env(EventlogSocket *eventlog_socket_out,
     strncpy(unix_path_copy, unix_path, unix_path_len);
 
     // Write the configuration:
-    EventlogSocket eventlog_socket = {0};
+    EventlogSocketAddr eventlog_socket = {0};
     eventlog_socket.tag = EVENTLOG_SOCKET_UNIX;
     eventlog_socket.unix_addr.unix_path = unix_path;
-    memcpy(eventlog_socket_out, &eventlog_socket, sizeof(EventlogSocket));
+    memcpy(eventlog_socket_out, &eventlog_socket, sizeof(EventlogSocketAddr));
   }
 
   // Try to construct a TCP/IP address:
@@ -855,11 +855,11 @@ eventlog_socket_from_env(EventlogSocket *eventlog_socket_out,
       char *inet_port_copy = malloc(inet_port_len);
       strncpy(inet_port_copy, inet_port, inet_port_len);
       // Write the configuration:
-      EventlogSocket eventlog_socket = {0};
+      EventlogSocketAddr eventlog_socket = {0};
       eventlog_socket.tag = EVENTLOG_SOCKET_INET;
       eventlog_socket.inet_addr.inet_host = inet_host_copy;
       eventlog_socket.inet_addr.inet_port = inet_port_copy;
-      memcpy(eventlog_socket_out, &eventlog_socket, sizeof(EventlogSocket));
+      memcpy(eventlog_socket_out, &eventlog_socket, sizeof(EventlogSocketAddr));
     } else {
       return EVENTLOG_SOCKET_FROM_ENV_NOTFOUND;
     }
@@ -886,7 +886,7 @@ eventlog_socket_from_env(EventlogSocket *eventlog_socket_out,
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_start_unix(char *unix_path) {
-  const EventlogSocket eventlog_socket = {
+  const EventlogSocketAddr eventlog_socket = {
       .tag = EVENTLOG_SOCKET_UNIX,
       .unix_addr =
           {
@@ -898,7 +898,7 @@ void eventlog_socket_start_unix(char *unix_path) {
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_start_inet(char *inet_host, char *inet_port) {
-  const EventlogSocket eventlog_socket = {
+  const EventlogSocketAddr eventlog_socket = {
       .tag = EVENTLOG_SOCKET_INET,
       .inet_addr =
           {
@@ -911,7 +911,7 @@ void eventlog_socket_start_inet(char *inet_host, char *inet_port) {
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_init_unix(char *unix_path) {
-  const EventlogSocket eventlog_socket = {
+  const EventlogSocketAddr eventlog_socket = {
       .tag = EVENTLOG_SOCKET_UNIX,
       .unix_addr =
           {
@@ -923,7 +923,7 @@ void eventlog_socket_init_unix(char *unix_path) {
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_init_inet(char *inet_host, char *inet_port) {
-  EventlogSocket eventlog_socket = {
+  EventlogSocketAddr eventlog_socket = {
       .tag = EVENTLOG_SOCKET_INET,
       .inet_addr =
           {
