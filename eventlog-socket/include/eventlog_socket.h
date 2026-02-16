@@ -49,7 +49,7 @@ void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket);
 // writes default options
 void eventlog_socket_opts_init(EventlogSocketOpts *eventlog_socket_opts);
 
-// note: does not free `eventlog_socket_opts_free` itself
+// note: does not free `EventlogSocketOpts` itself
 void eventlog_socket_opts_free(EventlogSocketOpts *opts);
 
 extern const EventLogWriter SocketEventLogWriter;
@@ -63,8 +63,8 @@ typedef enum EventlogSocketFromEnvStatus {
 
 /// @par MT-Unsafe
 EventlogSocketFromEnvStatus
-eventlog_socket_addr_from_env(EventlogSocketAddr *eventlog_socket_out,
-                              EventlogSocketOpts *eventlog_socket_opts_out);
+eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_out,
+                         EventlogSocketOpts *eventlog_socket_opts_out);
 
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
 // It spawns the worker immediately but defers handling of control messages

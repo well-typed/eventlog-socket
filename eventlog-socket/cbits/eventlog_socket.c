@@ -811,8 +811,8 @@ void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketFromEnvStatus
-eventlog_socket_addr_from_env(EventlogSocketAddr *eventlog_socket_out,
-                              EventlogSocketOpts *eventlog_socket_opts_out) {
+eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_out,
+                         EventlogSocketOpts *eventlog_socket_opts_out) {
   // Check that eventlog_socket_out is nonnull.
   if (eventlog_socket_out == NULL) {
     return EVENTLOG_SOCKET_FROM_ENV_INVAL;

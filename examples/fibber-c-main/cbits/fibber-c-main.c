@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
   EventlogSocketAddr eventlog_socket = {0};
   EventlogSocketOpts eventlog_socket_opts = {0};
   const EventlogSocketFromEnvStatus status =
-      eventlog_socket_addr_from_env(&eventlog_socket, &eventlog_socket_opts);
+      eventlog_socket_from_env(&eventlog_socket, &eventlog_socket_opts);
   if (status == EVENTLOG_SOCKET_FROM_ENV_OK ||
       status == EVENTLOG_SOCKET_FROM_ENV_NOTFOUND) {
     eventlog_socket_init(&eventlog_socket, &eventlog_socket_opts);
