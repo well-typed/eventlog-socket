@@ -20,7 +20,7 @@ import Text.Read (readMaybe)
 main :: IO ()
 main = do
     -- Allow the user to overwrite the TCP port:
-    tcpPort <- (fromMaybe 4242 . (readMaybe =<<)) <$> lookupEnv "GHC_EVENTLOG_INET_PORT"
+    tcpPort <- (fromMaybe "4242" . (readMaybe =<<)) <$> lookupEnv "GHC_EVENTLOG_INET_PORT"
 
     -- Create:
     withLogger $ do
@@ -29,13 +29,13 @@ main = do
             defaultMain . testGroup "Tests" $
                 [ testGroup "Unix" . catMaybes $
                     tests <&> \test ->
-                        test $ EventlogUnixSocket $ tmpDir </> "ghc_eventlog.sock"
+                        test $ EventlogSocketUnixAddr $ tmpDir </> "ghc_eventlog.sock"
                 , testGroup "Tcp" . catMaybes $
                     tests <&> \test ->
-                        test $ EventlogTcpSocket "127.0.0.1" tcpPort
+                        test $ EventlogSocketInetAddr "127.0.0.1" tcpPort
                 ]
   where
-    tests :: (HasLogger) => [EventlogSocket -> Maybe TestTree]
+    tests :: (HasLogger) => [EventlogSocketAddr -> Maybe TestTree]
     tests =
         [ test_fibber
         , test_fibberCMain
@@ -53,7 +53,7 @@ main = do
 {- |
 Test that @fibber 35@ produces a parseable eventlog.
 -}
-test_fibber :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_fibber :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_fibber =
     testCaseFor "test_fibber" $ \eventlogSocket -> do
         let fibber = Program "fibber" ["35"] ["-l-au"] eventlogSocket
@@ -67,7 +67,7 @@ Test that @fibber-c-main 35@ produces a parseable eventlog.
 
 __Note:__ This test does not support TCP sockets.
 -}
-test_fibberCMain :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_fibberCMain :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_fibberCMain =
     testCaseFor "test_fibberCMain" $ \eventlogSocket -> do
         let fibber = Program "fibber-c-main" ["35"] ["-l-au"] eventlogSocket
@@ -79,7 +79,7 @@ test_fibberCMain =
 {- |
 Test that @oddball@ produces heap profile samples.
 -}
-test_oddball :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball =
     testCaseFor "test_oddball" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
@@ -93,7 +93,7 @@ test_oddball =
 {- |
 Test that @--no-automatic-heap-samples@ is respected.
 -}
-test_oddball_NoAutomaticHeapSamples :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_NoAutomaticHeapSamples :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_NoAutomaticHeapSamples =
     testCaseFor "test_oddball_NoAutomaticHeapSamples" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
@@ -108,7 +108,7 @@ test_oddball_NoAutomaticHeapSamples =
 {- |
 Test that @oddball@ produces heap profile samples even after reconnecting.
 -}
-test_oddball_Reconnect :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_Reconnect :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_Reconnect =
     testCaseFor "test_oddball_Reconnect" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
@@ -121,7 +121,7 @@ test_oddball_Reconnect =
 {- |
 Test that the command parsing state is reset on reconnect.
 -}
-test_oddball_ResetOnReconnect :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_ResetOnReconnect :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_ResetOnReconnect =
     testCaseFor "test_oddball_ResetOnReconnect" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
@@ -145,7 +145,7 @@ respected, i.e., that once the `StartHeapProfiling` command is sent, heap
 profile samples are received, and once the `StopHeapProfiling` command is
 sent, after some iterations, no more heap profile samples are received.
 -}
-test_oddball_StartAndStopHeapProfiling :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_StartAndStopHeapProfiling :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_StartAndStopHeapProfiling =
     testCaseFor "test_oddball_StartAndStopHeapProfiling" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
@@ -165,7 +165,7 @@ test_oddball_StartAndStopHeapProfiling =
 Test that the `RequestHeapCensus` signal is respected, i.e., that once the
 `RequestHeapCensus` command is sent, a heap profile is received.
 -}
-test_oddball_RequestHeapCensus :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_oddball_RequestHeapCensus :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_RequestHeapCensus =
     testCaseFor "test_oddball_RequestHeapCensus" $ \eventlogSocket -> do
         let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
@@ -187,7 +187,7 @@ test_oddball_RequestHeapCensus =
 Test that the `RequestHeapCensus` command is still respected after junk has
 been sent over the control socket.
 -}
-test_oddball_Junk :: (HasLogger) => (ByteString, ByteString) -> EventlogSocket -> Maybe TestTree
+test_oddball_Junk :: (HasLogger) => (ByteString, ByteString) -> EventlogSocketAddr -> Maybe TestTree
 test_oddball_Junk (junkBefore, junkAfter) =
     let testName = "test_oddball_Junk[" <> show junkBefore <> "," <> show junkAfter <> "]"
      in testCaseFor testName $ \eventlogSocket -> do
@@ -206,7 +206,7 @@ test_oddball_Junk (junkBefore, junkAfter) =
 {- |
 Test that custom commands are respected.
 -}
-test_customCommand :: (HasLogger) => EventlogSocket -> Maybe TestTree
+test_customCommand :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_customCommand =
     testCaseFor "test_customCommand" $ \eventlogSocket -> do
         let customCommand = Program "custom-command" ["--forever"] ["-l-au", "--eventlog-flush-interval=1"] eventlogSocket

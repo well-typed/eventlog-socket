@@ -9,9 +9,9 @@ module Test.Common (
     withProgram,
 
     -- * Eventlog Validation
-    EventlogSocket (..),
-    isEventlogUnixSocket,
-    isEventlogTcpSocket,
+    EventlogSocketAddr (..),
+    isEventlogSocketUnixAddr,
+    isEventlogSocketInetAddr,
     EventlogAssertion (initialTimeoutS, timeoutExponent, eventlogSocket, validateEvents),
     defaultEventlogAssertion,
     assertEventlogOk,
@@ -89,7 +89,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Word (Word16, Word64)
 import GHC.Clock (getMonotonicTimeNSec)
-import GHC.Eventlog.Socket (EventlogSocket (..))
+import GHC.Eventlog.Socket (EventlogSocketAddr (..))
 import GHC.Eventlog.Socket.Control (Command)
 import GHC.RTS.Events (Event)
 import qualified GHC.RTS.Events as E
@@ -124,7 +124,7 @@ data Program = Program
     { name :: String
     , args :: [String]
     , rtsopts :: [String]
-    , eventlogSocket :: EventlogSocket
+    , eventlogSocketAddr :: EventlogSocketAddr
     }
 
 type HasProgramInfo = (?programInfo :: ProgramInfo)
@@ -154,7 +154,7 @@ start program = do
             inheritedEnv <- filter shouldInherit <$> getEnvironment
             let name = "cabal"
             let args = ["run", program.name, "-w" <> ghc, "--", "+RTS"] <> program.rtsopts <> ["-RTS"] <> program.args
-            let extraEnv = eventlogSocketEnv program.eventlogSocket
+            let extraEnv = eventlogSocketEnv program.eventlogSocketAddr
             debugInfo $
                 unlines . concat $
                     [ ["Launching " <> showCommandForUser name args]
@@ -227,36 +227,36 @@ murderProcess programName (maybeStdIn, maybeStdOut, maybeStdErr, processHandle) 
 shouldInherit :: (String, String) -> Bool
 shouldInherit = (`elem` ["PATH"]) . fst
 
-eventlogSocketEnv :: EventlogSocket -> [(String, String)]
+eventlogSocketEnv :: EventlogSocketAddr -> [(String, String)]
 eventlogSocketEnv = \case
-    EventlogUnixSocket{..} ->
-        [("GHC_EVENTLOG_UNIX_PATH", unixPath)]
-    EventlogTcpSocket{..} ->
-        [("GHC_EVENTLOG_INET_HOST", inetHost), ("GHC_EVENTLOG_INET_PORT", show inetPort)]
+    EventlogSocketUnixAddr{..} ->
+        [("GHC_EVENTLOG_UNIX_PATH", esaUnixPath)]
+    EventlogSocketInetAddr{..} ->
+        [("GHC_EVENTLOG_INET_HOST", esaInetHost), ("GHC_EVENTLOG_INET_PORT", esaInetPort)]
 
 --------------------------------------------------------------------------------
 -- Eventlog Validation
 --------------------------------------------------------------------------------
 
-isEventlogUnixSocket :: EventlogSocket -> Bool
-isEventlogUnixSocket = \case
-    EventlogUnixSocket{} -> True
+isEventlogSocketUnixAddr :: EventlogSocketAddr -> Bool
+isEventlogSocketUnixAddr = \case
+    EventlogSocketUnixAddr{} -> True
     _otherwise -> False
 
-isEventlogTcpSocket :: EventlogSocket -> Bool
-isEventlogTcpSocket = \case
-    EventlogTcpSocket{} -> True
+isEventlogSocketInetAddr :: EventlogSocketAddr -> Bool
+isEventlogSocketInetAddr = \case
+    EventlogSocketInetAddr{} -> True
     _otherwise -> False
 
 data EventlogAssertion x
     = EventlogAssertion
     { initialTimeoutS :: Double
     , timeoutExponent :: Double
-    , eventlogSocket :: EventlogSocket
+    , eventlogSocket :: EventlogSocketAddr
     , validateEvents :: Socket -> ProcessT IO Event x
     }
 
-defaultEventlogAssertion :: EventlogSocket -> EventlogAssertion Event
+defaultEventlogAssertion :: EventlogSocketAddr -> EventlogAssertion Event
 defaultEventlogAssertion eventlogSocket =
     EventlogAssertion
         { initialTimeoutS = 0.25
@@ -267,14 +267,14 @@ defaultEventlogAssertion eventlogSocket =
 
 assertEventlogOk ::
     (HasLogger, HasTestInfo) =>
-    EventlogSocket ->
+    EventlogSocketAddr ->
     Assertion
 assertEventlogOk eventlogSocket =
     assertEventlogWith eventlogSocket (debugEventCounter 1_000)
 
 assertEventlogWith ::
     (HasLogger, HasTestInfo) =>
-    EventlogSocket ->
+    EventlogSocketAddr ->
     (ProcessT IO Event x) ->
     Assertion
 assertEventlogWith eventlogSocket validateEvents =
@@ -282,7 +282,7 @@ assertEventlogWith eventlogSocket validateEvents =
 
 assertEventlogWith' ::
     (HasLogger, HasTestInfo) =>
-    EventlogSocket ->
+    EventlogSocketAddr ->
     (Socket -> ProcessT IO Event x) ->
     Assertion
 assertEventlogWith' eventlogSocket validateEvents =
@@ -300,7 +300,7 @@ withEventlogHandle ::
     (HasLogger, HasTestInfo) =>
     Double ->
     Double ->
-    EventlogSocket ->
+    EventlogSocketAddr ->
     (Socket -> IO a) ->
     IO a
 withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
@@ -326,21 +326,21 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
         tryConnect = do
             let timeoutMSec = round $ timeoutS * 1e3
             case eventlogSocket of
-                EventlogUnixSocket{..} -> do
+                EventlogSocketUnixAddr{..} -> do
                     let newSocket = S.socket S.AF_UNIX S.Stream S.defaultProtocol
                     let closeSocket socket = S.close socket
                     bracket newSocket closeSocket $ \socket -> do
-                        debugInfo $ "Trying to connect to Unix socket at " <> unixPath
-                        S.connect socket (S.SockAddrUnix unixPath)
-                        debugInfo $ "Connected to Unix socket at " <> unixPath
+                        debugInfo $ "Trying to connect to Unix socket at " <> esaUnixPath
+                        S.connect socket (S.SockAddrUnix esaUnixPath)
+                        debugInfo $ "Connected to Unix socket at " <> esaUnixPath
                         action socket
-                EventlogTcpSocket{..} -> do
+                EventlogSocketInetAddr{..} -> do
                     let addrInfo =
                             S.defaultHints
                                 { S.addrFamily = S.AF_INET
                                 , S.addrSocketType = S.Stream
                                 }
-                    addr <- NE.head <$> S.getAddrInfo (Just addrInfo) (Just inetHost) (Just . show $ inetPort)
+                    addr <- NE.head <$> S.getAddrInfo (Just addrInfo) (Just esaInetHost) (Just $ esaInetPort)
                     let newSocket = S.socket (S.addrFamily addr) (S.addrSocketType addr) (S.addrProtocol addr)
                     let closeSocket socket = S.gracefulClose socket timeoutMSec
                     bracket newSocket closeSocket $ \socket -> do
@@ -813,40 +813,40 @@ inetPortCounter = unsafePerformIO (newMVar 0)
 testCaseForUnix ::
     (HasLogger) =>
     TestName ->
-    ((HasTestInfo) => EventlogSocket -> Assertion) ->
-    EventlogSocket ->
+    ((HasTestInfo) => EventlogSocketAddr -> Assertion) ->
+    EventlogSocketAddr ->
     Maybe TestTree
 testCaseForUnix testName test eventlogSocket
-    | isEventlogUnixSocket eventlogSocket = testCaseFor testName test eventlogSocket
+    | isEventlogSocketUnixAddr eventlogSocket = testCaseFor testName test eventlogSocket
     | otherwise = Nothing
 
 testCaseFor ::
     (HasLogger) =>
     TestName ->
-    ((HasTestInfo) => EventlogSocket -> Assertion) ->
-    EventlogSocket ->
+    ((HasTestInfo) => EventlogSocketAddr -> Assertion) ->
+    EventlogSocketAddr ->
     Maybe TestTree
 testCaseFor testName test = \case
-    EventlogUnixSocket{..} ->
+    EventlogSocketUnixAddr{..} ->
         let testName' = testName <> "_Unix"
          in let ?testInfo = TestInfo{testName = testName'}
              in Just $ testCase testName' $ do
                     debug Header
-                    let (directory, fileName) = splitFileName unixPath
+                    let (directory, fileName) = splitFileName esaUnixPath
                     let unixPath' = directory </> testName <> "_" <> fileName
                     debugInfo $ "Using Unix socket: " <> unixPath'
-                    test $ EventlogUnixSocket unixPath'
+                    test $ EventlogSocketUnixAddr unixPath'
                     debug Footer
-    EventlogTcpSocket{..} ->
+    EventlogSocketInetAddr{..} ->
         let testName' = testName <> "_Tcp"
          in let ?testInfo = TestInfo{testName = testName'}
              in Just $ testCase testName' $ do
                     debug Header
-                    inetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
+                    esaInetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
                         let nextTcpPortOffset = currentTcpPortOffset + 1
                         pure (nextTcpPortOffset, currentTcpPortOffset)
-                    let inetPort' = inetPort + inetPortOffset
-                    test $ EventlogTcpSocket inetHost inetPort'
+                    let inetPort' = show (read esaInetPort + esaInetPortOffset)
+                    test $ EventlogSocketInetAddr esaInetHost inetPort'
                     debug Footer
 
 type HasLogger = (?logger :: Logger, HasCallStack)
