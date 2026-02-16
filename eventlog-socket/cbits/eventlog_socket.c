@@ -239,6 +239,10 @@ static void writer_stop(void) {
   pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
 }
 
+/// @brief The eventlog socket writer.
+///
+/// @warning It is only safe to pass this value to the GHC RTS *after*
+/// `eventlog_socket_init` or `eventlog_socket_start` is called.
 const EventLogWriter SocketEventLogWriter = {.initEventLogWriter = writer_init,
                                              .writeEventLog = writer_write,
                                              .flushEventLog = writer_flush,
@@ -622,15 +626,17 @@ static void worker_init(void) {
   }
 }
 
-static void worker_start(const EventlogSocketAddr *const eventlog_socket,
-                         const EventlogSocketOpts *const opts) {
+static void worker_start(const EventlogSocketAddr *const eventlog_socket_addr,
+                         const EventlogSocketOpts *const eventlog_socket_opts) {
   DEBUG_TRACE("%s", "Starting worker thread.");
-  switch (eventlog_socket->esa_tag) {
+  switch (eventlog_socket_addr->esa_tag) {
   case EVENTLOG_SOCKET_UNIX:
-    worker_socket_init_unix(&eventlog_socket->esa_unix_addr, opts);
+    worker_socket_init_unix(&eventlog_socket_addr->esa_unix_addr,
+                            eventlog_socket_opts);
     break;
   case EVENTLOG_SOCKET_INET:
-    worker_socket_init_inet(&eventlog_socket->esa_inet_addr, opts);
+    worker_socket_init_inet(&eventlog_socket_addr->esa_inet_addr,
+                            eventlog_socket_opts);
     break;
   default:
     DEBUG_ERROR("%s", "unknown listener kind");
@@ -661,12 +667,13 @@ static size_t get_unix_path_max(void) {
  *********************************************************************************/
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket,
-                          const EventlogSocketOpts *const opts) {
+void eventlog_socket_init(
+    const EventlogSocketAddr *const eventlog_socket_addr,
+    const EventlogSocketOpts *const eventlog_socket_opts) {
   worker_init();
 
   // start worker thread
-  worker_start(eventlog_socket, opts);
+  worker_start(eventlog_socket_addr, eventlog_socket_opts);
 
   // start control thread
   g_control_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
@@ -699,6 +706,9 @@ int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
                                  StgClosure *main_closure) {
   SchedulerStatus status;
   int exit_status;
+
+  // Set the eventlog socket writer.
+  rts_config.eventlog_writer = &SocketEventLogWriter;
 
   // Initialize the GHC RTS.
   hs_init_ghc(&argc, &argv, rts_config);
@@ -738,7 +748,11 @@ int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
   shutdownHaskellAndExit(exit_status, 0 /* !fastExit */);
 }
 
-/* PUBLIC - see documentation in eventlog_socket.h */
+/// @brief Start event logging with `SocketEventLogWriter` and start the control
+/// thread.
+///
+/// @pre The GHC RTS is ready.
+/// @pre The function `eventlog_socket_init` has been called.
 void eventlog_socket_attach(void) {
   // Check if this version of the GHC RTS supports the eventlog.
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
@@ -759,11 +773,11 @@ void eventlog_socket_attach(void) {
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_start(const EventlogSocketAddr *eventlog_socket,
-                           const EventlogSocketOpts *opts) {
+void eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
+                           const EventlogSocketOpts *eventlog_socket_opts) {
 
   // Initialize eventlog_socket.
-  eventlog_socket_init(eventlog_socket, opts);
+  eventlog_socket_init(eventlog_socket_addr, eventlog_socket_opts);
 
   // Attache the eventlog writer to the GHC RTS.
   eventlog_socket_attach();
@@ -813,14 +827,13 @@ void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
 EventlogSocketFromEnvStatus
 eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
                          EventlogSocketOpts *eventlog_socket_opts_out) {
-  // Allocate a variable for the status.
-  EventlogSocketFromEnvStatus status = EVENTLOG_SOCKET_FROM_ENV_OK;
-
   // Check that eventlog_socket_out is nonnull.
   if (eventlog_socket_addr_out == NULL) {
-    status = EVENTLOG_SOCKET_FROM_ENV_INVAL;
-    goto exit;
+    return EVENTLOG_SOCKET_FROM_ENV_INVAL;
   }
+
+  // Allocate a variable for the return status:
+  EventlogSocketFromEnvStatus status = EVENTLOG_SOCKET_FROM_ENV_OK;
 
   // Try to construct a Unix domain socket address:
   char *unix_path = getenv(EVENTLOG_SOCKET_ENV_UNIX_PATH); // NOLINT
@@ -853,30 +866,40 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     char *inet_port = getenv(EVENTLOG_SOCKET_ENV_INET_PORT); // NOLINT
     const bool has_inet_host = inet_host != NULL;
     const bool has_inet_port = inet_port != NULL;
-    if (has_inet_host && has_inet_port) {
-      // Copy inet_host:
-      const size_t inet_host_len = strlen(inet_host);
-      char *inet_host_copy = malloc(inet_host_len);
-      strncpy(inet_host_copy, inet_host, inet_host_len);
-      DEBUG_DEBUG("inet_host: %s", inet_host_copy);
-      // Copy inet_port:
-      const size_t inet_port_len = strlen(inet_port);
-      char *inet_port_copy = malloc(inet_port_len);
-      strncpy(inet_port_copy, inet_port, inet_port_len);
-      DEBUG_DEBUG("inet_port: %s", inet_port_copy);
+    // If either is set, construct a TCP/IP address:
+    if (has_inet_host || has_inet_port) {
       // Write the configuration:
-      EventlogSocketAddr eventlog_socket = {0};
-      eventlog_socket.esa_tag = EVENTLOG_SOCKET_INET;
-      eventlog_socket.esa_inet_addr.esa_inet_host = inet_host_copy;
-      eventlog_socket.esa_inet_addr.esa_inet_port = inet_port_copy;
-      memcpy(eventlog_socket_addr_out, &eventlog_socket,
+      EventlogSocketAddr eventlog_socket_addr = {0};
+      eventlog_socket_addr.esa_tag = EVENTLOG_SOCKET_INET;
+      // If the inet_host is set, copy it:
+      if (has_inet_host) {
+        // Copy inet_host:
+        const size_t inet_host_len = strlen(inet_host);
+        char *inet_host_copy = malloc(inet_host_len);
+        strncpy(inet_host_copy, inet_host, inet_host_len);
+        DEBUG_DEBUG("inet_host: %s", inet_host_copy);
+        eventlog_socket_addr.esa_inet_addr.esa_inet_host = inet_host_copy;
+      } else {
+        char *inet_host = malloc(strlen(""));
+        eventlog_socket_addr.esa_inet_addr.esa_inet_host = inet_host;
+        status = EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING;
+      }
+      // If the inet_port is set, copy it:
+      if (has_inet_port) {
+        // Copy inet_port:
+        const size_t inet_port_len = strlen(inet_port);
+        char *inet_port_copy = malloc(inet_port_len);
+        strncpy(inet_port_copy, inet_port, inet_port_len);
+        DEBUG_DEBUG("inet_port: %s", inet_port_copy);
+        eventlog_socket_addr.esa_inet_addr.esa_inet_port = inet_port_copy;
+      } else {
+        char *inet_port = malloc(strlen(""));
+        eventlog_socket_addr.esa_inet_addr.esa_inet_port = inet_port;
+        status = EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING;
+      }
+      // Copy the TCP/IP address to the output:
+      memcpy(eventlog_socket_addr_out, &eventlog_socket_addr,
              sizeof(EventlogSocketAddr));
-    } else if (has_inet_host && !has_inet_port) {
-      status = EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING;
-      goto exit;
-    } else if (!has_inet_host && has_inet_port) {
-      status = EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING;
-      goto exit;
     }
   }
 
@@ -893,57 +916,5 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     memcpy(eventlog_socket_opts_out, &eventlog_socket_opts,
            sizeof(EventlogSocketOpts));
   }
-
-exit:
   return status;
-}
-
-/* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_start_unix(char *unix_path) {
-  const EventlogSocketAddr eventlog_socket = {
-      .esa_tag = EVENTLOG_SOCKET_UNIX,
-      .esa_unix_addr =
-          {
-              .esa_unix_path = unix_path,
-          },
-  };
-  eventlog_socket_start(&eventlog_socket, NULL);
-}
-
-/* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_start_inet(char *inet_host, char *inet_port) {
-  const EventlogSocketAddr eventlog_socket = {
-      .esa_tag = EVENTLOG_SOCKET_INET,
-      .esa_inet_addr =
-          {
-              .esa_inet_host = inet_host,
-              .esa_inet_port = inet_port,
-          },
-  };
-  eventlog_socket_start(&eventlog_socket, NULL);
-}
-
-/* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_init_unix(char *unix_path) {
-  const EventlogSocketAddr eventlog_socket = {
-      .esa_tag = EVENTLOG_SOCKET_UNIX,
-      .esa_unix_addr =
-          {
-              .esa_unix_path = unix_path,
-          },
-  };
-  eventlog_socket_init(&eventlog_socket, NULL);
-}
-
-/* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_init_inet(char *inet_host, char *inet_port) {
-  EventlogSocketAddr eventlog_socket = {
-      .esa_tag = EVENTLOG_SOCKET_INET,
-      .esa_inet_addr =
-          {
-              .esa_inet_host = inet_host,
-              .esa_inet_port = inet_port,
-          },
-  };
-  eventlog_socket_init(&eventlog_socket, NULL);
 }

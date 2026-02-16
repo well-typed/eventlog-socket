@@ -50,10 +50,15 @@ flag optimise-heavily
 
 library
   exposed-modules:    GHC.Eventlog.Socket
-  other-extensions:   CApiFFI
+  other-modules:      GHC.Eventlog.Socket.CApi
+  other-extensions:
+    CApiFFI
+    GeneralizedNewtypeDeriving
+    PatternSynonyms
 
   -- Use base lower bound as proxy for GHC >= 8.10
   build-depends:      base >=4.14 && <5
+  build-tool-depends: hsc2hs:hsc2hs
   hs-source-dirs:     src
   cc-options:         -std=c11
   default-language:   Haskell2010
