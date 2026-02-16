@@ -63,7 +63,7 @@ typedef enum EventlogSocketFromEnvStatus {
 
 /// @par MT-Unsafe
 EventlogSocketFromEnvStatus
-eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_out,
+eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
                          EventlogSocketOpts *eventlog_socket_opts_out);
 
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
