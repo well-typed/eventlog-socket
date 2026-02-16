@@ -33,7 +33,7 @@ typedef struct EventlogSocketOpts {
   int so_sndbuf;
 } EventlogSocketOpts;
 
-typedef struct EventlogSocket {
+typedef struct EventlogSocketAddr {
   EventlogSocketTag tag;
   union {
     /// The address for an `EVENTLOG_SOCKET_UNIX` socket.
@@ -41,10 +41,10 @@ typedef struct EventlogSocket {
     /// The address for an `EVENTLOG_SOCKET_INET` socket.
     EventlogSocketInetAddr inet_addr;
   };
-} EventlogSocket;
+} EventlogSocketAddr;
 
-// note: does not free `EventlogSocket` itself
-void eventlog_socket_free(EventlogSocket *eventlog_socket);
+// note: does not free `EventlogSocketAddr` itself
+void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket);
 
 // writes default options
 void eventlog_socket_opts_init(EventlogSocketOpts *eventlog_socket_opts);
@@ -63,13 +63,13 @@ typedef enum EventlogSocketFromEnvStatus {
 
 /// @par MT-Unsafe
 EventlogSocketFromEnvStatus
-eventlog_socket_from_env(EventlogSocket *eventlog_socket_out,
-                         EventlogSocketOpts *eventlog_socket_opts_out);
+eventlog_socket_addr_from_env(EventlogSocketAddr *eventlog_socket_out,
+                              EventlogSocketOpts *eventlog_socket_opts_out);
 
 // Use this when you install SocketEventLogWriter via RtsConfig before hs_main.
 // It spawns the worker immediately but defers handling of control messages
 // until eventlog_socket_ready() is invoked after RTS initialization.
-void eventlog_socket_init(const EventlogSocket *eventlog_socket,
+void eventlog_socket_init(const EventlogSocketAddr *eventlog_socket,
                           const EventlogSocketOpts *opts);
 
 void eventlog_socket_init_unix(char *unix_path);
@@ -82,7 +82,7 @@ void eventlog_socket_attach(void);
 
 // Use this from an already-running RTS: it reconfigures eventlogging to use
 // SocketEventLogWriter and restarts the log when a client connects.
-void eventlog_socket_start(const EventlogSocket *eventlog_socket,
+void eventlog_socket_start(const EventlogSocketAddr *eventlog_socket,
                            const EventlogSocketOpts *opts);
 
 void eventlog_socket_start_unix(char *unix_path);
