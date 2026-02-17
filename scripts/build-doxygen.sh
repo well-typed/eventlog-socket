@@ -32,5 +32,8 @@ fi
 
 # Build documentation for C files with doxygen
 echo "Build documentation for C files using doxygen version ${ACTUAL_VERSION}"
-# shellcheck disable=SC2086
-doxygen Doxyfile
+if [ "${MODE}" == "dev" ]; then
+	doxygen Doxyfile.dev
+else
+	doxygen Doxyfile
+fi
