@@ -2,6 +2,35 @@
 #ifndef EVENGLOG_SOCKET_H
 #define EVENGLOG_SOCKET_H
 
+/// @mainpage
+/// This is the documentation for the @c eventlog-socket C API.
+///
+/// The Haskell API is sufficient for most uses and is much simpler, but there
+/// are two use-cases where you need to use the C API:
+///
+/// 1. You want to start @c eventlog-socket from a C main function.
+///
+///    If you instrument your application with @c eventlog-socket using the
+///    Haskell API, then the RTS is started with the default file writer, which
+///    means that the first few events are written to a file instead of the
+///    eventlog socket.
+///
+///    To avoid this, you can instrument your application using the C API. See
+///    `eventlog_socket_init` and `eventlog_socket_wrap_hs_main`.
+///
+/// 2. You want to register custom commands for use with the @c eventlog-socket
+///    control protocol.
+///
+///    Presently, this has to be done using the C API.
+///
+///    For details, `eventlog_socket_control_register_namespace` and
+///    `eventlog_socket_control_register_command`.
+///
+///
+/// The main entry point for the C API is eventlog_socket.h. This file is
+/// installed as part of the @c eventlog-socket package and should be available
+/// from the C bits of your Haskell package.
+
 #include <Rts.h>
 #include <rts/EventLogWriter.h>
 #include <stdbool.h>
