@@ -183,10 +183,13 @@ jobs:
         run: cat "./scripts/dev-dependencies.txt" >> "$GITHUB_OUTPUT"
         id: dev-dependencies
 
-      - name: 🎗️ Lint with clang-format
-        uses: jidicula/clang-format-action@v4.16.0
+      - name: 🛠️ Install clang-format
+        uses: ./.github/actions/setup-clang-format
         with:
           clang-format-version: ${{ steps.dev-dependencies.outputs.clang-format }}
+
+      - name: 🎗️ Lint with clang-format
+        run: ./scripts/lint-clang-format.sh
 
   #############################################################################
   # Lint with Fourmolu
