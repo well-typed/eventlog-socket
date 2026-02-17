@@ -35,7 +35,7 @@ import Data.Maybe (fromMaybe)
 import Data.Word (Word8, Word32)
 import Foreign.C (CBool (..))
 import Foreign.C.String (CString, peekCString, withCString)
-import Foreign.Ptr (Ptr, castPtr, plusPtr)
+import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (Storable (..))
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Utils (fromBool, toBool, with)
@@ -116,11 +116,11 @@ data
 peekEventlogSocketAddr ::
     Ptr EventlogSocketAddr ->
     IO EventlogSocketAddr
-peekEventlogSocketAddr esaPtr =
+peekEventlogSocketAddr esaPtr = do
     #{peek EventlogSocketAddr, esa_tag} esaPtr >>= \case
         EVENTLOG_SOCKET_UNIX -> do
             esaUnixPath <-
-                peekCString <=< peek
+                peekNullableCString <=< peek
                     $ esaPtr
                     & #{ptr EventlogSocketAddr, esa_unix_addr}
                     & #{ptr EventlogSocketUnixAddr, esa_unix_path}
@@ -129,12 +129,12 @@ peekEventlogSocketAddr esaPtr =
                 }
         EVENTLOG_SOCKET_INET -> do
             esaInetHost <-
-                peekCString <=< peek
+                peekNullableCString <=< peek
                     $ esaPtr
                     & #{ptr EventlogSocketAddr, esa_inet_addr}
                     & #{ptr EventlogSocketInetAddr, esa_inet_host}
             esaInetPort <-
-                peekCString <=< peek
+                peekNullableCString <=< peek
                     $ esaPtr
                     & #{ptr EventlogSocketAddr, esa_inet_addr}
                     & #{ptr EventlogSocketInetAddr, esa_inet_port}
@@ -177,6 +177,10 @@ foreign import capi safe "eventlog_socket.h eventlog_socket_addr_free"
     eventlog_socket_addr_free ::
         Ptr EventlogSocketAddr ->
         IO ()
+
+peekNullableCString :: CString -> IO String
+peekNullableCString charPtr =
+    if charPtr == nullPtr then pure "" else peekCString charPtr
 
 --------------------------------------------------------------------------------
 -- EventlogSocketOpts
@@ -241,8 +245,13 @@ eventlogSocketFromEnv =
     allocaBytes #{size EventlogSocketOpts} $ \esoPtr -> do
         let tryGet =
                 eventlog_socket_from_env esaPtr esoPtr
+        let shouldFree status =
+                notElem status $
+                    [ EVENTLOG_SOCKET_FROM_ENV_NONE
+                    , EVENTLOG_SOCKET_FROM_ENV_INVAL
+                    ]
         let maybeFree status =
-                when (status /= EVENTLOG_SOCKET_FROM_ENV_INVAL) $ do
+                when (shouldFree status) $ do
                     eventlog_socket_addr_free esaPtr
                     eventlog_socket_opts_free esoPtr
         let maybePeek = \case
@@ -250,6 +259,10 @@ eventlogSocketFromEnv =
                     esa <- peekEventlogSocketAddr esaPtr
                     eso <- peekEventlogSocketOpts esoPtr
                     pure $ Just (esa, eso)
+                EVENTLOG_SOCKET_FROM_ENV_NONE -> do
+                    pure Nothing
+                EVENTLOG_SOCKET_FROM_ENV_INVAL -> do
+                    error "allocaBytes returned nullPtr"
                 EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG -> do
                     esa <- peekEventlogSocketAddr esaPtr
                     throwIO $ EventlogSocketAddrUnixPathTooLong (esaUnixPath esa)
@@ -271,6 +284,9 @@ newtype
 pattern EVENTLOG_SOCKET_FROM_ENV_OK :: EventlogSocketFromEnvStatus
 pattern EVENTLOG_SOCKET_FROM_ENV_OK = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_OK}
 
+pattern EVENTLOG_SOCKET_FROM_ENV_NONE :: EventlogSocketFromEnvStatus
+pattern EVENTLOG_SOCKET_FROM_ENV_NONE = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_NONE}
+
 pattern EVENTLOG_SOCKET_FROM_ENV_INVAL :: EventlogSocketFromEnvStatus
 pattern EVENTLOG_SOCKET_FROM_ENV_INVAL = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_INVAL}
 
@@ -285,6 +301,7 @@ pattern EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING = EventlogSocketFromEnvStatus
 
 {-# COMPLETE
     EVENTLOG_SOCKET_FROM_ENV_OK,
+    EVENTLOG_SOCKET_FROM_ENV_NONE,
     EVENTLOG_SOCKET_FROM_ENV_INVAL,
     EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG,
     EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING,

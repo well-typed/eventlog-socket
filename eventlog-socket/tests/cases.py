@@ -207,7 +207,7 @@ def default_cases() -> list[TestCase]:
             args = program.args_for_mode(mode)
             mode_label = MODE_LABELS[mode]
             for scenario in control_scenarios:
-                description = f"Test {program.target} ({mode_label}{scenario.suffix})"
+                description = f"Test {program.target} ({mode_label}, {program.socket_type}{scenario.suffix})"
                 cases.append(
                     TestCase(
                         description,

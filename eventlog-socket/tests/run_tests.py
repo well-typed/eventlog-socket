@@ -166,11 +166,12 @@ class TestRunner:
         if self.testCase.mode == "reconnect":
             eventlog_rts = ["+RTS", "--eventlog-flush-interval=1", "-RTS"]
 
-        args = ["cabal", "run", self.testCase.target, "-f+debug", "--", "+RTS", "-l", "-hT", "--no-automatic-heap-samples", "-RTS", *eventlog_rts, *self.testCase.args]
+        args = ["cabal", "run", self.testCase.target, "--", "+RTS", "-l", "-hT", "--no-automatic-heap-samples", "-RTS", *eventlog_rts, *self.testCase.args]
         stdout_file = open(self.app_stdout, "w", encoding="utf-8", errors="replace")
         proc = subprocess.Popen(args, stdout=stdout_file, stderr=subprocess.STDOUT, cwd=ROOT_DIR, env=self.env)
         self._stdout_handle = stdout_file
         log(f"Launched {self.testCase.target} (pid={proc.pid})")
+        log(' '.join(args))
         return proc
 
     def wait_for_socket(self) -> None:
@@ -198,9 +199,9 @@ class TestRunner:
                 try:
                     sock.connect((self.tcp_host, self.tcp_port))
                     break
-                except OSError:
+                except OSError as e:
                     if time.time() > deadline:
-                        raise
+                        raise e
                     time.sleep(0.25)
         return sock
 
