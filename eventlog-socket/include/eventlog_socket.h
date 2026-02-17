@@ -83,6 +83,8 @@ void eventlog_socket_opts_free(EventlogSocketOpts *opts);
 typedef enum EventlogSocketFromEnvStatus {
   /// @brief Successfully initialised the socket address and options.
   EVENTLOG_SOCKET_FROM_ENV_OK,
+  /// @brief Did not find any socket address.
+  EVENTLOG_SOCKET_FROM_ENV_NONE,
   /// @brief Received invalid arguments.
   EVENTLOG_SOCKET_FROM_ENV_INVAL,
   /// @brief The found Unix domain socket path was too long.
@@ -113,37 +115,6 @@ typedef enum EventlogSocketFromEnvStatus {
 /// to determine whether or not to wait.
 #define EVENTLOG_SOCKET_ENV_WAIT "GHC_EVENTLOG_WAIT"
 
-/// @brief
-/// Read the eventlog socket address and options from the environment.
-///
-/// @par MT-Unsafe
-///
-/// @return
-///   Upon successful completion, the value `EVENTLOG_SOCKET_FROM_ENV_OK` is
-///   returned. A valid `EventlogSocketAddr` is written to
-///   `eventlog_socket_addr_out`, which must be freed using
-///   `eventlog_socket_addr_free`. If `eventlog_socket_opts_out` was nonnull,
-///   then a valid `EventlogSocketOpts` is written to
-///   `eventlog_socket_opts_out`, which must be freed using
-///   `eventlog_socket_opts_free`.
-///
-/// @return
-///   If `eventlog_socket_addr_out` was null, then
-///   `EVENTLOG_SOCKET_FROM_ENV_INVAL` is returned.
-///
-/// @return
-///   If any other value is returned, then valid data is written to
-///   `eventlog_socket_addr_out` and `eventlog_socket_opts_out` as if
-///   `EVENTLOG_SOCKET_FROM_ENV_OK` was returned, which must be freed using the
-///   appropriate functions. This data is for use in error messages only, and
-///   should not be passed to `eventlog_socket_init` or `eventlog_socket_start`.
-///   For details, see `EventlogSocketFromEnvStatus`.
-///
-/// @see EventlogSocketFromEnvStatus
-EventlogSocketFromEnvStatus
-eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
-                         EventlogSocketOpts *eventlog_socket_opts_out);
-
 /// @brief Start the eventlog socket writer.
 ///
 /// Use this when you install the eventlog socket writer *after* the GHC RTS has
@@ -157,6 +128,44 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 /// @pre The argument `eventlog_socket_addr` is nonnull.
 void eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
                            const EventlogSocketOpts *eventlog_socket_opts);
+
+/// @brief
+/// Read the eventlog socket address and options from the environment.
+///
+/// @par MT-Unsafe
+///
+/// @return
+///   Upon successful completion, the value `EVENTLOG_SOCKET_FROM_ENV_OK` is
+///   returned. A valid object is written to `eventlog_socket_addr_out`, which
+///   must be freed using `eventlog_socket_addr_free`. If
+///   `eventlog_socket_opts_out` was nonnull, then a valid object is written to
+///   `eventlog_socket_opts_out`, which must be freed using
+///   `eventlog_socket_opts_free`.
+///
+/// @return
+///   If no socket address is found, the value `EVENTLOG_SOCKET_FROM_ENV_NONE`
+///   is returned and the content of `eventlog_socket_addr_out` and
+///   `eventlog_socket_opts_out` are unchanged.
+///
+/// @return
+///   If `eventlog_socket_addr_out` was null, then
+///   `EVENTLOG_SOCKET_FROM_ENV_INVAL` is returned and the content of
+///   `eventlog_socket_addr_out` and `eventlog_socket_opts_out` are unchanged.
+///
+/// @return
+///   If any other value is returned, then a valid object is written to
+///   `eventlog_socket_addr_out` as if `EVENTLOG_SOCKET_FROM_ENV_OK` was
+///   returned, which must be freed using `eventlog_socket_addr_free. If
+///   `eventlog_socket_opts_out` was nonnull, then a valid object is written to
+///   `eventlog_socket_opts_out`, which must be freed using
+///   `eventlog_socket_opts_free`. These objects is for use in error messages
+///   only, and should not be passed to `eventlog_socket_init` or
+///   `eventlog_socket_start`. For details, see `EventlogSocketFromEnvStatus`.
+///
+/// @see EventlogSocketFromEnvStatus
+EventlogSocketFromEnvStatus
+eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
+                         EventlogSocketOpts *eventlog_socket_opts_out);
 
 /// @brief Initialise the eventlog socket.
 ///

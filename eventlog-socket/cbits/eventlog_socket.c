@@ -827,13 +827,14 @@ void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
 EventlogSocketFromEnvStatus
 eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
                          EventlogSocketOpts *eventlog_socket_opts_out) {
+
   // Check that eventlog_socket_out is nonnull.
   if (eventlog_socket_addr_out == NULL) {
     return EVENTLOG_SOCKET_FROM_ENV_INVAL;
   }
 
   // Allocate a variable for the return status:
-  EventlogSocketFromEnvStatus status = EVENTLOG_SOCKET_FROM_ENV_OK;
+  EventlogSocketFromEnvStatus status = EVENTLOG_SOCKET_FROM_ENV_NONE;
 
   // Try to construct a Unix domain socket address:
   char *unix_path = getenv(EVENTLOG_SOCKET_ENV_UNIX_PATH); // NOLINT
@@ -858,6 +859,9 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     eventlog_socket.esa_unix_addr.esa_unix_path = unix_path_copy;
     memcpy(eventlog_socket_addr_out, &eventlog_socket,
            sizeof(EventlogSocketAddr));
+
+    // Set the status:
+    status = EVENTLOG_SOCKET_FROM_ENV_OK;
   }
 
   // Try to construct a TCP/IP address:
@@ -900,6 +904,10 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
       // Copy the TCP/IP address to the output:
       memcpy(eventlog_socket_addr_out, &eventlog_socket_addr,
              sizeof(EventlogSocketAddr));
+      // Set the status:
+      if (status == EVENTLOG_SOCKET_FROM_ENV_NONE) {
+        status = EVENTLOG_SOCKET_FROM_ENV_OK;
+      }
     }
   }
 
