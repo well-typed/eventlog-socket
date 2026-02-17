@@ -1,8 +1,13 @@
 cabal-version:      2.2
 name:               eventlog-socket
 version:            0.1.1.0
-synopsis:           Stream GHC eventlog events to external processes
-description:        Stream GHC eventlog events to external processes.
+synopsis:           Stream GHC eventlog events to external processes.
+description:
+  The @eventlog-socket@ package lets you stream the GHC eventlog over a socket in realtime.
+  This package exports both a Haskell API (from "GHC.Eventlog.Socket") and a C API (from [@eventlog_socket.h@](./c/index.html)).
+  For most uses, the Haskell API is sufficient.
+  However, if you want to instrument your application from a C main or install custom command handlers you need the C API.
+
 license:            BSD-3-Clause
 license-file:       LICENSE
 author:             Eventlog Socket Contributors

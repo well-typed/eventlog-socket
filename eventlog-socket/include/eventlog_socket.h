@@ -4,9 +4,9 @@
 
 /// @mainpage
 /// This is the documentation for the @c eventlog-socket C API.
-///
-/// The Haskell API is sufficient for most uses and is much simpler, but there
-/// are two use-cases where you need to use the C API:
+/// For most uses, the Haskell API is sufficient.
+/// However, if you want to instrument your application from a C main or install
+/// custom command handlers you need the C API.
 ///
 /// 1. You want to start @c eventlog-socket from a C main function.
 ///
@@ -66,7 +66,7 @@ typedef struct EventlogSocketInetAddr {
 typedef struct EventlogSocketOpts {
   /// @brief Whether or not to wait for a client to connect.
   bool eso_wait;
-  /// @brief The size of the send buffer.
+  /// @brief The size of the socket send buffer.
   ///
   /// See the documentation for `SO_SNDBUF` in `socket.h`.
   int eso_sndbuf;
