@@ -2,11 +2,13 @@
 #define _GNU_SOURCE
 
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -549,10 +551,12 @@ worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
   hints.ai_flags = AI_PASSIVE;
 
   struct addrinfo *res = NULL;
-  int ret = getaddrinfo(inet_addr->esa_inet_host, inet_addr->esa_inet_port,
-                        &hints, &res);
-  if (ret != 0) {
-    DEBUG_ERROR("getaddrinfo() failed: %s", gai_strerror(ret));
+  const int success_or_errno = getaddrinfo(
+      inet_addr->esa_inet_host, inet_addr->esa_inet_port, &hints, &res);
+  if (success_or_errno != 0) {
+    DEBUG_ERROR("getaddrinfo(\"%s\", \"%s\") failed: %s",
+                inet_addr->esa_inet_host, inet_addr->esa_inet_port,
+                gai_strerror(success_or_errno));
     abort();
   }
 
@@ -815,6 +819,13 @@ void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket) {
   }
 }
 
+/// @brief Copy the first `str_len` characters of a string into allocated memory.
+static char *strncpy_alloc(const size_t str_len, const char *const str) {
+  char *str_copy = calloc(str_len + 1, sizeof(char));
+  strncpy(str_copy, str, str_len);
+  return str_copy;
+}
+
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
   (void)eventlog_socket_opts;
@@ -848,17 +859,14 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
       status = EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG;
     }
 
-    // Copy unix_path:
-    char *unix_path_copy = malloc(unix_path_len);
-    strncpy(unix_path_copy, unix_path, unix_path_len);
-    DEBUG_DEBUG("unix_path: %s", unix_path_copy);
-
     // Write the configuration:
-    EventlogSocketAddr eventlog_socket = {0};
-    eventlog_socket.esa_tag = EVENTLOG_SOCKET_UNIX;
-    eventlog_socket.esa_unix_addr.esa_unix_path = unix_path_copy;
-    memcpy(eventlog_socket_addr_out, &eventlog_socket,
-           sizeof(EventlogSocketAddr));
+    *eventlog_socket_addr_out = (EventlogSocketAddr){
+        .esa_tag = EVENTLOG_SOCKET_UNIX,
+        .esa_unix_addr =
+            {
+                .esa_unix_path = strncpy_alloc(unix_path_len, unix_path),
+            },
+    };
 
     // Set the status:
     status = EVENTLOG_SOCKET_FROM_ENV_OK;
@@ -873,39 +881,22 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     // If either is set, construct a TCP/IP address:
     if (has_inet_host || has_inet_port) {
       // Write the configuration:
-      EventlogSocketAddr eventlog_socket_addr = {0};
-      eventlog_socket_addr.esa_tag = EVENTLOG_SOCKET_INET;
-      // If the inet_host is set, copy it:
-      if (has_inet_host) {
-        // Copy inet_host:
-        const size_t inet_host_len = strlen(inet_host);
-        char *inet_host_copy = malloc(inet_host_len);
-        strncpy(inet_host_copy, inet_host, inet_host_len);
-        DEBUG_DEBUG("inet_host: %s", inet_host_copy);
-        eventlog_socket_addr.esa_inet_addr.esa_inet_host = inet_host_copy;
-      } else {
-        char *inet_host = malloc(strlen(""));
-        eventlog_socket_addr.esa_inet_addr.esa_inet_host = inet_host;
-        status = EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING;
-      }
-      // If the inet_port is set, copy it:
-      if (has_inet_port) {
-        // Copy inet_port:
-        const size_t inet_port_len = strlen(inet_port);
-        char *inet_port_copy = malloc(inet_port_len);
-        strncpy(inet_port_copy, inet_port, inet_port_len);
-        DEBUG_DEBUG("inet_port: %s", inet_port_copy);
-        eventlog_socket_addr.esa_inet_addr.esa_inet_port = inet_port_copy;
-      } else {
-        char *inet_port = malloc(strlen(""));
-        eventlog_socket_addr.esa_inet_addr.esa_inet_port = inet_port;
-        status = EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING;
-      }
-      // Copy the TCP/IP address to the output:
-      memcpy(eventlog_socket_addr_out, &eventlog_socket_addr,
-             sizeof(EventlogSocketAddr));
+      *eventlog_socket_addr_out = (EventlogSocketAddr){
+          .esa_tag = EVENTLOG_SOCKET_INET,
+          .esa_inet_addr = {
+              .esa_inet_host = (has_inet_host)
+                                   ? strncpy_alloc(strlen(inet_host), inet_host)
+                                   : strncpy_alloc(0, ""),
+              .esa_inet_port = (has_inet_port)
+                                   ? strncpy_alloc(strlen(inet_port), inet_port)
+                                   : strncpy_alloc(0, ""),
+          }};
       // Set the status:
-      if (status == EVENTLOG_SOCKET_FROM_ENV_NONE) {
+      if (!has_inet_host) {
+        status = EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING;
+      } else if (!has_inet_port) {
+        status = EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING;
+      } else {
         status = EVENTLOG_SOCKET_FROM_ENV_OK;
       }
     }
@@ -913,16 +904,9 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 
   // If an output address was provided for the options:
   if (eventlog_socket_opts_out != NULL) {
-    EventlogSocketOpts eventlog_socket_opts = {0};
-    eventlog_socket_opts_init(&eventlog_socket_opts);
-
-    // Try to construct the options:
-    char *ghc_eventlog_wait = getenv(EVENTLOG_SOCKET_ENV_WAIT); // NOLINT
-    eventlog_socket_opts.eso_wait = ghc_eventlog_wait != NULL;
-
-    // Write the options:
-    memcpy(eventlog_socket_opts_out, &eventlog_socket_opts,
-           sizeof(EventlogSocketOpts));
+    eventlog_socket_opts_init(eventlog_socket_opts_out);
+    eventlog_socket_opts_out->eso_wait =
+        getenv(EVENTLOG_SOCKET_ENV_WAIT) != NULL; // NOLINT
   }
   return status;
 }
