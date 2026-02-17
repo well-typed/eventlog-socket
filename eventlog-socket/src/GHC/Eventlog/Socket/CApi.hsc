@@ -96,14 +96,16 @@ pattern EVENTLOG_SOCKET_INET = EventlogSocketTag #{const EVENTLOG_SOCKET_INET}
 
 {- |
 A type representing the supported eventlog socket modes.
+
+@since 0.1.1.0
 -}
 data
     {-# CTYPE "eventlog_socket.h" "EventlogSocketAddr" #-}
     EventlogSocketAddr = EventlogSocketUnixAddr
         { esaUnixPath :: FilePath
-        -- ^ Unix socket path, e.g., @"/tmp/ghc_eventlog.sock"@.
+        -- ^ Unix socket path, e.g., @"\/tmp\/ghc_eventlog.sock"@.
         --
-        --         __Warning:__ Unix socket paths are limited to 107 characters.
+        --         __Warning:__ Unix domain socket paths are often limited to 107 characters or less.
         }
     | EventlogSocketInetAddr
         { esaInetHost :: String
@@ -185,6 +187,31 @@ peekNullableCString charPtr =
 --------------------------------------------------------------------------------
 -- EventlogSocketOpts
 
+{- |
+The socket options for @eventlog-socket@.
+
+To construct an instance of the socket options, use `defaultEventlogSocketOpts` and the fields.
+For instance:
+
+@
+myEventlogSocketOpts :: EventlogSocketOpts
+myEventlogSocketOpts = defaultEventlogSocketOpts
+    { esoWait = True
+    }
+@
+
+The following socket options are available:
+
+[@`esoWait` :: `Bool`@]:
+    Whether or not to wait for a client to connect.
+
+[@`esoSndbuf` ~ `Foreign.C.Types.CInt`@]:
+    The size of the socket send buffer.
+
+    See the documentation for @SO_SNDBUF@ in @socket.h@.
+
+@since 0.1.1.0
+-}
 data
     {-# CTYPE "eventlog_socket.h" "EventlogSocketOpts" #-}
     EventlogSocketOpts = EventlogSocketOpts
@@ -215,6 +242,13 @@ withEventlogSocketOpts eso action =
         #{poke EventlogSocketOpts, eso_sndbuf} esoPtr . fromMaybe 0 $ esoSndbuf eso
         action esoPtr
 
+{- |
+The default socket options for @eventlog-socket@.
+
+See t`EventlogSocketOpts`.
+
+@since 0.1.1.0
+-}
 defaultEventlogSocketOpts :: EventlogSocketOpts
 defaultEventlogSocketOpts =
     unsafePerformIO $
