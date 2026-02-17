@@ -129,44 +129,6 @@ typedef enum EventlogSocketFromEnvStatus {
 void eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
                            const EventlogSocketOpts *eventlog_socket_opts);
 
-/// @brief
-/// Read the eventlog socket address and options from the environment.
-///
-/// @par MT-Unsafe
-///
-/// @return
-///   Upon successful completion, the value `EVENTLOG_SOCKET_FROM_ENV_OK` is
-///   returned. A valid object is written to `eventlog_socket_addr_out`, which
-///   must be freed using `eventlog_socket_addr_free`. If
-///   `eventlog_socket_opts_out` was nonnull, then a valid object is written to
-///   `eventlog_socket_opts_out`, which must be freed using
-///   `eventlog_socket_opts_free`.
-///
-/// @return
-///   If no socket address is found, the value `EVENTLOG_SOCKET_FROM_ENV_NONE`
-///   is returned and the content of `eventlog_socket_addr_out` and
-///   `eventlog_socket_opts_out` are unchanged.
-///
-/// @return
-///   If `eventlog_socket_addr_out` was null, then
-///   `EVENTLOG_SOCKET_FROM_ENV_INVAL` is returned and the content of
-///   `eventlog_socket_addr_out` and `eventlog_socket_opts_out` are unchanged.
-///
-/// @return
-///   If any other value is returned, then a valid object is written to
-///   `eventlog_socket_addr_out` as if `EVENTLOG_SOCKET_FROM_ENV_OK` was
-///   returned, which must be freed using `eventlog_socket_addr_free. If
-///   `eventlog_socket_opts_out` was nonnull, then a valid object is written to
-///   `eventlog_socket_opts_out`, which must be freed using
-///   `eventlog_socket_opts_free`. These objects is for use in error messages
-///   only, and should not be passed to `eventlog_socket_init` or
-///   `eventlog_socket_start`. For details, see `EventlogSocketFromEnvStatus`.
-///
-/// @see EventlogSocketFromEnvStatus
-EventlogSocketFromEnvStatus
-eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
-                         EventlogSocketOpts *eventlog_socket_opts_out);
-
 /// @brief Initialise the eventlog socket.
 ///
 /// Use this when you install the eventlog socket writer *before* the GHC RTS
@@ -175,8 +137,124 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 /// `eventlog_socket_start`.
 ///
 /// @pre The argument `eventlog_socket_addr` is nonnull.
+///
+/// @par Examples
+/// @parblock
+/// The following function initialises eventlog socket from a C main function.
+/// @code{.c}
+/// #include <Rts.h>
+/// #include <eventlog_socket.h>
+/// #include <stdlib.h>
+///
+/// // Define the eventlog Unix domain socket path.
+/// #define MY_EVENTLOG_SOCKET "/tmp/my_eventlog.socket"
+///
+/// // Get the closure for the Haskell main.
+/// extern StgClosure ZCMain_main_closure;
+///
+/// int main(int argc, char* argv[]) {
+///
+///  // Create a GHC RTS configuration object.
+///  RtsConfig rts_config = {0};
+///  memcpy(&rts_config, &defaultRtsConfig, sizeof(RtsConfig));
+///  rts_config.rts_opts_enabled = RtsOptsAll; // Enable all RTS options.
+///  rts_config.rts_opts = "-l";               // Enable binary eventlog.
+///
+///   // Initialise eventlog socket using the default options.
+///   EventlogSocketAddr eventlog_socket_addr = {
+///       .esa_tag = EVENTLOG_SOCKET_UNIX,
+///       .esa_unix_addr = {
+///           .esa_unix_path = MY_EVENTLOG_SOCKET,
+///       }};
+///   eventlog_socket_init(eventlog_socket_addr, NULL);
+///
+///   // Evaluate the close for the Haskell main.
+///   return eventlog_socket_wrap_hs_main(argc, argv, rts_config,
+///                                       &ZCMain_main_closure);
+/// }
+/// @endcode
+/// @endparblock
 void eventlog_socket_init(const EventlogSocketAddr *eventlog_socket_addr,
                           const EventlogSocketOpts *eventlog_socket_opts);
+
+/// @brief Read the eventlog socket address and options from the environment.
+///
+/// @par MT-Unsafe
+///
+/// @return Upon successful completion, the value `EVENTLOG_SOCKET_FROM_ENV_OK`
+/// is returned. A valid object is written to @p eventlog_socket_addr_out, which
+/// must be freed using `eventlog_socket_addr_free`. If
+/// @p eventlog_socket_opts_out was nonnull, then a valid object is written to
+/// @p eventlog_socket_opts_out, which must be freed using
+/// `eventlog_socket_opts_free`.
+///
+/// @return If no socket address is found, the value
+/// `EVENTLOG_SOCKET_FROM_ENV_NONE` is returned and the content of
+/// @p eventlog_socket_addr_out and @p eventlog_socket_opts_out are unchanged.
+///
+/// @return If @p eventlog_socket_addr_out was null, then
+/// `EVENTLOG_SOCKET_FROM_ENV_INVAL` is returned and the content of
+/// @p eventlog_socket_addr_out and @p eventlog_socket_opts_out are unchanged.
+///
+/// @return If any other value is returned, then a valid object is written to
+/// @p eventlog_socket_addr_out as if `EVENTLOG_SOCKET_FROM_ENV_OK` was
+/// returned, which must be freed using `eventlog_socket_addr_free`. If
+/// @p eventlog_socket_opts_out was nonnull, then a valid object is written to
+/// @p eventlog_socket_opts_out, which must be freed using
+/// `eventlog_socket_opts_free`. These objects is for use in error messages
+/// only, and should not be passed to `eventlog_socket_init` or
+/// `eventlog_socket_start`. For details, see `EventlogSocketFromEnvStatus`.
+///
+/// @par Examples
+/// @parblock
+/// The following function initialises eventlog socket using a socket address
+/// and options from the environment.
+/// @code{.c}
+/// EventlogSocketFromEnvStatus init_from_env(void) {
+///
+///   // Read the socket address and options from the environment.
+///   EventlogSocketAddr eventlog_socket_addr = {0};
+///   EventlogSocketOpts eventlog_socket_opts = {0};
+///   const EventlogSocketFromEnvStatus status =
+///       eventlog_socket_from_env(&eventlog_socket_addr,
+///       &eventlog_socket_opts);
+///
+///   // Handle the return status.
+///   switch (status) {
+///   case EVENTLOG_SOCKET_FROM_ENV_OK:
+///     // Initialise eventlog socket.
+///     eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts);
+///     break;
+///   case EVENTLOG_SOCKET_FROM_ENV_NONE:
+///     return status; // Skip free.
+///   case EVENTLOG_SOCKET_FROM_ENV_INVAL:
+///     return status; // Skip free.
+///   case EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG:
+///     fprintf(stderr, "Error: value of %s (%s) is too long\n",
+///             EVENTLOG_SOCKET_ENV_UNIX_PATH,
+///             eventlog_socket_addr.esa_unix_addr.esa_unix_path);
+///     break;
+///   case EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING:
+///     fprintf(stderr, "Error: no value given for %s\n",
+///             EVENTLOG_SOCKET_ENV_INET_HOST);
+///     break;
+///   case EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING:
+///     fprintf(stderr, "Error: no value given for %s\n",
+///             EVENTLOG_SOCKET_ENV_INET_PORT);
+///     break;
+///   }
+///
+///   // Free the memory held by socket address and options.
+///   eventlog_socket_addr_free(&eventlog_socket_addr);
+///   eventlog_socket_opts_free(&eventlog_socket_opts);
+///
+///   return status;
+/// }
+/// @endcode
+/// @endparblock
+EventlogSocketFromEnvStatus
+eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
+                         EventlogSocketOpts *eventlog_socket_opts_out);
 
 /// @brief Wait for a client to connect to the eventlog socket.
 ///
@@ -194,6 +272,11 @@ void eventlog_socket_wait(void);
 /// @return The exit code of the Haskell main function.
 ///
 /// @pre The eventlog socket was initialised using `eventlog_socket_init`.
+///
+/// @par Examples
+/// @parblock
+/// See `eventlog_socket_init`.
+/// @endparblock
 int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
                                  StgClosure *main_closure);
 

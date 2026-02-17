@@ -819,7 +819,8 @@ void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket) {
   }
 }
 
-/// @brief Copy the first `str_len` characters of a string into allocated memory.
+/// @brief Copy the first `str_len` characters of a string into allocated
+/// memory.
 static char *strncpy_alloc(const size_t str_len, const char *const str) {
   char *str_copy = calloc(str_len + 1, sizeof(char));
   strncpy(str_copy, str, str_len);
