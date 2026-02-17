@@ -19,9 +19,9 @@ runs:
         mkdir -p "$PIPX_BIN_DIR"
         pipx install "clang-format==${{ inputs.clang-format-version }}.*"
       env:
-        PIPX_BIN_DIR: "${{ github.workspace }}/.clang-format/bin"
+        PIPX_BIN_DIR: "${{ github.workspace }}/.clang-format.d/bin"
       shell: sh
 
     - name: 🛠️ Add clang-format to PATH
-      run: echo "${{ github.workspace }}/.clang-format/bin" >> "$GITHUB_PATH"
+      run: echo "${{ github.workspace }}/.clang-format.d/bin" >> "$GITHUB_PATH"
       shell: sh
