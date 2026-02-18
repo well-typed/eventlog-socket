@@ -32,6 +32,7 @@
 
 #include "./control.h"
 #include "./debug.h"
+#include "./error.h"
 #include "./poll.h"
 #include "eventlog_socket.h"
 
@@ -346,7 +347,7 @@ const EventlogSocketControlCommand *control_command_store_resolve(
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-bool eventlog_socket_control_register_command(
+EventlogSocketStatus eventlog_socket_control_register_command(
     EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id,
     EventlogSocketControlCommandHandler command_handler,
@@ -356,7 +357,13 @@ bool eventlog_socket_control_register_command(
               command_id, namespace->namespace_len, namespace->namespace);
 
   // Acquire the lock on g_control_namespace_store.
-  pthread_mutex_lock(&g_control_namespace_registry_mutex);
+  {
+    const int success_or_errno =
+        pthread_mutex_lock(&g_control_namespace_registry_mutex);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
+  }
 
   // Create the data for the new command_entry.
   const EventlogSocketControlCommand next = (EventlogSocketControlCommand){
@@ -374,6 +381,9 @@ bool eventlog_socket_control_register_command(
     // Allocate memory for the new command_entry.
     namespace->command_registry = malloc(sizeof(EventlogSocketControlCommand));
     command_entry = namespace->command_registry;
+    if (command_entry == NULL) {
+      return STATUS_FROM_ERRNO();
+    }
   }
   // Otherwise, traverse the command_store to the last position...
   else {
@@ -385,9 +395,9 @@ bool eventlog_socket_control_register_command(
       if (command_entry->command_id == command_id) {
         DEBUG_ERROR("Command 0x%02x already registered for namespace %p.",
                     command_id, (void *)namespace);
-        // If so, return false.
+        // If so, fail.
         pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-        return false;
+        return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERROR_CMD_EXISTS);
       }
     } while (command_entry->next != NULL);
     assert(command_entry != NULL);
@@ -396,6 +406,9 @@ bool eventlog_socket_control_register_command(
     // Allocate memory for the new command_entry.
     command_entry->next = malloc(sizeof(EventlogSocketControlCommand));
     command_entry = command_entry->next;
+    if (command_entry == NULL) {
+      return STATUS_FROM_ERRNO();
+    }
   }
   // Write the data for the new command_entry.
   DEBUG_TRACE("Registered command 0x%02x in namespace %.*s", command_id,
@@ -403,8 +416,14 @@ bool eventlog_socket_control_register_command(
   memcpy(command_entry, &next, sizeof(EventlogSocketControlCommand));
 
   // Release the lock on g_control_namespace_store.
-  pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-  return true;
+  {
+    const int success_or_errno =
+        pthread_mutex_unlock(&g_control_namespace_registry_mutex);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
+  }
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /// @brief Call a command by namespace and ID.
@@ -459,15 +478,29 @@ static void control_wait_ghc_rts_ready(void) {
   pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
 }
 
-/* HIDDEN - see control.h for documentation */
-void HIDDEN control_signal_ghc_rts_ready(void) {
+/* PUBLIC - see documentation in eventlog_socket.h */
+EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
   DEBUG_DEBUG("%s", "Sending signal that GHC RTS is ready.");
-  pthread_mutex_lock(&g_ghc_rts_ready_mutex);
+  {
+    const int success_or_errno = pthread_mutex_lock(&g_ghc_rts_ready_mutex);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
+  }
   if (!g_ghc_rts_ready) {
     g_ghc_rts_ready = true;
-    pthread_cond_broadcast(&g_ghc_rts_ready_cond);
+    const int success_or_errno = pthread_cond_broadcast(&g_ghc_rts_ready_cond);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
   }
-  pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
+  {
+    const int success_or_errno = pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
+  }
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /******************************************************************************
@@ -1102,7 +1135,7 @@ onexit:
 }
 
 /* HIDDEN - see documentation in control.h */
-void HIDDEN eventlog_socket_control_start(
+EventlogSocketStatus HIDDEN eventlog_socket_control_start(
     pthread_t *const control_thread, const volatile int *const control_fd_ptr,
     pthread_mutex_t *const control_fd_mutex_ptr,
     pthread_cond_t *const new_conn_cond_ptr) {
@@ -1110,11 +1143,20 @@ void HIDDEN eventlog_socket_control_start(
   g_control_fd_ptr = control_fd_ptr;
   g_control_fd_mutex_ptr = control_fd_mutex_ptr;
   g_new_conn_cond_ptr = new_conn_cond_ptr;
-  if (pthread_create(control_thread, NULL, control_loop, NULL) != 0) {
-    DEBUG_ERRNO("pthread_create() failed");
-    return;
+  {
+    const int success_or_errno =
+        pthread_create(control_thread, NULL, control_loop, NULL);
+    if (success_or_errno != 0) {
+      DEBUG_ERRNO("pthread_create() failed");
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
   }
-  if (pthread_detach(*control_thread) != 0) {
-    DEBUG_ERRNO("pthread_detach() failed");
+  {
+    const int success_or_errno = pthread_detach(*control_thread);
+    if (success_or_errno != 0) {
+      DEBUG_ERRNO("pthread_detach() failed");
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
   }
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
