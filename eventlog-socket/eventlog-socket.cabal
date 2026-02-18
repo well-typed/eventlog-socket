@@ -55,7 +55,6 @@ flag optimise-heavily
 
 library
   exposed-modules:    GHC.Eventlog.Socket
-  other-modules:      GHC.Eventlog.Socket.CApi
   other-extensions:
     CApiFFI
     GeneralizedNewtypeDeriving
