@@ -6,7 +6,7 @@
 #include "./write_buffer.h"
 
 void HIDDEN write_buffer_push(WriteBuffer *wb, uint8_t *data, size_t size) {
-  DEBUG_TRACE("%p, %lu\n", data, size);
+  DEBUG_TRACE("%p, %lu\n", (void *)data, size);
   uint8_t *copy = malloc(size);
   memcpy(copy, data, size);
 
@@ -27,7 +27,7 @@ void HIDDEN write_buffer_push(WriteBuffer *wb, uint8_t *data, size_t size) {
     wb->last = item;
   }
 
-  DEBUG_TRACE("%p %p\n", wb, wb->head);
+  DEBUG_TRACE("%p %p\n", (void *)wb, (void *)wb->head);
 }
 
 void HIDDEN write_buffer_pop(WriteBuffer *wb) {

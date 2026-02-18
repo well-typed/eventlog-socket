@@ -1,6 +1,7 @@
 #ifndef EVENTLOG_SOCKET_DEBUG_H
 #define EVENTLOG_SOCKET_DEBUG_H
 
+#include <errno.h>
 #include <stdio.h>
 
 #ifdef DEBUG_COLOR /* Colorize with ANSI escape sequences. */
@@ -42,48 +43,58 @@
 #define DEBUG_TRACE(fmt, ...)                                                  \
   do {                                                                         \
     if (DEBUG_VERBOSITY >= DEBUG_VERBOSITY_TRACE) {                            \
+      const int errno_old = errno;                                             \
       fprintf(stderr,                                                          \
               DEBUG_COLOR_PURPLE "TRACE[%s|%d|%s]: " DEBUG_COLOR_RESET fmt     \
                                  "\n",                                         \
               __FILE__, __LINE__, __func__, __VA_ARGS__);                      \
+      errno = errno_old;                                                       \
     }                                                                          \
   } while (0)
 
 #define DEBUG_DEBUG(fmt, ...)                                                  \
   do {                                                                         \
     if (DEBUG_VERBOSITY >= DEBUG_VERBOSITY_DEBUG) {                            \
+      const int errno_old = errno;                                             \
       fprintf(stderr,                                                          \
               DEBUG_COLOR_BLUE "DEBUG[%s|%d|%s]: " DEBUG_COLOR_RESET fmt "\n", \
               __FILE__, __LINE__, __func__, __VA_ARGS__);                      \
+      errno = errno_old;                                                       \
     }                                                                          \
   } while (0)
 
 #define DEBUG_INFO(fmt, ...)                                                   \
   do {                                                                         \
     if (DEBUG_VERBOSITY >= DEBUG_VERBOSITY_INFO) {                             \
+      const int errno_old = errno;                                             \
       fprintf(stderr,                                                          \
               DEBUG_COLOR_YELLOW "INFO[%s|%d|%s]: " DEBUG_COLOR_RESET fmt      \
                                  "\n",                                         \
               __FILE__, __LINE__, __func__, __VA_ARGS__);                      \
+      errno = errno_old;                                                       \
     }                                                                          \
   } while (0)
 
 #define DEBUG_WARN(fmt, ...)                                                   \
   do {                                                                         \
     if (DEBUG_VERBOSITY >= DEBUG_VERBOSITY_WARN) {                             \
+      const int errno_old = errno;                                             \
       fprintf(stderr,                                                          \
               DEBUG_COLOR_YELLOW "WARN[%s|%d|%s]: " DEBUG_COLOR_RESET fmt      \
                                  "\n",                                         \
               __FILE__, __LINE__, __func__, __VA_ARGS__);                      \
+      errno = errno_old;                                                       \
     }                                                                          \
   } while (0)
 
 #define DEBUG_ERROR(fmt, ...)                                                  \
   do {                                                                         \
     if (DEBUG_VERBOSITY >= DEBUG_VERBOSITY_ERROR) {                            \
+      const int errno_old = errno;                                             \
       fprintf(stderr,                                                          \
               DEBUG_COLOR_RED "ERROR[%s|%d|%s]: " DEBUG_COLOR_RESET fmt "\n",  \
               __FILE__, __LINE__, __func__, __VA_ARGS__);                      \
+      errno = errno_old;                                                       \
     }                                                                          \
   } while (0)
 

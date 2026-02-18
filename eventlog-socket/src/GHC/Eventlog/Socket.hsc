@@ -41,6 +41,7 @@ import GHC.Enum (toEnumError)
 import System.IO.Unsafe (unsafePerformIO)
 
 #include <eventlog_socket.h>
+#include <string.h>
 
 --------------------------------------------------------------------------------
 -- High-level API
@@ -56,9 +57,12 @@ startWith ::
     EventlogSocketOpts ->
     IO ()
 startWith esa eso =
-    withEventlogSocketAddr esa $ \esaPtr ->
-    withEventlogSocketOpts eso $ \esoPtr ->
-        eventlog_socket_start esaPtr esoPtr
+    allocaBytes #{size EventlogSocketStatus} $ \essPtr -> do
+        withEventlogSocketAddr esa $ \esaPtr ->
+            withEventlogSocketOpts eso $ \esoPtr ->
+                eventlog_socket_start essPtr esaPtr esoPtr
+        essStatus <- peekEventlogSocketStatus essPtr
+        print essStatus
 
 --------------------------------------------------------------------------------
 -- Configuration types
@@ -156,34 +160,28 @@ fromEnv =
     allocaBytes #{size EventlogSocketAddr} $ \esaPtr ->
     allocaBytes #{size EventlogSocketOpts} $ \esoPtr -> do
         let tryGet =
-                eventlog_socket_from_env esaPtr esoPtr
+                allocaBytes #{size EventlogSocketStatus} $ \essPtr -> do
+                    eventlog_socket_from_env essPtr esaPtr esoPtr
+                    peekEventlogSocketStatus essPtr
         let shouldFree status =
-                notElem status $
-                    [ EVENTLOG_SOCKET_FROM_ENV_NONE
-                    , EVENTLOG_SOCKET_FROM_ENV_INVAL
+                elem (essStatusCode status) $
+                    [ EVENTLOG_SOCKET_OK
+                    , EVENTLOG_SOCKET_ERROR_CNF_TOOLONG
+                    , EVENTLOG_SOCKET_ERROR_CNF_NOHOST
+                    , EVENTLOG_SOCKET_ERROR_CNF_NOPORT
                     ]
         let maybeFree status =
                 when (shouldFree status) $ do
                     eventlog_socket_addr_free esaPtr
                     eventlog_socket_opts_free esoPtr
-        let maybePeek = \case
-                EVENTLOG_SOCKET_FROM_ENV_OK -> do
+        let maybePeek status
+                | essStatusCode status == EVENTLOG_SOCKET_OK = do
                     esa <- peekEventlogSocketAddr esaPtr
                     eso <- peekEventlogSocketOpts esoPtr
                     pure $ Just (esa, eso)
-                EVENTLOG_SOCKET_FROM_ENV_NONE -> do
+                | otherwise = do
+                    -- TODO: throw as exception
                     pure Nothing
-                EVENTLOG_SOCKET_FROM_ENV_INVAL -> do
-                    error "allocaBytes returned nullPtr"
-                EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG -> do
-                    esa <- peekEventlogSocketAddr esaPtr
-                    throwIO $ EventlogSocketAddrUnixPathTooLong (esaUnixPath esa)
-                EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING -> do
-                    esa  <- peekEventlogSocketAddr esaPtr
-                    throwIO $ EventlogSocketAddrInetHostMissing (esaInetPort esa)
-                EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING -> do
-                    esa  <- peekEventlogSocketAddr esaPtr
-                    throwIO $ EventlogSocketAddrInetPortMissing (esaInetHost esa)
         bracket tryGet maybeFree maybePeek
 
 
@@ -311,58 +309,67 @@ pattern EVENTLOG_SOCKET_INET = EventlogSocketTag #{const EVENTLOG_SOCKET_INET}
     EVENTLOG_SOCKET_INET #-}
 
 {- |
-The return status for the C function `eventlog_socket_from_env`.
+The status codes used by the @eventlog-socket@ library.
 -}
 newtype
-    {-# CTYPE "eventlog_socket.h" "EventlogSocketFromEnvStatus" #-}
-    EventlogSocketFromEnvStatus = EventlogSocketFromEnvStatus
-        { unEventlogSocketFromEnvStatus :: #{type EventlogSocketFromEnvStatus}
+    {-# CTYPE "eventlog_socket.h" "EventlogSocketStatusCode" #-}
+    EventlogSocketStatusCode = EventlogSocketStatusCode
+        { unEventlogSocketStatusCode :: #{type EventlogSocketStatusCode}
         }
         deriving (Eq, Show, Storable)
 
-{- |
-Successfully initialised the socket address and options.
--}
-pattern EVENTLOG_SOCKET_FROM_ENV_OK :: EventlogSocketFromEnvStatus
-pattern EVENTLOG_SOCKET_FROM_ENV_OK = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_OK}
+pattern EVENTLOG_SOCKET_OK :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_OK = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_OK}
 
-{- |
-Did not find any socket address.
--}
-pattern EVENTLOG_SOCKET_FROM_ENV_NONE :: EventlogSocketFromEnvStatus
-pattern EVENTLOG_SOCKET_FROM_ENV_NONE = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_NONE}
+pattern EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT}
 
-{- |
-Received invalid arguments.
--}
-pattern EVENTLOG_SOCKET_FROM_ENV_INVAL :: EventlogSocketFromEnvStatus
-pattern EVENTLOG_SOCKET_FROM_ENV_INVAL = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_INVAL}
+pattern EVENTLOG_SOCKET_ERROR_RTS_FAIL :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_RTS_FAIL = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_RTS_FAIL}
 
-{- |
-The found Unix domain socket path was too long.
--}
-pattern EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG :: EventlogSocketFromEnvStatus
-pattern EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG}
+pattern EVENTLOG_SOCKET_ERROR_CNF_NOADDR :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_CNF_NOADDR = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CNF_NOADDR}
 
-{- |
-No TCP/IP port number was found, but no host name was found.
--}
-pattern EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING :: EventlogSocketFromEnvStatus
-pattern EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING}
+pattern EVENTLOG_SOCKET_ERROR_CNF_TOOLONG :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_CNF_TOOLONG = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CNF_TOOLONG}
 
-{- |
-A TCP/IP host name was found, but no port number was found.
--}
-pattern EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING :: EventlogSocketFromEnvStatus
-pattern EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING = EventlogSocketFromEnvStatus #{const EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING}
+pattern EVENTLOG_SOCKET_ERROR_CNF_NOHOST :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_CNF_NOHOST = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CNF_NOHOST}
+
+pattern EVENTLOG_SOCKET_ERROR_CNF_NOPORT :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_CNF_NOPORT = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CNF_NOPORT}
+
+pattern EVENTLOG_SOCKET_ERROR_CMD_EXISTS :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_CMD_EXISTS = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CMD_EXISTS}
+
+pattern EVENTLOG_SOCKET_ERROR_GAI :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_GAI = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_GAI}
+
+pattern EVENTLOG_SOCKET_ERROR_SYSTEM :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERROR_SYSTEM = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_SYSTEM}
 
 {-# COMPLETE
-    EVENTLOG_SOCKET_FROM_ENV_OK,
-    EVENTLOG_SOCKET_FROM_ENV_NONE,
-    EVENTLOG_SOCKET_FROM_ENV_INVAL,
-    EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG,
-    EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING,
-    EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING #-}
+    EVENTLOG_SOCKET_OK,
+    EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT,
+    EVENTLOG_SOCKET_ERROR_RTS_FAIL,
+    EVENTLOG_SOCKET_ERROR_CNF_NOADDR,
+    EVENTLOG_SOCKET_ERROR_CNF_TOOLONG,
+    EVENTLOG_SOCKET_ERROR_CNF_NOHOST,
+    EVENTLOG_SOCKET_ERROR_CNF_NOPORT,
+    EVENTLOG_SOCKET_ERROR_CMD_EXISTS,
+    EVENTLOG_SOCKET_ERROR_GAI,
+    EVENTLOG_SOCKET_ERROR_SYSTEM #-}
+
+{- |
+The status used by the @eventlog-socket@ library.
+-}
+data
+    {-# CTYPE "eventlog_socket.h" "EventlogSocketStatus" #-}
+    EventlogSocketStatus = EventlogSocketStatus
+        { essStatusCode :: !EventlogSocketStatusCode
+        , essErrorCode :: !( #{type int} )
+        }
+    deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
 -- Marshalling from foreign types
@@ -462,6 +469,24 @@ withEventlogSocketOpts eso action =
         action esoPtr
 
 {- |
+Marshal an `EventlogSocketStatus` from C.
+-}
+peekEventlogSocketStatus ::
+    Ptr EventlogSocketStatus ->
+    IO EventlogSocketStatus
+peekEventlogSocketStatus essPtr = do
+    essStatusCode <-
+        #{peek EventlogSocketStatus, ess_status_code} essPtr
+    essErrorCode <-
+        if essStatusCode `elem` [EVENTLOG_SOCKET_ERROR_GAI, EVENTLOG_SOCKET_ERROR_SYSTEM]
+            then #{peek EventlogSocketStatus, ess_error_code} essPtr
+            else pure 0
+    pure EventlogSocketStatus
+        { essStatusCode = essStatusCode
+        , essErrorCode = essErrorCode
+        }
+
+{- |
 Variant of `peekCString` that checks for `nullPtr`.
 -}
 peekNullableCString :: CString -> IO String
@@ -486,17 +511,43 @@ foreign import capi safe "eventlog_socket.h eventlog_socket_opts_free"
         Ptr EventlogSocketOpts ->
         IO ()
 
-foreign import capi safe "eventlog_socket.h eventlog_socket_start"
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_start"
     eventlog_socket_start ::
+        Ptr EventlogSocketStatus ->
         Ptr EventlogSocketAddr ->
         Ptr EventlogSocketOpts ->
         IO ()
 
-foreign import capi safe "eventlog_socket.h eventlog_socket_from_env"
+#{def
+  void _wrap_eventlog_socket_start(
+    EventlogSocketStatus *eventlog_socket_status,
+    EventlogSocketAddr *eventlog_socket_addr,
+    EventlogSocketOpts *eventlog_socket_opts
+  )
+  {
+    const EventlogSocketStatus status = eventlog_socket_start(eventlog_socket_addr, eventlog_socket_opts);
+    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
+  }
+}
+
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_from_env"
     eventlog_socket_from_env ::
+        Ptr EventlogSocketStatus ->
         Ptr EventlogSocketAddr ->
         Ptr EventlogSocketOpts ->
-        IO EventlogSocketFromEnvStatus
+        IO ()
+
+#{def
+  void _wrap_eventlog_socket_from_env(
+    EventlogSocketStatus *eventlog_socket_status,
+    EventlogSocketAddr *eventlog_socket_addr,
+    EventlogSocketOpts *eventlog_socket_opts
+  )
+  {
+    const EventlogSocketStatus status = eventlog_socket_from_env(eventlog_socket_addr, eventlog_socket_opts);
+    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
+  }
+}
 
 foreign import capi safe "eventlog_socket.h eventlog_socket_wait"
     eventlog_socket_wait :: IO ()

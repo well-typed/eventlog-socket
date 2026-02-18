@@ -1,10 +1,11 @@
 #ifndef EVENTLOG_SOCKET_CONTROL_H
 #define EVENTLOG_SOCKET_CONTROL_H
 
-#include "./macros.h"
-
 #include <pthread.h>
 #include <stdbool.h>
+
+#include "./macros.h"
+#include "eventlog_socket.h"
 
 /// @brief Start the control thread.
 ///
@@ -20,19 +21,18 @@
 /// @param new_conn_cond_ptr
 ///   The control thread uses this condition together with
 ///   `control_fd_mutex_ptr` to wait for changes in `control_fd_ptr`.
-void HIDDEN eventlog_socket_control_start(pthread_t *control_thread,
-                                          const volatile int *control_fd_ptr,
-                                          pthread_mutex_t *control_fd_mutex_ptr,
-                                          pthread_cond_t *new_conn_cond_ptr);
-
-/// Signal that the GHC RTS is ready.
 ///
-/// Since control command handlers may call function from the GHC RTS API, no
-/// control commands are executed until the GHC RTS is ready. You do not need to
-/// call this function if you're starting eventlog socket using the Haskell API
-/// or via `eventlog_socket_start`.
+/// @return Upon successful completion, 0 is returned.
 ///
-/// @pre The GHC RTS is ready.
-void HIDDEN control_signal_ghc_rts_ready(void);
+/// @return On error, On error, -1 is returned, errno is set to indicate the
+/// error.
+///
+/// @par Errors
+/// @parblock
+/// `EAGAIN`, `EINVAL`, `EPERM`, or `ESRCH`.
+/// @endparblock
+EventlogSocketStatus HIDDEN eventlog_socket_control_start(
+    pthread_t *control_thread, const volatile int *control_fd_ptr,
+    pthread_mutex_t *control_fd_mutex_ptr, pthread_cond_t *new_conn_cond_ptr);
 
 #endif /* EVENTLOG_SOCKET_CONTROL_H */

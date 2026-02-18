@@ -1,6 +1,3 @@
-// Required for `POLLRDHUP` (used in poll.h).
-#define _GNU_SOURCE
-
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -22,6 +19,7 @@
 
 #include "./eventlog_socket/control.h"
 #include "./eventlog_socket/debug.h"
+#include "./eventlog_socket/error.h"
 #include "./eventlog_socket/poll.h"
 #include "./eventlog_socket/write_buffer.h"
 #include "eventlog_socket.h"
@@ -35,7 +33,7 @@
 /* This module is concurrent.
  * There are three thread(group)s:
  * 1. RTS
- * 2. worker spawned by open_socket (this writes to the socket)
+ * 2. worker spawned by worker_start (this writes to the socket)
  * 3. listener spawned by start_control_receiver (this receives messages on the
  * socket)
  */
@@ -245,10 +243,11 @@ static void writer_stop(void) {
 ///
 /// @warning It is only safe to pass this value to the GHC RTS *after*
 /// `eventlog_socket_init` or `eventlog_socket_start` is called.
-const EventLogWriter SocketEventLogWriter = {.initEventLogWriter = writer_init,
-                                             .writeEventLog = writer_write,
-                                             .flushEventLog = writer_flush,
-                                             .stopEventLogWriter = writer_stop};
+static const EventLogWriter SocketEventLogWriter = {
+    .initEventLogWriter = writer_init,
+    .writeEventLog = writer_write,
+    .flushEventLog = writer_flush,
+    .stopEventLogWriter = writer_stop};
 
 /*********************************************************************************
  * Main worker (in own thread)
@@ -488,41 +487,76 @@ static void *worker_loop(void *arg) {
   return NULL; // unreachable
 }
 
-// Initialize the Unix-domain listener socket and bind it to the provided path.
-// This function does not start any threads; open_socket() completes the setup.
-static void
+/// @brief Initialize the Unix domain socket and bind it to the provided path.
+///
+/// This function does not start any threads; @c worker_start() completes the
+/// setup.
+///
+/// @return See `EventlogSocketStatus`.
+///
+/// @par Errors
+/// @parblock
+/// This function may return the following system errors:
+/// `EADDRINUSE`, `EADDRNOTAVAIL`, `EAFNOSUPPORT`, `EBADF`, `EDOM`,
+/// `EFAULT`, `EINVAL`, `EISCONN`, `ELOOP`, `EMFILE`, `ENAMETOOLONG`, `ENFILE`,
+/// `ENOBUFS`, `ENOENT`, `ENOMEM`, `ENOPROTOOPT`, `ENOTDIR`, `ENOTSOCK`,
+/// `EPROTONOSUPPORT`, or `EROFS`.
+/// @endparblock
+static EventlogSocketStatus
 worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
                         const EventlogSocketOpts *const opts) {
   DEBUG_TRACE("init Unix listener: %s", unix_addr->esa_unix_path);
 
+  // Create a socket.
   g_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (g_listen_fd == -1) {
+    return STATUS_FROM_ERRNO(); // `setsockopt` sets errno.
+  }
 
   // Record the sock_path so it can be unlinked at exit
   g_sock_path = strdup(unix_addr->esa_unix_path);
+  if (g_sock_path == NULL) {
+    return STATUS_FROM_ERRNO(); // `strdup` sets errno.
+  }
 
-  // set socket linger
+  // Set socket linger.
   {
     const struct linger so_linger = {
         .l_onoff = true,
         .l_linger = 10,
     };
     if (setsockopt(g_listen_fd, SOL_SOCKET, SO_LINGER, &so_linger,
-                   sizeof(so_linger)) != 0) {
+                   sizeof(so_linger)) == -1) {
       DEBUG_ERRNO("setsockopt() failed for SO_LINGER");
+      const int setsockopt_errno = errno; // `setsockopt` sets errno.
+      close(g_listen_fd);
+      g_listen_fd = -1;
+      errno = setsockopt_errno;
+      return STATUS_FROM_ERRNO();
     }
   }
 
-  // set socket receive low water mark
+  // Set socket receive low water mark.
   if (setsockopt(g_listen_fd, SOL_SOCKET, SO_RCVLOWAT, &(int){1},
-                 sizeof(int)) != 0) {
+                 sizeof(int)) == -1) {
     DEBUG_ERRNO("setsockopt() failed for SO_RCVLOWAT");
+    const int setsockopt_errno = errno; // `setsockopt` sets errno.
+    close(g_listen_fd);
+    g_listen_fd = -1;
+    errno = setsockopt_errno;
+    return STATUS_FROM_ERRNO();
   }
 
-  // set socket send buffer size
+  // Set socket send buffer size.
   if (opts != NULL && opts->eso_sndbuf > 0) {
     if (setsockopt(g_listen_fd, SOL_SOCKET, SO_SNDBUF, &opts->eso_sndbuf,
-                   sizeof(opts->eso_sndbuf)) != 0) {
+                   sizeof(opts->eso_sndbuf)) == -1) {
       DEBUG_ERRNO("setsockopt() failed for SO_SNDBUF");
+      const int setsockopt_errno = errno; // `setsockopt` sets errno.
+      close(g_listen_fd);
+      g_listen_fd = -1;
+      errno = setsockopt_errno;
+      return STATUS_FROM_ERRNO();
     }
   }
 
@@ -534,14 +568,36 @@ worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
   if (bind(g_listen_fd, (struct sockaddr *)&local,
            sizeof(struct sockaddr_un)) == -1) {
     DEBUG_ERRNO("bind() failed");
-    abort();
+    return STATUS_FROM_ERRNO(); // `bind` sets errno.
   }
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
-// Initialize a TCP listener bound to the specified host/port combination.
-// Either host or port may be NULL, in which case the defaults used by
-// getaddrinfo (INADDR_ANY / unspecified port) apply.
-static void
+/// @brief Initialize the TCP/IP socket and bind it to the provided address.
+///
+/// This function does not start any threads; @c worker_start() completes the
+/// setup.
+///
+/// Either host or port may be NULL, in which case the defaults used by
+/// @c getaddrinfo apply.
+///
+/// @return See `EventlogSocketStatus`.
+///
+/// @par Errors
+/// @parblock
+/// This function may return the following system errors:
+/// `EADDRINUSE`, `EADDRNOTAVAIL`, `EAFNOSUPPORT`, `EAGAIN`, `EALREADY`,
+/// `EBADF`, `EDESTADDRREQ`, `EDOM`, `EFAULT`, `EINPROGRESS`, `EINVAL`, `EIO`,
+/// `EISCONN`, `EISDIR`, `ELOOP`, `EMFILE`, `ENAMETOOLONG`, `ENFILE`, `ENOBUFS`,
+/// `ENOENT`, `ENOMEM`, `ENOPROTOOPT`, `ENOTDIR`, `ENOTSOCK`, `EOPNOTSUPP`,
+/// `EPROTONOSUPPORT`, or `EROFS`.
+///
+/// This function may return the following @c getaddrinfo errors:
+/// `EAI_ADDRFAMILY`, `EAI_AGAIN`, `EAI_BADFLAGS`, `EAI_FAIL`, `EAI_FAMILY`,
+/// `EAI_MEMORY`, `EAI_NODATA`, `EAI_NONAME`, `EAI_SERVICE`, `EAI_SOCKTYPE`, or
+/// `EAI_SYSTEM`.
+/// @endparblock
+static EventlogSocketStatus
 worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
                         const EventlogSocketOpts *const opts) {
   struct addrinfo hints;
@@ -551,13 +607,13 @@ worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
   hints.ai_flags = AI_PASSIVE;
 
   struct addrinfo *res = NULL;
-  const int success_or_errno = getaddrinfo(
+  const int success_or_gai_error = getaddrinfo(
       inet_addr->esa_inet_host, inet_addr->esa_inet_port, &hints, &res);
-  if (success_or_errno != 0) {
+  if (success_or_gai_error != 0) {
     DEBUG_ERROR("getaddrinfo(\"%s\", \"%s\") failed: %s",
                 inet_addr->esa_inet_host, inet_addr->esa_inet_port,
-                gai_strerror(success_or_errno));
-    abort();
+                gai_strerror(success_or_gai_error));
+    return STATUS_FROM_GAI_ERROR(success_or_gai_error);
   }
 
   struct addrinfo *rp;
@@ -567,7 +623,7 @@ worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
       continue;
     }
 
-    // set socket reuse address
+    // Set socket reuse address.
     if (setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &(int){1},
                    sizeof(int)) != 0) {
       DEBUG_ERRNO("setsockopt() failed for SO_REUSEADDR");
@@ -587,73 +643,120 @@ worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
       }
     }
 
-    if (bind(g_listen_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+    if (bind(g_listen_fd, rp->ai_addr, rp->ai_addrlen) == -1) {
+      DEBUG_ERRNO("bind() failed");
+      close(g_listen_fd);
+      g_listen_fd = -1;
+      continue;
+    } else {
       char hostbuf[NI_MAXHOST];
       char servbuf[NI_MAXSERV];
       if (getnameinfo(rp->ai_addr, rp->ai_addrlen, hostbuf, sizeof(hostbuf),
                       servbuf, sizeof(servbuf),
                       NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
-        DEBUG_TRACE("bound TCP listener to %s:%s", hostbuf, servbuf);
+        DEBUG_TRACE("Bound TCP listener to %s:%s", hostbuf, servbuf);
       }
       break; // success
     }
-
-    DEBUG_ERRNO("bind() failed");
-    close(g_listen_fd);
-    g_listen_fd = -1;
   }
 
   freeaddrinfo(res);
 
   if (g_listen_fd == -1) {
-    DEBUG_ERROR("%s", "unable to bind TCP listener");
-    abort();
+    DEBUG_ERROR("%s", "Unable to bind TCP listener");
+    errno = EAGAIN;
+    return STATUS_FROM_ERRNO();
   }
+
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
-static void worker_init(void) {
+/// @brief Initialize the worker thread.
+///
+/// @return See `EventlogSocketStatus`.
+///
+/// @par Errors
+/// @parblock
+/// This function may return the following system errors:
+/// `EACCES`, `EAGAIN`, `EBADF`, `EFAULT`, `EINVAL`, `EMFILE`, `ENFILE`,
+/// `ENFILE`, or `ENOPKG`.
+/// @endparblock
+static EventlogSocketStatus worker_init(void) {
   if (!g_initialized) {
     if (pipe(g_wake_pipe) == -1) {
       DEBUG_ERRNO("pipe() failed");
-      abort();
+      return STATUS_FROM_ERRNO();
     }
     for (int i = 0; i < 2; i++) {
       const int flags = fcntl(g_wake_pipe[i], F_GETFL, 0);
-      if (flags == -1 ||
-          fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
+      if (flags == -1) {
+        DEBUG_ERRNO("fcntl() failed for F_GETFL");
+        return STATUS_FROM_ERRNO();
+      }
+      if (fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
         DEBUG_ERRNO("fcntl() failed for F_SETFL");
-        abort();
+        return STATUS_FROM_ERRNO();
       }
     }
     atexit(cleanup);
     g_initialized = true;
   }
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
-static void worker_start(const EventlogSocketAddr *const eventlog_socket_addr,
-                         const EventlogSocketOpts *const eventlog_socket_opts) {
+/// @brief Start the worker thread.
+///
+/// @return Upon successful completion, 0 is returned.
+///
+/// @return On error, one of the following error codes is returned.
+///
+/// @par Errors
+/// @parblock
+/// `EAI_ADDRFAMILY`, `EAI_AGAIN`, `EAI_BADFLAGS`, `EAI_FAIL`, `EAI_FAMILY`,
+/// `EAI_MEMORY`, `EAI_NODATA`, `EAI_NONAME`, `EAI_SERVICE`, `EAI_SOCKTYPE`, or
+/// `EAI_SYSTEM`.
+///
+/// If `EAI_SYSTEM` is returned, errno is set to one of the following error
+/// codes, in addition to any of the system errors that may be produced by
+/// `getaddrinfo`:
+///
+/// `EACCES`, `EADDRINUSE`, `EADDRNOTAVAIL`, `EAFNOSUPPORT`, `EAGAIN`,
+/// `EALREADY`, `EBADF`, `EDESTADDRREQ`, `EDOM`, `EFAULT`, `EINPROGRESS`,
+/// `EINVAL`, `EIO`, `EISCONN`, `EISDIR`, `ELOOP`, `EMFILE`, `ENAMETOOLONG`,
+/// `ENFILE`, `ENOBUFS`, `ENOENT`, `ENOMEM`, `ENOPKG`, `ENOPROTOOPT`, `ENOTDIR`,
+/// `ENOTSOCK`, `EOPNOTSUPP`, `EPERM`, `EPROTONOSUPPORT`, or `EROFS`.
+/// @endparblock
+static EventlogSocketStatus
+worker_start(const EventlogSocketAddr *const eventlog_socket_addr,
+             const EventlogSocketOpts *const eventlog_socket_opts) {
   DEBUG_TRACE("%s", "Starting worker thread.");
   switch (eventlog_socket_addr->esa_tag) {
-  case EVENTLOG_SOCKET_UNIX:
-    worker_socket_init_unix(&eventlog_socket_addr->esa_unix_addr,
-                            eventlog_socket_opts);
+  case EVENTLOG_SOCKET_UNIX: {
+    RETURN_ON_ERROR(worker_socket_init_unix(
+        &eventlog_socket_addr->esa_unix_addr, eventlog_socket_opts));
     break;
-  case EVENTLOG_SOCKET_INET:
-    worker_socket_init_inet(&eventlog_socket_addr->esa_inet_addr,
-                            eventlog_socket_opts);
+  }
+  case EVENTLOG_SOCKET_INET: {
+    RETURN_ON_ERROR(worker_socket_init_inet(
+        &eventlog_socket_addr->esa_inet_addr, eventlog_socket_opts));
     break;
-  default:
+  }
+  default: {
     DEBUG_ERROR("%s", "unknown listener kind");
-    abort();
+    errno = EINVAL;
+    return STATUS_FROM_ERRNO();
+  }
   }
 
   // start the worker thread
   g_listen_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
-  int ret = pthread_create(g_listen_thread_ptr, NULL, worker_loop, NULL);
-  if (ret != 0) {
+  const int success_or_errno =
+      pthread_create(g_listen_thread_ptr, NULL, worker_loop, NULL);
+  if (success_or_errno != 0) {
     DEBUG_ERRNO("pthread_create() failed");
-    abort();
+    return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
   }
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /*********************************************************************************
@@ -671,54 +774,78 @@ static size_t get_unix_path_max(void) {
  *********************************************************************************/
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_init(
-    const EventlogSocketAddr *const eventlog_socket_addr,
-    const EventlogSocketOpts *const eventlog_socket_opts) {
-  worker_init();
+EventlogSocketStatus
+eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
+                     const EventlogSocketOpts *const eventlog_socket_opts) {
 
-  // start worker thread
-  worker_start(eventlog_socket_addr, eventlog_socket_opts);
+  // Initialise worker thread.
+  RETURN_ON_ERROR(worker_init());
 
-  // start control thread
+  // Start worker thread.
+  RETURN_ON_ERROR(worker_start(eventlog_socket_addr, eventlog_socket_opts));
+
+  // Start control thread.
   g_control_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
-  eventlog_socket_control_start(g_control_thread_ptr, &g_client_fd,
-                                &g_write_buffer_and_client_fd_mutex,
-                                &g_new_conn_cond);
+  if (g_control_thread_ptr == NULL) {
+    return STATUS_FROM_ERRNO(); // `malloc` sets errno.
+  }
+  RETURN_ON_ERROR(eventlog_socket_control_start(
+      g_control_thread_ptr, &g_client_fd, &g_write_buffer_and_client_fd_mutex,
+      &g_new_conn_cond));
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_wait(void) {
+EventlogSocketStatus eventlog_socket_wait(void) {
   // Condition variable pairs with the mutex so reader threads can wait for the
   // worker to publish a connected client_fd atomically.
-  pthread_mutex_lock(&g_write_buffer_and_client_fd_mutex);
+  {
+    const int success_or_errno =
+        pthread_mutex_lock(&g_write_buffer_and_client_fd_mutex);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
+  }
   DEBUG_TRACE("initial client_fd=%d", g_client_fd);
   while (g_client_fd == -1) {
     DEBUG_TRACE("%s", "blocking for connection");
-    int ret = pthread_cond_wait(&g_new_conn_cond,
-                                &g_write_buffer_and_client_fd_mutex);
-    if (ret != 0) {
-      DEBUG_ERRNO("pthread_cond_wait() failed");
+    const int success_or_errno = pthread_cond_wait(
+        &g_new_conn_cond, &g_write_buffer_and_client_fd_mutex);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
     }
     DEBUG_TRACE("woke up, client_fd=%d", g_client_fd);
   }
   DEBUG_TRACE("proceeding with client_fd=%d", g_client_fd);
-  pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
+  const int success_or_errno =
+      pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
+  if (success_or_errno != 0) {
+    return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+  }
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
-                                 StgClosure *main_closure) {
+RtsConfig eventlog_socket_attach_rts_config(RtsConfig rts_config) {
+  rts_config.eventlog_writer = &SocketEventLogWriter;
+  return rts_config;
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+void eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
+                                  StgClosure *main_closure) {
   SchedulerStatus status;
   int exit_status;
 
   // Set the eventlog socket writer.
-  rts_config.eventlog_writer = &SocketEventLogWriter;
+  rts_config = eventlog_socket_attach_rts_config(rts_config);
 
   // Initialize the GHC RTS.
   hs_init_ghc(&argc, &argv, rts_config);
 
   // Tell the control thread that the GHC RTS is initialised.
-  control_signal_ghc_rts_ready();
+  // TODO: print error message
+  eventlog_socket_signal_ghc_rts_ready();
 
   // Evaluate the Haskell main closure.
   {
@@ -756,12 +883,13 @@ int eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
 /// thread.
 ///
 /// @pre The GHC RTS is ready.
+///
 /// @pre The function `eventlog_socket_init` has been called.
-void eventlog_socket_attach(void) {
+EventlogSocketStatus eventlog_socket_attach(void) {
   // Check if this version of the GHC RTS supports the eventlog.
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
     DEBUG_ERROR("%s", "eventlog is not supported.");
-    return;
+    return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT);
   }
 
   // Stop the existing eventlog writer.
@@ -770,21 +898,29 @@ void eventlog_socket_attach(void) {
   }
 
   // Attach the `SocketEventLogWriter` eventlog writer.
-  startEventLogging(&SocketEventLogWriter);
+  if (!startEventLogging(&SocketEventLogWriter)) {
+    return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERROR_RTS_FAIL);
+  }
 
-  // Tell the control thread that the GHC RTS is initialised.
-  control_signal_ghc_rts_ready();
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
-                           const EventlogSocketOpts *eventlog_socket_opts) {
+EventlogSocketStatus
+eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
+                      const EventlogSocketOpts *eventlog_socket_opts) {
 
   // Initialize eventlog_socket.
-  eventlog_socket_init(eventlog_socket_addr, eventlog_socket_opts);
+  RETURN_ON_ERROR(
+      eventlog_socket_init(eventlog_socket_addr, eventlog_socket_opts));
 
-  // Attache the eventlog writer to the GHC RTS.
-  eventlog_socket_attach();
+  // Attach the eventlog writer to the GHC RTS.
+  RETURN_ON_ERROR(eventlog_socket_attach());
+
+  // Signal that the GHC RTS is ready.
+  RETURN_ON_ERROR(eventlog_socket_signal_ghc_rts_ready());
+
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
@@ -793,7 +929,6 @@ void eventlog_socket_opts_init(EventlogSocketOpts *eventlog_socket_opts) {
     return;
   }
   eventlog_socket_opts->eso_wait = false;
-  // todo: any value <=1024 should be ignored
   eventlog_socket_opts->eso_sndbuf = 0;
 }
 
@@ -821,8 +956,18 @@ void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket) {
 
 /// @brief Copy the first `str_len` characters of a string into allocated
 /// memory.
+///
+/// @return Upon successful completion, a pointer to an allocated copy of the
+/// string is returned.
+///
+/// @return On error, a null pointer is returned and errno is set to indicate
+/// the error.
 static char *strncpy_alloc(const size_t str_len, const char *const str) {
+  // `calloc` sets errno.
   char *str_copy = calloc(str_len + 1, sizeof(char));
+  if (str_copy == NULL) {
+    return NULL;
+  }
   strncpy(str_copy, str, str_len);
   return str_copy;
 }
@@ -836,17 +981,18 @@ void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-EventlogSocketFromEnvStatus
+EventlogSocketStatus
 eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
                          EventlogSocketOpts *eventlog_socket_opts_out) {
 
   // Check that eventlog_socket_out is nonnull.
   if (eventlog_socket_addr_out == NULL) {
-    return EVENTLOG_SOCKET_FROM_ENV_INVAL;
+    errno = EINVAL;
+    return STATUS_FROM_ERRNO();
   }
 
   // Allocate a variable for the return status:
-  EventlogSocketFromEnvStatus status = EVENTLOG_SOCKET_FROM_ENV_NONE;
+  EventlogSocketStatusCode status_code = EVENTLOG_SOCKET_ERROR_CNF_NOADDR;
 
   // Try to construct a Unix domain socket address:
   char *unix_path = getenv(EVENTLOG_SOCKET_ENV_UNIX_PATH); // NOLINT
@@ -857,20 +1003,24 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     // Check that unix_path does not exceed the maximum unix_path length:
     const size_t unix_path_len = strlen(unix_path);
     if (unix_path_len > unix_path_max) {
-      status = EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG;
+      status_code = EVENTLOG_SOCKET_ERROR_CNF_TOOLONG;
     }
 
     // Write the configuration:
+    char *unix_path_copy = strncpy_alloc(unix_path_len, unix_path);
+    if (unix_path_copy == NULL) {
+      return STATUS_FROM_ERRNO(); // `strncpy_alloc` sets errno.
+    }
     *eventlog_socket_addr_out = (EventlogSocketAddr){
         .esa_tag = EVENTLOG_SOCKET_UNIX,
         .esa_unix_addr =
             {
-                .esa_unix_path = strncpy_alloc(unix_path_len, unix_path),
+                .esa_unix_path = unix_path_copy,
             },
     };
 
     // Set the status:
-    status = EVENTLOG_SOCKET_FROM_ENV_OK;
+    status_code = EVENTLOG_SOCKET_OK;
   }
 
   // Try to construct a TCP/IP address:
@@ -881,24 +1031,35 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     const bool has_inet_port = inet_port != NULL;
     // If either is set, construct a TCP/IP address:
     if (has_inet_host || has_inet_port) {
+      // Copy the inet_host:
+      char *inet_host_copy = (has_inet_host)
+                                 ? strncpy_alloc(strlen(inet_host), inet_host)
+                                 : strncpy_alloc(0, "");
+      if (inet_host_copy == NULL) {
+        return STATUS_FROM_ERRNO(); // `strncpy_alloc` sets errno.
+      }
+      // Copy the inet_port:
+      char *inet_port_copy = (has_inet_port)
+                                 ? strncpy_alloc(strlen(inet_port), inet_port)
+                                 : strncpy_alloc(0, "");
+      if (inet_port_copy == NULL) {
+        free(inet_host_copy);
+        return STATUS_FROM_ERRNO(); // `strncpy_alloc` sets errno.
+      }
       // Write the configuration:
-      *eventlog_socket_addr_out = (EventlogSocketAddr){
-          .esa_tag = EVENTLOG_SOCKET_INET,
-          .esa_inet_addr = {
-              .esa_inet_host = (has_inet_host)
-                                   ? strncpy_alloc(strlen(inet_host), inet_host)
-                                   : strncpy_alloc(0, ""),
-              .esa_inet_port = (has_inet_port)
-                                   ? strncpy_alloc(strlen(inet_port), inet_port)
-                                   : strncpy_alloc(0, ""),
-          }};
+      *eventlog_socket_addr_out =
+          (EventlogSocketAddr){.esa_tag = EVENTLOG_SOCKET_INET,
+                               .esa_inet_addr = {
+                                   .esa_inet_host = inet_host_copy,
+                                   .esa_inet_port = inet_port_copy,
+                               }};
       // Set the status:
       if (!has_inet_host) {
-        status = EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING;
+        status_code = EVENTLOG_SOCKET_ERROR_CNF_NOHOST;
       } else if (!has_inet_port) {
-        status = EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING;
+        status_code = EVENTLOG_SOCKET_ERROR_CNF_NOPORT;
       } else {
-        status = EVENTLOG_SOCKET_FROM_ENV_OK;
+        status_code = EVENTLOG_SOCKET_OK;
       }
     }
   }
@@ -909,5 +1070,5 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     eventlog_socket_opts_out->eso_wait =
         getenv(EVENTLOG_SOCKET_ENV_WAIT) != NULL; // NOLINT
   }
-  return status;
+  return STATUS_FROM_CODE(status_code);
 }

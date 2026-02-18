@@ -1,15 +1,38 @@
 #include <Rts.h>
 #include <eventlog_socket.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Debug macros
-#define DEBUG_ERROR(fmt, ...)                                                  \
+/// @brief If the status contains an error code, print a string describing the
+/// error to stderr, and exit.
+#define EXIT_ON_ERROR(eventlog_socket_status)                                  \
   do {                                                                         \
-    fprintf(stderr, "ERROR[%s|%d|%s]: " fmt "\n", __FILE__, __LINE__,          \
-            __func__, __VA_ARGS__);                                            \
+    const EventlogSocketStatus status = (eventlog_socket_status);              \
+    const EventlogSocketStatusCode status_code = status.ess_status_code;       \
+    if (status_code != EVENTLOG_SOCKET_OK) {                                   \
+      char *strerr = eventlog_socket_strerror(status);                         \
+      if (strerr != NULL) {                                                    \
+        fprintf(stderr, "ERROR[%s|%d|%s]: %s\n", __FILE__, __LINE__, __func__, \
+                strerr);                                                       \
+        free(strerr);                                                          \
+        exit((int)status_code); /* NOLINT */                                   \
+      }                                                                        \
+    }                                                                          \
   } while (0)
+
+/// @brief Portable macro for labeling explicit fallthrough.
+#ifndef FALLTHROUGH
+#ifdef __has_attribute
+#if __has_attribute(fallthrough)
+#define FALLTHROUGH __attribute__((fallthrough))
+#endif
+#endif
+#ifndef FALLTHROUGH
+#define FALLTHROUGH ((void)0)
+#endif
+#endif
 
 // Get the main closure.
 extern StgClosure ZCMain_main_closure;
@@ -25,38 +48,26 @@ int main(int argc, char *argv[]) {
   // Read the socket address and options from the environment.
   EventlogSocketAddr eventlog_socket_addr = {0};
   EventlogSocketOpts eventlog_socket_opts = {0};
-  const EventlogSocketFromEnvStatus status =
+  const EventlogSocketStatus status =
       eventlog_socket_from_env(&eventlog_socket_addr, &eventlog_socket_opts);
 
   // Handle the return status.
-  switch (status) {
-  case EVENTLOG_SOCKET_FROM_ENV_OK:
-    // Initialise eventlog socket.
-    eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts);
-    break;
-  case EVENTLOG_SOCKET_FROM_ENV_NONE:
-    goto main; // Skip free.
-  case EVENTLOG_SOCKET_FROM_ENV_INVAL:
-    goto main; // Skip free.
-  case EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG:
-    assert(eventlog_socket_addr.esa_tag == EVENTLOG_SOCKET_UNIX);
-    DEBUG_ERROR("value of %s (%s) is too long", EVENTLOG_SOCKET_ENV_UNIX_PATH,
-                eventlog_socket_addr.esa_unix_addr.esa_unix_path);
-    break;
-  case EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING:
-    DEBUG_ERROR("no value given for %s", EVENTLOG_SOCKET_ENV_INET_HOST);
-    break;
-  case EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING:
-    DEBUG_ERROR("no value given for %s", EVENTLOG_SOCKET_ENV_INET_PORT);
-    break;
+  switch (status.ess_status_code) {
+  case EVENTLOG_SOCKET_OK:
+    EXIT_ON_ERROR(
+        eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts));
+    FALLTHROUGH;
+  case EVENTLOG_SOCKET_ERROR_CNF_TOOLONG:
+    FALLTHROUGH;
+  case EVENTLOG_SOCKET_ERROR_CNF_NOHOST:
+    FALLTHROUGH;
+  case EVENTLOG_SOCKET_ERROR_CNF_NOPORT:
+    // Free the memory held by socket address and options.
+    eventlog_socket_addr_free(&eventlog_socket_addr);
+    eventlog_socket_opts_free(&eventlog_socket_opts);
+    FALLTHROUGH;
+  default:
+    // Delegate to the helper that runs hs_main and the application closure.
+    eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure);
   }
-
-  // Free the memory held by socket address and options.
-  eventlog_socket_addr_free(&eventlog_socket_addr);
-  eventlog_socket_opts_free(&eventlog_socket_opts);
-
-main:
-  // Delegate to the helper that runs hs_main and the application closure.
-  return eventlog_socket_wrap_hs_main(argc, argv, rts_config,
-                                      &ZCMain_main_closure);
 }
