@@ -31,6 +31,8 @@ extra-source-files:
   cbits/eventlog_socket/error.h
   cbits/eventlog_socket/macros.h
   cbits/eventlog_socket/poll.h
+  cbits/eventlog_socket/string.c
+  cbits/eventlog_socket/string.h
   cbits/eventlog_socket/write_buffer.c
   cbits/eventlog_socket/write_buffer.h
   cbits/eventlog_socket.c
@@ -66,12 +68,13 @@ library
   build-depends:      base >=4.14 && <5
   build-tool-depends: hsc2hs:hsc2hs
   hs-source-dirs:     src
-  cc-options:         -std=c11
+  cc-options:         -std=c11 -D_POSIX_C_SOURCE=200112L
   default-language:   Haskell2010
   default-extensions: LambdaCase
   c-sources:
     cbits/eventlog_socket/control.c
     cbits/eventlog_socket/error.c
+    cbits/eventlog_socket/string.c
     cbits/eventlog_socket/write_buffer.c
     cbits/eventlog_socket.c
 

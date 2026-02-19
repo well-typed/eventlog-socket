@@ -1,10 +1,10 @@
 #ifndef EVENTLOG_SOCKET_WRITE_BUFFER_H
 #define EVENTLOG_SOCKET_WRITE_BUFFER_H
 
-#include "./macros.h"
-
 #include <stddef.h>
 #include <stdint.h>
+
+#include "./macros.h"
 
 typedef struct WriteBuffer WriteBuffer;
 typedef struct WriteBufferItem WriteBufferItem;
