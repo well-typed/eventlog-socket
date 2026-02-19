@@ -1,20 +1,16 @@
 #include <netdb.h>
 #include <string.h>
 
-#include "eventlog_socket.h"
 #include "./string.h"
+#include "eventlog_socket.h"
 
 #define STRERROR_BUFLEN_INIT 1024
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 char *eventlog_socket_strerror(EventlogSocketStatus status) {
   switch (status.ess_status_code) {
-  case EVENTLOG_SOCKET_OK: {
-    return ess_strdup("Ok");
-  }
   case EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT: {
-    return ess_strdup(
-        "This version of the GHC RTS does not support the eventlog.");
+    return ess_strdup("The GHC RTS does not support the eventlog.");
   }
   case EVENTLOG_SOCKET_ERROR_RTS_FAIL: {
     return ess_strdup("The GHC RTS could not start the eventlog writer.");
@@ -35,7 +31,7 @@ char *eventlog_socket_strerror(EventlogSocketStatus status) {
   }
   case EVENTLOG_SOCKET_ERROR_CMD_EXISTS: {
     return ess_strdup("The requested combination of namespace and command ID "
-                        "is already in use.");
+                      "is already in use.");
   }
   case EVENTLOG_SOCKET_ERROR_GAI: {
     return ess_strdup(gai_strerror(status.ess_error_code));

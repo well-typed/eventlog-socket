@@ -15,16 +15,4 @@
 #endif
 #endif
 
-// Portable macro for marking cases with explicit fallthrough.
-#ifndef FALLTHROUGH
-#ifdef __has_attribute
-#if __has_attribute(fallthrough)
-#define FALLTHROUGH __attribute__((fallthrough))
-#endif
-#endif
-#ifndef FALLTHROUGH
-#define FALLTHROUGH ((void)0)
-#endif
-#endif
-
 #endif /* EVENTLOG_SOCKET_MACROS_H */

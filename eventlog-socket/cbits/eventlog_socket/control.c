@@ -30,11 +30,11 @@
 #include <Rts.h>
 #include <rts/prof/Heap.h>
 
-#include "eventlog_socket.h"
 #include "./control.h"
 #include "./debug.h"
 #include "./error.h"
 #include "./poll.h"
+#include "eventlog_socket.h"
 
 // CONTROL_MAGIC should be the UTF-8 encoding of some code point between
 // U+010000 and U+10FFFF. Let's pick code point U+01E5CC, for Eventlog

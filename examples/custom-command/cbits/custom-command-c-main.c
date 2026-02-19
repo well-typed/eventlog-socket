@@ -122,18 +122,17 @@ int main(int argc, char *argv[]) {
   case EVENTLOG_SOCKET_OK:
     EXIT_ON_ERROR(
         eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts));
-    FALLTHROUGH;
+    /*FALLTHROUGH*/
   case EVENTLOG_SOCKET_ERROR_CNF_TOOLONG:
-    FALLTHROUGH;
   case EVENTLOG_SOCKET_ERROR_CNF_NOHOST:
-    FALLTHROUGH;
   case EVENTLOG_SOCKET_ERROR_CNF_NOPORT:
     // Free the memory held by socket address and options.
     eventlog_socket_addr_free(&eventlog_socket_addr);
     eventlog_socket_opts_free(&eventlog_socket_opts);
-    FALLTHROUGH;
+    break;
   default:
     // Delegate to the helper that runs hs_main and the application closure.
-    eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure);
+    break;
   }
+  eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure);
 }
