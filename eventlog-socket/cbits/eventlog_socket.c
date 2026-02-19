@@ -17,14 +17,22 @@
 #include <Rts.h>
 #include <rts/prof/Heap.h>
 
+#include "eventlog_socket.h"
 #include "./eventlog_socket/control.h"
 #include "./eventlog_socket/debug.h"
 #include "./eventlog_socket/error.h"
 #include "./eventlog_socket/poll.h"
+#include "./eventlog_socket/string.h"
 #include "./eventlog_socket/write_buffer.h"
-#include "eventlog_socket.h"
 
 #define LISTEN_BACKLOG 5
+
+#ifndef NI_MAXHOST
+#define NI_MAXHOST 1025
+#endif
+#ifndef NI_MAXSERV
+#define NI_MAXSERV 32
+#endif
 
 /*********************************************************************************
  * globals
@@ -514,9 +522,9 @@ worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
   }
 
   // Record the sock_path so it can be unlinked at exit
-  g_sock_path = strdup(unix_addr->esa_unix_path);
+  g_sock_path = ess_strdup(unix_addr->esa_unix_path);
   if (g_sock_path == NULL) {
-    return STATUS_FROM_ERRNO(); // `strdup` sets errno.
+    return STATUS_FROM_ERRNO(); // `ess_strdup` sets errno.
   }
 
   // Set socket linger.
@@ -954,24 +962,6 @@ void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket) {
   }
 }
 
-/// @brief Copy the first `str_len` characters of a string into allocated
-/// memory.
-///
-/// @return Upon successful completion, a pointer to an allocated copy of the
-/// string is returned.
-///
-/// @return On error, a null pointer is returned and errno is set to indicate
-/// the error.
-static char *strncpy_alloc(const size_t str_len, const char *const str) {
-  // `calloc` sets errno.
-  char *str_copy = calloc(str_len + 1, sizeof(char));
-  if (str_copy == NULL) {
-    return NULL;
-  }
-  strncpy(str_copy, str, str_len);
-  return str_copy;
-}
-
 /* PUBLIC - see documentation in eventlog_socket.h */
 void eventlog_socket_opts_free(EventlogSocketOpts *eventlog_socket_opts) {
   (void)eventlog_socket_opts;
@@ -1007,9 +997,9 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     }
 
     // Write the configuration:
-    char *unix_path_copy = strncpy_alloc(unix_path_len, unix_path);
+    char *unix_path_copy = ess_strndup(unix_path_len, unix_path);
     if (unix_path_copy == NULL) {
-      return STATUS_FROM_ERRNO(); // `strncpy_alloc` sets errno.
+      return STATUS_FROM_ERRNO(); // `ess_strndup` sets errno.
     }
     *eventlog_socket_addr_out = (EventlogSocketAddr){
         .esa_tag = EVENTLOG_SOCKET_UNIX,
@@ -1033,18 +1023,18 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     if (has_inet_host || has_inet_port) {
       // Copy the inet_host:
       char *inet_host_copy = (has_inet_host)
-                                 ? strncpy_alloc(strlen(inet_host), inet_host)
-                                 : strncpy_alloc(0, "");
+                                 ? ess_strndup(strlen(inet_host), inet_host)
+                                 : ess_strndup(0, "");
       if (inet_host_copy == NULL) {
-        return STATUS_FROM_ERRNO(); // `strncpy_alloc` sets errno.
+        return STATUS_FROM_ERRNO(); // `ess_strndup` sets errno.
       }
       // Copy the inet_port:
       char *inet_port_copy = (has_inet_port)
-                                 ? strncpy_alloc(strlen(inet_port), inet_port)
-                                 : strncpy_alloc(0, "");
+                                 ? ess_strndup(strlen(inet_port), inet_port)
+                                 : ess_strndup(0, "");
       if (inet_port_copy == NULL) {
         free(inet_host_copy);
-        return STATUS_FROM_ERRNO(); // `strncpy_alloc` sets errno.
+        return STATUS_FROM_ERRNO(); // `ess_strndup` sets errno.
       }
       // Write the configuration:
       *eventlog_socket_addr_out =

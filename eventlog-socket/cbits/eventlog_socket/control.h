@@ -4,8 +4,8 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-#include "./macros.h"
 #include "eventlog_socket.h"
+#include "./macros.h"
 
 /// @brief Start the control thread.
 ///
