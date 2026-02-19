@@ -166,9 +166,9 @@ fromEnv =
         let shouldFree status =
                 elem (essStatusCode status) $
                     [ EVENTLOG_SOCKET_OK
-                    , EVENTLOG_SOCKET_ERROR_CNF_TOOLONG
-                    , EVENTLOG_SOCKET_ERROR_CNF_NOHOST
-                    , EVENTLOG_SOCKET_ERROR_CNF_NOPORT
+                    , EVENTLOG_SOCKET_ERR_ENV_TOOLONG
+                    , EVENTLOG_SOCKET_ERR_ENV_NOHOST
+                    , EVENTLOG_SOCKET_ERR_ENV_NOPORT
                     ]
         let maybeFree status =
                 when (shouldFree status) $ do
@@ -179,15 +179,15 @@ fromEnv =
                     esa <- peekEventlogSocketAddr esaPtr
                     eso <- peekEventlogSocketOpts esoPtr
                     pure $ Just (esa, eso)
-                | essStatusCode status == EVENTLOG_SOCKET_ERROR_CNF_NOADDR = do
+                | essStatusCode status == EVENTLOG_SOCKET_ERR_ENV_NOADDR = do
                     pure Nothing
-                | essStatusCode status == EVENTLOG_SOCKET_ERROR_CNF_TOOLONG = do
+                | essStatusCode status == EVENTLOG_SOCKET_ERR_ENV_TOOLONG = do
                     esa <- peekEventlogSocketAddr esaPtr
                     throwIO $ EventlogSocketAddrUnixPathTooLong (esaUnixPath esa)
-                | essStatusCode status == EVENTLOG_SOCKET_ERROR_CNF_NOHOST = do
+                | essStatusCode status == EVENTLOG_SOCKET_ERR_ENV_NOHOST = do
                     esa <- peekEventlogSocketAddr esaPtr
                     throwIO $ EventlogSocketAddrInetHostMissing (esaInetPort esa)
-                | essStatusCode status == EVENTLOG_SOCKET_ERROR_CNF_NOPORT = do
+                | essStatusCode status == EVENTLOG_SOCKET_ERR_ENV_NOPORT = do
                     esa <- peekEventlogSocketAddr esaPtr
                     throwIO $ EventlogSocketAddrInetHostMissing (esaInetHost esa)
                 | otherwise =
@@ -335,44 +335,44 @@ newtype
 pattern EVENTLOG_SOCKET_OK :: EventlogSocketStatusCode
 pattern EVENTLOG_SOCKET_OK = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_OK}
 
-pattern EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT}
+pattern EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT}
 
-pattern EVENTLOG_SOCKET_ERROR_RTS_FAIL :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_RTS_FAIL = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_RTS_FAIL}
+pattern EVENTLOG_SOCKET_ERR_RTS_FAIL :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_RTS_FAIL = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_RTS_FAIL}
 
-pattern EVENTLOG_SOCKET_ERROR_CNF_NOADDR :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_CNF_NOADDR = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CNF_NOADDR}
+pattern EVENTLOG_SOCKET_ERR_ENV_NOADDR :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_ENV_NOADDR = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_ENV_NOADDR}
 
-pattern EVENTLOG_SOCKET_ERROR_CNF_TOOLONG :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_CNF_TOOLONG = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CNF_TOOLONG}
+pattern EVENTLOG_SOCKET_ERR_ENV_TOOLONG :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_ENV_TOOLONG = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_ENV_TOOLONG}
 
-pattern EVENTLOG_SOCKET_ERROR_CNF_NOHOST :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_CNF_NOHOST = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CNF_NOHOST}
+pattern EVENTLOG_SOCKET_ERR_ENV_NOHOST :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_ENV_NOHOST = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_ENV_NOHOST}
 
-pattern EVENTLOG_SOCKET_ERROR_CNF_NOPORT :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_CNF_NOPORT = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CNF_NOPORT}
+pattern EVENTLOG_SOCKET_ERR_ENV_NOPORT :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_ENV_NOPORT = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_ENV_NOPORT}
 
-pattern EVENTLOG_SOCKET_ERROR_CMD_EXISTS :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_CMD_EXISTS = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_CMD_EXISTS}
+pattern EVENTLOG_SOCKET_ERR_CMD_EXISTS :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_CMD_EXISTS = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_CMD_EXISTS}
 
-pattern EVENTLOG_SOCKET_ERROR_GAI :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_GAI = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_GAI}
+pattern EVENTLOG_SOCKET_ERR_GAI :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_GAI = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_GAI}
 
-pattern EVENTLOG_SOCKET_ERROR_SYSTEM :: EventlogSocketStatusCode
-pattern EVENTLOG_SOCKET_ERROR_SYSTEM = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERROR_SYSTEM}
+pattern EVENTLOG_SOCKET_ERR_SYS :: EventlogSocketStatusCode
+pattern EVENTLOG_SOCKET_ERR_SYS = EventlogSocketStatusCode #{const EVENTLOG_SOCKET_ERR_SYS}
 
 {-# COMPLETE
     EVENTLOG_SOCKET_OK,
-    EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT,
-    EVENTLOG_SOCKET_ERROR_RTS_FAIL,
-    EVENTLOG_SOCKET_ERROR_CNF_NOADDR,
-    EVENTLOG_SOCKET_ERROR_CNF_TOOLONG,
-    EVENTLOG_SOCKET_ERROR_CNF_NOHOST,
-    EVENTLOG_SOCKET_ERROR_CNF_NOPORT,
-    EVENTLOG_SOCKET_ERROR_CMD_EXISTS,
-    EVENTLOG_SOCKET_ERROR_GAI,
-    EVENTLOG_SOCKET_ERROR_SYSTEM #-}
+    EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT,
+    EVENTLOG_SOCKET_ERR_RTS_FAIL,
+    EVENTLOG_SOCKET_ERR_ENV_NOADDR,
+    EVENTLOG_SOCKET_ERR_ENV_TOOLONG,
+    EVENTLOG_SOCKET_ERR_ENV_NOHOST,
+    EVENTLOG_SOCKET_ERR_ENV_NOPORT,
+    EVENTLOG_SOCKET_ERR_CMD_EXISTS,
+    EVENTLOG_SOCKET_ERR_GAI,
+    EVENTLOG_SOCKET_ERR_SYS #-}
 
 {- |
 The status used by the @eventlog-socket@ library.
@@ -492,7 +492,7 @@ peekEventlogSocketStatus essPtr = do
     essStatusCode <-
         #{peek EventlogSocketStatus, ess_status_code} essPtr
     essErrorCode <-
-        if essStatusCode `elem` [EVENTLOG_SOCKET_ERROR_GAI, EVENTLOG_SOCKET_ERROR_SYSTEM]
+        if essStatusCode `elem` [EVENTLOG_SOCKET_ERR_GAI, EVENTLOG_SOCKET_ERR_SYS]
             then #{peek EventlogSocketStatus, ess_error_code} essPtr
             else pure 0
     pure EventlogSocketStatus

@@ -397,7 +397,7 @@ EventlogSocketStatus eventlog_socket_control_register_command(
                     command_id, (void *)namespace);
         // If so, fail.
         pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-        return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERROR_CMD_EXISTS);
+        return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_CMD_EXISTS);
       }
     } while (command_entry->next != NULL);
     assert(command_entry != NULL);

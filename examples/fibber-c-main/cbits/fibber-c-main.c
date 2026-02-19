@@ -45,9 +45,9 @@ int main(int argc, char *argv[]) {
     EXIT_ON_ERROR(
         eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts));
     /*FALLTHROUGH*/
-  case EVENTLOG_SOCKET_ERROR_CNF_TOOLONG:
-  case EVENTLOG_SOCKET_ERROR_CNF_NOHOST:
-  case EVENTLOG_SOCKET_ERROR_CNF_NOPORT:
+  case EVENTLOG_SOCKET_ERR_ENV_TOOLONG:
+  case EVENTLOG_SOCKET_ERR_ENV_NOHOST:
+  case EVENTLOG_SOCKET_ERR_ENV_NOPORT:
     // Free the memory held by socket address and options.
     eventlog_socket_addr_free(&eventlog_socket_addr);
     eventlog_socket_opts_free(&eventlog_socket_opts);

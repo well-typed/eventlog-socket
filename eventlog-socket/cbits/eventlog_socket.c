@@ -897,7 +897,7 @@ EventlogSocketStatus eventlog_socket_attach(void) {
   // Check if this version of the GHC RTS supports the eventlog.
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
     DEBUG_ERROR("%s", "eventlog is not supported.");
-    return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT);
+    return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT);
   }
 
   // Stop the existing eventlog writer.
@@ -907,7 +907,7 @@ EventlogSocketStatus eventlog_socket_attach(void) {
 
   // Attach the `SocketEventLogWriter` eventlog writer.
   if (!startEventLogging(&SocketEventLogWriter)) {
-    return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERROR_RTS_FAIL);
+    return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_RTS_FAIL);
   }
 
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
@@ -982,7 +982,7 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
   }
 
   // Allocate a variable for the return status:
-  EventlogSocketStatusCode status_code = EVENTLOG_SOCKET_ERROR_CNF_NOADDR;
+  EventlogSocketStatusCode status_code = EVENTLOG_SOCKET_ERR_ENV_NOADDR;
 
   // Try to construct a Unix domain socket address:
   char *unix_path = getenv(EVENTLOG_SOCKET_ENV_UNIX_PATH); // NOLINT
@@ -993,7 +993,7 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     // Check that unix_path does not exceed the maximum unix_path length:
     const size_t unix_path_len = strlen(unix_path);
     if (unix_path_len > unix_path_max) {
-      status_code = EVENTLOG_SOCKET_ERROR_CNF_TOOLONG;
+      status_code = EVENTLOG_SOCKET_ERR_ENV_TOOLONG;
     }
 
     // Write the configuration:
@@ -1045,9 +1045,9 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
                                }};
       // Set the status:
       if (!has_inet_host) {
-        status_code = EVENTLOG_SOCKET_ERROR_CNF_NOHOST;
+        status_code = EVENTLOG_SOCKET_ERR_ENV_NOHOST;
       } else if (!has_inet_port) {
-        status_code = EVENTLOG_SOCKET_ERROR_CNF_NOPORT;
+        status_code = EVENTLOG_SOCKET_ERR_ENV_NOPORT;
       } else {
         status_code = EVENTLOG_SOCKET_OK;
       }
