@@ -45,28 +45,28 @@ typedef enum EventlogSocketStatusCode {
   /// @brief The operation completed successfully.
   EVENTLOG_SOCKET_OK = 0,
   /// @brief The GHC RTS does not support the eventlog.
-  EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT,
+  EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT,
   /// @brief The GHC RTS failed to start the eventlog writer.
-  EVENTLOG_SOCKET_ERROR_RTS_FAIL,
+  EVENTLOG_SOCKET_ERR_RTS_FAIL,
   /// @brief Configuration via the environment could not find an address.
-  EVENTLOG_SOCKET_ERROR_CNF_NOADDR,
+  EVENTLOG_SOCKET_ERR_ENV_NOADDR,
   /// @brief Configuration via the environment found a Unix domain socket path
   /// that is too long.
-  EVENTLOG_SOCKET_ERROR_CNF_TOOLONG,
+  EVENTLOG_SOCKET_ERR_ENV_TOOLONG,
   /// @brief Configuration via the environment found a TCP/IP port number but no
   /// host name.
-  EVENTLOG_SOCKET_ERROR_CNF_NOHOST,
+  EVENTLOG_SOCKET_ERR_ENV_NOHOST,
   /// @brief Configuration via the environment found a TCP/IP host name but no
   /// port number.
-  EVENTLOG_SOCKET_ERROR_CNF_NOPORT,
+  EVENTLOG_SOCKET_ERR_ENV_NOPORT,
   /// @brief The control command is already registered.
-  EVENTLOG_SOCKET_ERROR_CMD_EXISTS,
+  EVENTLOG_SOCKET_ERR_CMD_EXISTS,
   /// @brief An error occurred in `getaddrinfo`; the @c error_code member is set
   /// to indicate the error.
-  EVENTLOG_SOCKET_ERROR_GAI,
+  EVENTLOG_SOCKET_ERR_GAI,
   /// @brief A system error occurred; the @c error_code member is set to
   /// indicate the error.
-  EVENTLOG_SOCKET_ERROR_SYSTEM,
+  EVENTLOG_SOCKET_ERR_SYS,
 } EventlogSocketStatusCode;
 
 typedef struct EventlogSocketStatus {
@@ -200,12 +200,12 @@ eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
 /// `eventlog_socket_opts_free`.
 ///
 /// @return If no socket address is found, the status code
-/// `EVENTLOG_SOCKET_ERROR_CNF_NOADDR` is returned and the content of
+/// `EVENTLOG_SOCKET_ERR_ENV_NOADDR` is returned and the content of
 /// @p eventlog_socket_addr_out and @p eventlog_socket_opts_out are unchanged.
 ///
 /// @return If an invalid address is found, one of
-/// `EVENTLOG_SOCKET_ERROR_CNF_TOOLONG`, `EVENTLOG_SOCKET_ERROR_CNF_NOHOST`, or
-/// `EVENTLOG_SOCKET_ERROR_CNF_NOPORT` is returned. A valid object is written to
+/// `EVENTLOG_SOCKET_ERR_ENV_TOOLONG`, `EVENTLOG_SOCKET_ERR_ENV_NOHOST`, or
+/// `EVENTLOG_SOCKET_ERR_ENV_NOPORT` is returned. A valid object is written to
 /// @p eventlog_socket_addr_out, which must be freed using
 /// `eventlog_socket_addr_free`. If @p eventlog_socket_opts_out was nonnull,
 /// then a valid object is written to @p eventlog_socket_opts_out, which must be

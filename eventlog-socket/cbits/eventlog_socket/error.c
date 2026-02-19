@@ -9,34 +9,34 @@
 /* PUBLIC - see documentation in eventlog_socket.h */
 char *eventlog_socket_strerror(EventlogSocketStatus status) {
   switch (status.ess_status_code) {
-  case EVENTLOG_SOCKET_ERROR_RTS_NOSUPPORT: {
+  case EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT: {
     return ess_strdup("The GHC RTS does not support the eventlog.");
   }
-  case EVENTLOG_SOCKET_ERROR_RTS_FAIL: {
+  case EVENTLOG_SOCKET_ERR_RTS_FAIL: {
     return ess_strdup("The GHC RTS could not start the eventlog writer.");
   }
-  case EVENTLOG_SOCKET_ERROR_CNF_NOADDR: {
+  case EVENTLOG_SOCKET_ERR_ENV_NOADDR: {
     return ess_strdup("No socket address was found in the environment.");
   }
-  case EVENTLOG_SOCKET_ERROR_CNF_TOOLONG: {
+  case EVENTLOG_SOCKET_ERR_ENV_TOOLONG: {
     return ess_strdup("The Unix domain socket path found was too long.");
   }
-  case EVENTLOG_SOCKET_ERROR_CNF_NOHOST: {
+  case EVENTLOG_SOCKET_ERR_ENV_NOHOST: {
     return ess_strdup(
         "A TCP/IP port number was found, but no host name was found.");
   }
-  case EVENTLOG_SOCKET_ERROR_CNF_NOPORT: {
+  case EVENTLOG_SOCKET_ERR_ENV_NOPORT: {
     return ess_strdup(
         "A TCP/IP host name was found, but no port number was found.");
   }
-  case EVENTLOG_SOCKET_ERROR_CMD_EXISTS: {
+  case EVENTLOG_SOCKET_ERR_CMD_EXISTS: {
     return ess_strdup("The requested combination of namespace and command ID "
                       "is already in use.");
   }
-  case EVENTLOG_SOCKET_ERROR_GAI: {
+  case EVENTLOG_SOCKET_ERR_GAI: {
     return ess_strdup(gai_strerror(status.ess_error_code));
   }
-  case EVENTLOG_SOCKET_ERROR_SYSTEM: {
+  case EVENTLOG_SOCKET_ERR_SYS: {
     size_t buflen = STRERROR_BUFLEN_INIT;
     char *strerrbuf = strerrbuf = malloc(buflen);
     if (strerrbuf == NULL) {
