@@ -179,9 +179,23 @@ fromEnv =
                     esa <- peekEventlogSocketAddr esaPtr
                     eso <- peekEventlogSocketOpts esoPtr
                     pure $ Just (esa, eso)
-                | otherwise = do
-                    -- TODO: throw as exception
+                | essStatusCode status == EVENTLOG_SOCKET_ERROR_CNF_NOADDR = do
                     pure Nothing
+                | essStatusCode status == EVENTLOG_SOCKET_ERROR_CNF_TOOLONG = do
+                    esa <- peekEventlogSocketAddr esaPtr
+                    throwIO $ EventlogSocketAddrUnixPathTooLong (esaUnixPath esa)
+                | essStatusCode status == EVENTLOG_SOCKET_ERROR_CNF_NOHOST = do
+                    esa <- peekEventlogSocketAddr esaPtr
+                    throwIO $ EventlogSocketAddrInetHostMissing (esaInetPort esa)
+                | essStatusCode status == EVENTLOG_SOCKET_ERROR_CNF_NOPORT = do
+                    esa <- peekEventlogSocketAddr esaPtr
+                    throwIO $ EventlogSocketAddrInetHostMissing (esaInetHost esa)
+                | otherwise =
+                    withEventlogSocketStatus status $ \essPtr -> do
+                        strPtr <- eventlog_socket_strerror essPtr
+                        str <- peekNullableCString strPtr
+                        throwIO $ userError str
+
         bracket tryGet maybeFree maybePeek
 
 
@@ -487,6 +501,19 @@ peekEventlogSocketStatus essPtr = do
         }
 
 {- |
+Marshal an `EventlogSocketStatus` to C.
+-}
+withEventlogSocketStatus ::
+    EventlogSocketStatus ->
+    (Ptr EventlogSocketStatus -> IO a) ->
+    IO a
+withEventlogSocketStatus ess action =
+    allocaBytes #{size EventlogSocketStatus} $ \essPtr -> do
+        #{poke EventlogSocketStatus, ess_status_code} essPtr $ essStatusCode ess
+        #{poke EventlogSocketStatus, ess_error_code} essPtr $ essErrorCode ess
+        action essPtr
+
+{- |
 Variant of `peekCString` that checks for `nullPtr`.
 -}
 peekNullableCString :: CString -> IO String
@@ -551,3 +578,18 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_from_e
 
 foreign import capi safe "eventlog_socket.h eventlog_socket_wait"
     eventlog_socket_wait :: IO ()
+
+
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_strerror"
+    eventlog_socket_strerror ::
+        Ptr EventlogSocketStatus ->
+        IO CString
+
+#{def
+  char *_wrap_eventlog_socket_strerror(
+    EventlogSocketStatus *eventlog_socket_status
+  )
+  {
+    return eventlog_socket_strerror(*eventlog_socket_status);
+  }
+}

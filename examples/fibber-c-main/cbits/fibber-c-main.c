@@ -17,22 +17,10 @@
         fprintf(stderr, "ERROR[%s|%d|%s]: %s\n", __FILE__, __LINE__, __func__, \
                 strerr);                                                       \
         free(strerr);                                                          \
-        exit((int)status_code); /* NOLINT */                                   \
       }                                                                        \
+      exit((int)status_code); /* NOLINT */                                     \
     }                                                                          \
   } while (0)
-
-/// @brief Portable macro for labeling explicit fallthrough.
-#ifndef FALLTHROUGH
-#ifdef __has_attribute
-#if __has_attribute(fallthrough)
-#define FALLTHROUGH __attribute__((fallthrough))
-#endif
-#endif
-#ifndef FALLTHROUGH
-#define FALLTHROUGH ((void)0)
-#endif
-#endif
 
 // Get the main closure.
 extern StgClosure ZCMain_main_closure;
@@ -56,18 +44,17 @@ int main(int argc, char *argv[]) {
   case EVENTLOG_SOCKET_OK:
     EXIT_ON_ERROR(
         eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts));
-    FALLTHROUGH;
+    /*FALLTHROUGH*/
   case EVENTLOG_SOCKET_ERROR_CNF_TOOLONG:
-    FALLTHROUGH;
   case EVENTLOG_SOCKET_ERROR_CNF_NOHOST:
-    FALLTHROUGH;
   case EVENTLOG_SOCKET_ERROR_CNF_NOPORT:
     // Free the memory held by socket address and options.
     eventlog_socket_addr_free(&eventlog_socket_addr);
     eventlog_socket_opts_free(&eventlog_socket_opts);
-    FALLTHROUGH;
+    break;
   default:
-    // Delegate to the helper that runs hs_main and the application closure.
-    eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure);
+    break;
   }
+  // Delegate to the helper that runs hs_main and the application closure.
+  eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure);
 }

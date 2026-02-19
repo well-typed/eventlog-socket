@@ -17,13 +17,13 @@
 #include <Rts.h>
 #include <rts/prof/Heap.h>
 
-#include "eventlog_socket.h"
 #include "./eventlog_socket/control.h"
 #include "./eventlog_socket/debug.h"
 #include "./eventlog_socket/error.h"
 #include "./eventlog_socket/poll.h"
 #include "./eventlog_socket/string.h"
 #include "./eventlog_socket/write_buffer.h"
+#include "eventlog_socket.h"
 
 #define LISTEN_BACKLOG 5
 
