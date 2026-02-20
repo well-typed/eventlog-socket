@@ -5,6 +5,3 @@ packages: examples/custom-command/custom-command.cabal
 packages: examples/fibber/fibber.cabal
 packages: examples/fibber-c-main/fibber-c-main.cabal
 packages: examples/oddball/oddball.cabal
-
-package eventlog-socket
-    flags: +debug

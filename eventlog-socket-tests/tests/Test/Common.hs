@@ -85,7 +85,7 @@ import Data.Foldable (traverse_)
 import qualified Data.List as L
 import qualified Data.List.NonEmpty as NE
 import Data.Machine
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Word (Word16, Word64)
 import GHC.Clock (getMonotonicTimeNSec)
@@ -104,7 +104,7 @@ import System.IO
 import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError, isResourceVanishedError)
 import System.IO.Unsafe (unsafePerformIO)
-import System.Process (CreateProcess (..), Pid, ProcessHandle, StdStream (..), createProcess_, getPid, getProcessExitCode, proc, showCommandForUser, terminateProcess, waitForProcess)
+import System.Process (CreateProcess (..), Pid, ProcessHandle, StdStream (..), createProcess_, getPid, getProcessExitCode, proc, readProcessWithExitCode, showCommandForUser, terminateProcess, waitForProcess)
 import System.Process.Internals (ignoreSigPipe)
 import Test.Tasty (TestName, TestTree)
 import Test.Tasty.HUnit (Assertion, HasCallStack, assertFailure, testCase)
@@ -124,6 +124,7 @@ data Program = Program
     { name :: String
     , args :: [String]
     , rtsopts :: [String]
+    , eventlogSocketBuildFlags :: [String]
     , eventlogSocketAddr :: EventlogSocketAddr
     }
 
@@ -131,7 +132,8 @@ type HasProgramInfo = (?programInfo :: ProgramInfo)
 
 data ProgramInfo = ProgramInfo
     { program :: Program
-    , pidInfo :: Maybe Pid
+    , programPidIO :: IO (Maybe Pid)
+    , programPid :: Maybe Pid
     }
 
 data ProgramHandle = ProgramHandle
@@ -145,26 +147,61 @@ withProgram program action =
     bracket (start program) kill $ \ProgramHandle{..} ->
         let ?programInfo = info in action
 
+defaultBuildFlags :: [String]
+#if defined(DEBUG)
+defaultBuildFlags = ["+debug"]
+#else
+defaultBuildFlags = []
+#endif
+
 start :: (HasLogger, HasTestInfo) => Program -> IO ProgramHandle
 start program = do
     debugInfo $ "Starting program " <> program.name
     let runner = do
             ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
-            debugInfo $ "Building program " <> program.name <> " with " <> ghc
+            cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
+
+            -- Build program
+            debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
+            let eventlogSocketBuildFlags = program.eventlogSocketBuildFlags <> defaultBuildFlags
+            let constraintArgs
+                    | null eventlogSocketBuildFlags = []
+                    | otherwise = ["--constraint", "eventlog-socket " <> unwords eventlogSocketBuildFlags]
+            let buildDir = "dist-newstyle/" <> L.intercalate "-" ("test-haskell" : eventlogSocketBuildFlags)
+            let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", buildDir] <> constraintArgs
+            debugInfo (showCommandForUser cabal buildArgs)
+            (buildExit, buildOut, buildErr) <- readProcessWithExitCode cabal buildArgs ""
+            when (buildExit /= ExitSuccess) $ do
+                debugFail . unlines $ ["Failed to build program", buildOut, buildErr]
+                throwIO buildExit
+
+            -- Find binary for program
+            debugInfo $ "Find binary for program " <> program.name
+            let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", buildDir]
+            debugInfo (showCommandForUser cabal findArgs)
+            (findExit, findOut, findErr) <- readProcessWithExitCode cabal findArgs ""
+            when (findExit /= ExitSuccess) $ do
+                debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
+                throwIO findExit
+            let maybeProgramBin = fmap fst . L.uncons . lines $ findOut
+            programBin <- flip (`maybe` pure) maybeProgramBin $ do
+                debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
+                throwIO findExit
+
+            -- Start program
+            debugInfo $ "Launching program " <> program.name
             inheritedEnv <- filter shouldInherit <$> getEnvironment
-            let name = "cabal"
-            let args = ["run", program.name, "-w" <> ghc, "--", "+RTS"] <> program.rtsopts <> ["-RTS"] <> program.args
+            let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
             let extraEnv = eventlogSocketEnv program.eventlogSocketAddr
-            debugInfo $
-                unlines . concat $
-                    [ ["Launching " <> showCommandForUser name args]
-                    , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
-                      | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
-                      ]
-                    ]
+            debugInfo . unlines . concat $
+                [ [showCommandForUser programBin programArgs]
+                , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
+                  | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
+                  ]
+                ]
             -- Create the process:
             let createProcess =
-                    (proc name args)
+                    (proc programBin programArgs)
                         { env = Just (inheritedEnv <> extraEnv)
                         , std_in = CreatePipe
                         , std_out = CreatePipe
@@ -172,7 +209,8 @@ start program = do
                         }
             (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
             -- Create the ProgramInfo:
-            pidInfo <- getPid processHandle
+            let programPidIO = getPid processHandle
+            programPid <- programPidIO
             let info = ProgramInfo{..}
             let ?programInfo = info
             debugInfo $ "Launched"
@@ -204,17 +242,20 @@ This function also hides the evidence by closing the handles.
 murderProcess :: (HasLogger, HasTestInfo) => String -> (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO ExitCode
 murderProcess programName (maybeStdIn, maybeStdOut, maybeStdErr, processHandle) = do
     -- Murder the process until it's dead:
-    let murderLoop :: IO ExitCode
-        murderLoop =
-            getProcessExitCode processHandle >>= \case
-                Nothing -> do
-                    debugInfo $ "Trying to kill the process for " <> programName
-                    terminateProcess processHandle
-                    threadDelay 100_000 -- 100ms
-                    murderLoop
-                Just exitCode ->
-                    pure exitCode
-    exitCode <- murderLoop
+    let murderLoop :: Int -> IO ExitCode
+        murderLoop n
+            | n > 0 =
+                getProcessExitCode processHandle >>= \case
+                    Nothing -> do
+                        debugInfo $ "Trying to kill the process for " <> programName
+                        terminateProcess processHandle
+                        threadDelay 100_000 -- 100ms
+                        murderLoop (n - 1)
+                    Just exitCode ->
+                        pure exitCode
+            | otherwise =
+                pure $ ExitFailure 1
+    exitCode <- murderLoop 100 -- 100 * 100ms = 10_000ms = 10s
     debugInfo $ "Killed the process for " <> programName
 
     -- Clean up handles:
@@ -266,14 +307,14 @@ defaultEventlogAssertion eventlogSocket =
         }
 
 assertEventlogOk ::
-    (HasLogger, HasTestInfo) =>
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
     EventlogSocketAddr ->
     Assertion
 assertEventlogOk eventlogSocket =
     assertEventlogWith eventlogSocket (debugEventCounter 1_000)
 
 assertEventlogWith ::
-    (HasLogger, HasTestInfo) =>
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
     EventlogSocketAddr ->
     (ProcessT IO Event x) ->
     Assertion
@@ -281,7 +322,7 @@ assertEventlogWith eventlogSocket validateEvents =
     assertEventlogWith' eventlogSocket (const validateEvents)
 
 assertEventlogWith' ::
-    (HasLogger, HasTestInfo) =>
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
     EventlogSocketAddr ->
     (Socket -> ProcessT IO Event x) ->
     Assertion
@@ -289,7 +330,7 @@ assertEventlogWith' eventlogSocket validateEvents =
     runEventlogAssertion (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
 
 runEventlogAssertion ::
-    (HasLogger, HasTestInfo) =>
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
     EventlogAssertion x ->
     Assertion
 runEventlogAssertion EventlogAssertion{..} =
@@ -297,7 +338,7 @@ runEventlogAssertion EventlogAssertion{..} =
         runT_ $ fromSocket 1000 4096 socket ~> decodeEvent ~> debugEvents ~> validateEvents socket
 
 withEventlogHandle ::
-    (HasLogger, HasTestInfo) =>
+    (HasLogger, HasTestInfo, HasProgramInfo) =>
     Double ->
     Double ->
     EventlogSocketAddr ->
@@ -319,7 +360,16 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
         catch @IOError tryConnect $ \ioe ->
             if isDoesNotExistError ioe || isResourceVanishedError ioe
                 then do
+                    -- Check if program is still running:
+                    maybePid <- ?programInfo.programPidIO
+                    when (isNothing maybePid) $
+                        error $
+                            "Program " <> ?programInfo.program.name <> " has terminated."
+
+                    -- Wait before retrying:
                     waitFor timeoutS
+
+                    -- Retry connection:
                     connectLoop (timeoutS * timeoutExponent)
                 else throwIO ioe
       where
@@ -875,6 +925,9 @@ data Message
 
 debug :: (HasLogger, HasTestInfo) => Message -> IO ()
 #if defined(DEBUG)
+#if !defined(DEBUG_EVENTS)
+debug Event{} = pure () -- Discard events
+#endif
 debug message = do
     T.atomically (T.writeTChan (logChan ?logger) (?testInfo, message))
 #else
@@ -921,7 +974,7 @@ withLogger action = do
             "[" <> testName <> "] fail: " <> message
 
     prettyProgramInfo :: ProgramInfo -> String
-    prettyProgramInfo ProgramInfo{..} = program.name <> " (" <> prettyPidInfo pidInfo <> ")"
+    prettyProgramInfo ProgramInfo{..} = program.name <> " (" <> prettyPidInfo programPid <> ")"
 
     prettyPidInfo :: Maybe Pid -> String
     prettyPidInfo = maybe "terminated" (\(CPid pid) -> "pid=" <> show pid)

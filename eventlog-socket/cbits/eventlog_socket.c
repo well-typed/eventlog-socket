@@ -17,7 +17,10 @@
 #include <Rts.h>
 #include <rts/prof/Heap.h>
 
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
 #include "./eventlog_socket/control.h"
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
+
 #include "./eventlog_socket/debug.h"
 #include "./eventlog_socket/error.h"
 #include "./eventlog_socket/poll.h"
@@ -52,10 +55,17 @@ static int g_listen_fd = -1;
 static const char *g_sock_path = NULL;
 static int g_wake_pipe[2] = {-1, -1};
 
-// concurrency variables
+// Worker thread handle.
 static pthread_t *g_listen_thread_ptr = NULL;
-static pthread_cond_t g_new_conn_cond = PTHREAD_COND_INITIALIZER;
+
+// Control thread handle.
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
 static pthread_t *g_control_thread_ptr = NULL;
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
+
+// Condition for new connections.
+static pthread_cond_t g_new_conn_cond = PTHREAD_COND_INITIALIZER;
+
 // Global mutex guarding all shared state between RTS threads, the worker
 // thread, and the detached control receiver. Only client_fd and wt need
 // protection, but using a single mutex ensures we keep their updates
@@ -92,6 +102,7 @@ static void cleanup(void) {
     g_wake_pipe[1] = -1;
   }
   // Stop the control thread.
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
   if (g_control_thread_ptr != NULL) {
     DEBUG_DEBUG("%s", "Cancelling control thread.");
     if (pthread_cancel(*g_control_thread_ptr) != 0) {
@@ -103,6 +114,8 @@ static void cleanup(void) {
     }
     free((void *)g_control_thread_ptr);
   }
+
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
   // Stop the worker thread.
   if (g_listen_thread_ptr != NULL) {
     DEBUG_DEBUG("%s", "Cancelling worker thread.");
@@ -793,6 +806,7 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
   RETURN_ON_ERROR(worker_start(eventlog_socket_addr, eventlog_socket_opts));
 
   // Start control thread.
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
   g_control_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
   if (g_control_thread_ptr == NULL) {
     return STATUS_FROM_ERRNO(); // `malloc` sets errno.
@@ -800,6 +814,8 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
   RETURN_ON_ERROR(eventlog_socket_control_start(
       g_control_thread_ptr, &g_client_fd, &g_write_buffer_and_client_fd_mutex,
       &g_new_conn_cond));
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
+
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
@@ -837,6 +853,15 @@ EventlogSocketStatus eventlog_socket_wait(void) {
 RtsConfig eventlog_socket_attach_rts_config(RtsConfig rts_config) {
   rts_config.eventlog_writer = &SocketEventLogWriter;
   return rts_config;
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
+  return eventlog_socket_control_signal_ghc_rts_ready();
+#else
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */

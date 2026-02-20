@@ -35,4 +35,7 @@ EventlogSocketStatus HIDDEN eventlog_socket_control_start(
     pthread_t *control_thread, const volatile int *control_fd_ptr,
     pthread_mutex_t *control_fd_mutex_ptr, pthread_cond_t *new_conn_cond_ptr);
 
+/// @see eventlog_socket_signal_ghc_rts_ready
+EventlogSocketStatus HIDDEN eventlog_socket_control_signal_ghc_rts_ready(void);
+
 #endif /* EVENTLOG_SOCKET_CONTROL_H */

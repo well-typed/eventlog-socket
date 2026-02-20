@@ -56,7 +56,14 @@ Test that @fibber 35@ produces a parseable eventlog.
 test_fibber :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_fibber =
     testCaseFor "test_fibber" $ \eventlogSocket -> do
-        let fibber = Program "fibber" ["35"] ["-l-au"] eventlogSocket
+        let fibber =
+                Program
+                    { name = "fibber"
+                    , args = ["40"]
+                    , rtsopts = ["-l-au"]
+                    , eventlogSocketBuildFlags = []
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram fibber $
             assertEventlogWith eventlogSocket $
                 -- Validate that the Finished marker is seen.
@@ -70,7 +77,14 @@ __Note:__ This test does not support TCP sockets.
 test_fibberCMain :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_fibberCMain =
     testCaseFor "test_fibberCMain" $ \eventlogSocket -> do
-        let fibber = Program "fibber-c-main" ["35"] ["-l-au"] eventlogSocket
+        let fibber =
+                Program
+                    { name = "fibber-c-main"
+                    , args = ["40"]
+                    , rtsopts = ["-l-au"]
+                    , eventlogSocketBuildFlags = []
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram fibber $
             assertEventlogWith eventlogSocket $
                 -- Validate that the Finished marker is seen.
@@ -82,7 +96,14 @@ Test that @oddball@ produces heap profile samples.
 test_oddball :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball =
     testCaseFor "test_oddball" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
+        let oddball =
+                Program
+                    { name = "oddball"
+                    , args = []
+                    , rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
+                    , eventlogSocketBuildFlags = []
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram oddball $
             assertEventlogWith eventlogSocket $
                 -- Validate that the Summing marker is seen, and that the event
@@ -96,7 +117,14 @@ Test that @--no-automatic-heap-samples@ is respected.
 test_oddball_NoAutomaticHeapSamples :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_NoAutomaticHeapSamples =
     testCaseFor "test_oddball_NoAutomaticHeapSamples" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+        let oddball =
+                Program
+                    { name = "oddball"
+                    , args = []
+                    , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                    , eventlogSocketBuildFlags = []
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram oddball $
             assertEventlogWith eventlogSocket $
                 -- Validate that the Summing marker is seen, and that the event
@@ -111,7 +139,14 @@ Test that @oddball@ produces heap profile samples even after reconnecting.
 test_oddball_Reconnect :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_Reconnect =
     testCaseFor "test_oddball_Reconnect" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"] eventlogSocket
+        let oddball =
+                Program
+                    { name = "oddball"
+                    , args = []
+                    , rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
+                    , eventlogSocketBuildFlags = []
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram oddball $ do
             -- Validate that the event stream contains at least one heap
             -- profile sample twice, connecting to the socket each time.
@@ -124,7 +159,14 @@ Test that the command parsing state is reset on reconnect.
 test_oddball_ResetOnReconnect :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_ResetOnReconnect =
     testCaseFor "test_oddball_ResetOnReconnect" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+        let oddball =
+                Program
+                    { name = "oddball"
+                    , args = []
+                    , rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                    , eventlogSocketBuildFlags = ["+control"]
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram oddball $ do
             -- Validate that the event stream contains at least one heap
             -- profile sample twice, connecting to the socket each time.
@@ -148,7 +190,14 @@ sent, after some iterations, no more heap profile samples are received.
 test_oddball_StartAndStopHeapProfiling :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_StartAndStopHeapProfiling =
     testCaseFor "test_oddball_StartAndStopHeapProfiling" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+        let oddball =
+                Program
+                    { name = "oddball"
+                    , args = []
+                    , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                    , eventlogSocketBuildFlags = ["+control"]
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram oddball $
             assertEventlogWith' eventlogSocket $ \socket ->
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
@@ -168,7 +217,14 @@ Test that the `RequestHeapCensus` signal is respected, i.e., that once the
 test_oddball_RequestHeapCensus :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_RequestHeapCensus =
     testCaseFor "test_oddball_RequestHeapCensus" $ \eventlogSocket -> do
-        let oddball = Program "oddball" [] ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+        let oddball =
+                Program
+                    { name = "oddball"
+                    , args = []
+                    , rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                    , eventlogSocketBuildFlags = ["+control"]
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram oddball $
             assertEventlogWith' eventlogSocket $ \socket ->
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
@@ -191,7 +247,14 @@ test_oddball_Junk :: (HasLogger) => (ByteString, ByteString) -> EventlogSocketAd
 test_oddball_Junk (junkBefore, junkAfter) =
     let testName = "test_oddball_Junk[" <> show junkBefore <> "," <> show junkAfter <> "]"
      in testCaseFor testName $ \eventlogSocket -> do
-            let oddball = Program "oddball" [] ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"] eventlogSocket
+            let oddball =
+                    Program
+                        { name = "oddball"
+                        , args = []
+                        , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                        , eventlogSocketBuildFlags = ["+control"]
+                        , eventlogSocketAddr = eventlogSocket
+                        }
             withProgram oddball $
                 assertEventlogWith' eventlogSocket $ \socket ->
                     hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
@@ -209,7 +272,14 @@ Test that custom commands are respected.
 test_customCommand :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_customCommand =
     testCaseFor "test_customCommand" $ \eventlogSocket -> do
-        let customCommand = Program "custom-command" ["--forever"] ["-l-au", "--eventlog-flush-interval=1"] eventlogSocket
+        let customCommand =
+                Program
+                    { name = "custom-command"
+                    , args = ["--forever"]
+                    , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
+                    , eventlogSocketBuildFlags = ["+control"]
+                    , eventlogSocketAddr = eventlogSocket
+                    }
         withProgram customCommand $
             assertEventlogWith' eventlogSocket $ \socket ->
                 hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`)

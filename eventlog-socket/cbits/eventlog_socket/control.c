@@ -478,8 +478,8 @@ static void control_wait_ghc_rts_ready(void) {
   pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
 }
 
-/* PUBLIC - see documentation in eventlog_socket.h */
-EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
+/* HIDDEN - see documentation in control.h */
+EventlogSocketStatus eventlog_socket_control_signal_ghc_rts_ready(void) {
   DEBUG_DEBUG("%s", "Sending signal that GHC RTS is ready.");
   {
     const int success_or_errno = pthread_mutex_lock(&g_ghc_rts_ready_mutex);
@@ -684,7 +684,7 @@ control_command_parser_enter_state(const ControlCommandParserStateTag tag,
 static void
 control_command_parser_handle_chunk(const size_t chunk_size,
                                     const uint8_t chunk[chunk_size]) {
-  DEBUG_TRACE("Received chunk of size %zd.", chunk_size);
+  DEBUG_DEBUG("Received chunk of size %zd.", chunk_size);
   // iterate over the bytes in the chunk...
   for (size_t chunk_index = 0; chunk_index < chunk_size; ++chunk_index) {
     // get the next byte from the chunk...
@@ -699,7 +699,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
           g_control_magic[g_control_command_parser_state.header_pos];
       // if the next byte is the expected byte...
       if (current_byte == expected_byte) {
-        DEBUG_TRACE("Matched control_magic byte %d",
+        DEBUG_DEBUG("Matched control_magic byte %d",
                     g_control_command_parser_state.header_pos);
         // ...move on the the next state...
         ++g_control_command_parser_state.header_pos;
@@ -724,7 +724,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
     }
     // the parser is currently reading the protocol version...
     case CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION: {
-      DEBUG_TRACE("Matched protocol version byte %d", current_byte);
+      DEBUG_DEBUG("Matched protocol version byte %d", current_byte);
       // if the message version matches the protocol version...
       if (current_byte == EVENTLOG_SOCKET_CONTROL_PROTOCOL_VERSION) {
         // ...then we should be able to parse the message...
@@ -752,7 +752,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
                                            &current_byte);
         continue;
       } else {
-        DEBUG_TRACE("Matched namespace_len byte %d", current_byte);
+        DEBUG_DEBUG("Matched namespace_len byte %d", current_byte);
         // otherwise, accept the namespace length and move to the next state...
         control_command_parser_enter_state(
             CONTROL_COMMAND_PARSER_STATE_NAMESPACE, &current_byte);
@@ -805,7 +805,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
 
       // otherwise, the namespace is complete...
       // note: this relies on the fact that the string is null-terminated!
-      DEBUG_TRACE("Matched namespace %.*s",
+      DEBUG_DEBUG("Matched namespace %.*s",
                   g_control_command_parser_state.namespace_buffer_len,
                   g_control_command_parser_state.namespace_buffer);
 
@@ -816,7 +816,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
               g_control_command_parser_state.namespace_buffer);
       // if the namespace was successfully resolved, then...
       if (namespace != NULL) {
-        DEBUG_TRACE("Resolved namespace %.*s",
+        DEBUG_DEBUG("Resolved namespace %.*s",
                     g_control_command_parser_state.namespace_buffer_len,
                     g_control_command_parser_state.namespace_buffer);
         // move chunk_index by the number of copied bytes less one,
@@ -873,7 +873,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
       }
     }
     case CONTROL_COMMAND_PARSER_STATE_COMMAND_ID: {
-      DEBUG_TRACE("Matched command_id byte 0x%02x", current_byte);
+      DEBUG_DEBUG("Matched command_id byte 0x%02x", current_byte);
       // Handle the command.
       control_command_handle(g_control_command_parser_state.namespace,
                              current_byte);
