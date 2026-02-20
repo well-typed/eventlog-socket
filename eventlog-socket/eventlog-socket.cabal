@@ -52,6 +52,11 @@ flag debug
   default:     False
   manual:      True
 
+flag control
+  description: Enable control commands.
+  default:     False
+  manual:      True
+
 flag optimise-heavily
   description: Pass @-O2@ to the C compiler.
   default:     False
@@ -86,6 +91,12 @@ library
     -- cpp-options are not passed to C code, see:
     -- https://github.com/haskell/cabal/issues/7635
     cc-options: -DDEBUG=1
+
+  if flag(control)
+    -- 2025-12-17:
+    -- cpp-options are not passed to C code, see:
+    -- https://github.com/haskell/cabal/issues/7635
+    cc-options: -DEVENTLOG_SOCKET_FEATURE_CONTROL=1
 
   if flag(optimise-heavily)
     cc-options: -O2

@@ -61,8 +61,13 @@ startWith esa eso =
         withEventlogSocketAddr esa $ \esaPtr ->
             withEventlogSocketOpts eso $ \esoPtr ->
                 eventlog_socket_start essPtr esaPtr esoPtr
-        essStatus <- peekEventlogSocketStatus essPtr
-        print essStatus
+        status <- peekEventlogSocketStatus essPtr
+
+        -- If the status is an error, throw a user error.
+        when (essStatusCode status /= EVENTLOG_SOCKET_OK) $ do
+            strPtr <- eventlog_socket_strerror essPtr
+            str <- peekNullableCString strPtr
+            throwIO $ userError str
 
 --------------------------------------------------------------------------------
 -- Configuration types

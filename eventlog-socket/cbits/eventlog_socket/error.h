@@ -1,7 +1,7 @@
 #ifndef EVENTLOG_SOCKET_ERR_H
 #define EVENTLOG_SOCKET_ERR_H
 
-#include <stdlib.h>
+#include "./debug.h"
 
 /// @brief Construct a status from an `EventlogSocketStatusCode` status code.
 #define STATUS_FROM_CODE(status_code)                                          \
@@ -28,6 +28,8 @@
   do {                                                                         \
     const EventlogSocketStatus status = (expr);                                \
     if (status.ess_status_code != EVENTLOG_SOCKET_OK) {                        \
+      char *strerr = eventlog_socket_strerror(status);                         \
+      DEBUG_ERROR("%s", strerr);                                               \
       return status;                                                           \
     }                                                                          \
   } while (0)
