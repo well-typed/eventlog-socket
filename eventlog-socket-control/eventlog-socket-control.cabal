@@ -1,8 +1,10 @@
 cabal-version:   3.0
 name:            eventlog-socket-control
 version:         0.1.0.0
-synopsis:        Control protocol for eventlog-socket
-description:     Control protocol for eventlog-socket.
+synopsis:        Control command protocol for eventlog-socket.
+description:
+  The @eventlog-socket-control@ package contains utilities for creating messages in the control command protocol for @eventlog-socket@.
+
 license:         BSD-3-Clause
 license-file:    LICENSE
 author:          Eventlog Socket Contributors
