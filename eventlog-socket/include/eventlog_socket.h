@@ -59,8 +59,10 @@ typedef enum EventlogSocketStatusCode {
   /// @brief Configuration via the environment found a TCP/IP host name but no
   /// port number.
   EVENTLOG_SOCKET_ERR_ENV_NOPORT,
-  /// @brief The control command is already registered.
-  EVENTLOG_SOCKET_ERR_CMD_EXISTS,
+  /// @brief The binary was compiled without support for control commands.
+  EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT,
+  /// @brief The namespace or command ID is already registered.
+  EVENTLOG_SOCKET_ERR_CTL_EXISTS,
   /// @brief An error occurred in `getaddrinfo`; the @c error_code member is set
   /// to indicate the error.
   EVENTLOG_SOCKET_ERR_GAI,
@@ -443,9 +445,9 @@ typedef void EventlogSocketControlCommandHandler(
 /// @return If there is no existing namespace with the given name, this function
 /// registers a new namespace and returns a stable pointer to it. Otherwise, it
 /// returns NULL. The returned pointer should not be freed.
-EventlogSocketControlNamespace *
-eventlog_socket_control_register_namespace(uint8_t namespace_len,
-                                           const char namespace[namespace_len]);
+EventlogSocketStatus eventlog_socket_control_register_namespace(
+    uint8_t namespace_len, const char namespace[namespace_len],
+    EventlogSocketControlNamespace **namespace_out);
 
 /// @brief Register a new command.
 ///

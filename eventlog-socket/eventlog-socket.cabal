@@ -77,7 +77,6 @@ library
   default-language:   Haskell2010
   default-extensions: LambdaCase
   c-sources:
-    cbits/eventlog_socket/control.c
     cbits/eventlog_socket/error.c
     cbits/eventlog_socket/string.c
     cbits/eventlog_socket/write_buffer.c
@@ -97,6 +96,7 @@ library
     -- cpp-options are not passed to C code, see:
     -- https://github.com/haskell/cabal/issues/7635
     cc-options: -DEVENTLOG_SOCKET_FEATURE_CONTROL=1
+    c-sources:  cbits/eventlog_socket/control.c
 
   if flag(optimise-heavily)
     cc-options: -O2

@@ -38,8 +38,8 @@
   } while (0)
 
 #define CUSTOM_COMMAND_NAMESPACE "custom-command"
-#define CUSTOM_COMMAND_PING 0
-#define CUSTOM_COMMAND_PONG 1
+#define CUSTOM_COMMAND_PING 1
+#define CUSTOM_COMMAND_PONG 2
 
 /// Internal GHC function that writes a user message to the eventlog.
 extern void traceUserMsg(Capability *cap, char *msg);
@@ -81,12 +81,9 @@ static void handle_pong(const EventlogSocketControlNamespace *const namespace,
 /// commands.
 void custom_command_init(void) {
   // Register the "custom-command" namespace.
-  EventlogSocketControlNamespace *namespace =
-      eventlog_socket_control_register_namespace(
-          strlen(CUSTOM_COMMAND_NAMESPACE), CUSTOM_COMMAND_NAMESPACE);
-  if (namespace == NULL) {
-    DEBUG_ERROR("failed to register namespace '%s'", CUSTOM_COMMAND_NAMESPACE);
-  }
+  EventlogSocketControlNamespace *namespace = NULL;
+  EXIT_ON_ERROR(eventlog_socket_control_register_namespace(
+      strlen(CUSTOM_COMMAND_NAMESPACE), CUSTOM_COMMAND_NAMESPACE, &namespace));
 
   // Register the "ping" command.
   EXIT_ON_ERROR(eventlog_socket_control_register_command(
