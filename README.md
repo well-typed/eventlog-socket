@@ -7,7 +7,7 @@ It streams the GHC eventlog in the [standard binary format](https://downloads.ha
 
 To use the code in this repository to profile your own application, follow these steps.
 
-### Add `eventlog-socket` as a dependency {#getting-started--build-depends}
+### Add `eventlog-socket` as a dependency
 
 Add `eventlog-socket` to the `build-depends` section for your executable.
 
@@ -20,7 +20,7 @@ executable my-app
     ...
 ```
 
-### Instrument your application from Haskell {#getting-started--instrument-from-haskell}
+### Instrument your application from Haskell
 
 If you want to stream the GHC eventlog over a Unix domain socket, all you have to do is call the `start` function from `GHC.Eventlog.Socket` with the path you'd like it to use for the socket.
 
@@ -51,21 +51,21 @@ For more detailed configuration options, including TCP/IP sockets, you should us
 > On most platforms, Unix domain socket paths are limited to 107 characters or less.
 
 > [!NOTE]
-> <a name="default-writer"></a>If you instrument your application from Haskell, the GHC RTS will start with the default eventlog writer, which is the file writer. This means that your application will write the first few events to a file called `my-app.eventlog`. Usually, this is not an issue, as all initialization events are repeated every time a new client connects to the socket. However, it may give you problems if your application is stored on a read-only filesystem, such as the Nix store. To change the file path, you can use the `-ol` RTS option. To disable the file writer entirely, use the `--null-eventlog-writer` RTS option. If it's important that you capture *all* of the GHC eventlog, you must [instrument your application from C](#getting-started--instrument-from-c), so that the GHC RTS is started with the `eventlog-socket` writer.
+> <a name="default-writer"></a>If you instrument your application from Haskell, the GHC RTS will start with the default eventlog writer, which is the file writer. This means that your application will write the first few events to a file called `my-app.eventlog`. Usually, this is not an issue, as all initialization events are repeated every time a new client connects to the socket. However, it may give you problems if your application is stored on a read-only filesystem, such as the Nix store. To change the file path, you can use the `-ol` RTS option. To disable the file writer entirely, use the `--null-eventlog-writer` RTS option. If it's important that you capture *all* of the GHC eventlog, you must [instrument your application from C](#instrument-your-application-from-c), so that the GHC RTS is started with the `eventlog-socket` writer.
 
-### Instrument your application from C {#getting-started--instrument-from-c}
+### Instrument your application from C
 
 The `eventlog-socket` package installs a C header file, `eventlog_socket.h`, which enables you to instrument your application from a C main function. There are two reasons you may want to instrument your application from C:
 
 1. You want to capture *all* of the GHC eventlog. If your application is instrumented from Haskell, it loses the first few events. See the note [above](#default-writer).
 
-2. You want to register custom commands for use with the control command protocol. Custom commands are currently only supported from C. For details, see [control commands](#control-commands).
+2. You want to register custom commands for use with the control command protocol. Custom commands are currently only supported from C. For details, see [Control Commands](#control-commands).
 
 For an example of an application instrumented from a custom C main, see [`examples/fibber-c-main`](examples/fibber-c-main/).
 
 For an example of an application instrumented with custom control commands, see [`examples/custom-command`](examples/custom-command/).
 
-### Configure your application to enable the eventlog {#getting-started--configure}
+### Configure your application to enable the eventlog
 
 To enable the eventlog, you must pass the `-l` RTS option. This can be done either at compile time or at runtime:
 
@@ -85,7 +85,7 @@ To enable the eventlog, you must pass the `-l` RTS option. This can be done eith
   ./my-app +RTS -l -RTS
   ```
 
-## Control Commands {#control-commands}
+## Control Commands
 
 When compiled with the `+control` feature flag, the eventlog socket supports *control commands*. These are messages that can be *written to* the eventlog socket by the client to control the RTS or execute custom control commands.
 
@@ -97,9 +97,10 @@ The `eventlog-socket` package provides three built-in commands:
 
 The heap profiling commands require that the RTS is initialised with one of the `-h` options. See [RTS options for heap profiling](https://downloads.haskell.org/ghc/latest/docs/users_guide/profiling.html#rts-options-heap-prof). If any heap profiling option is passed, heap profiling is started by default. To avoid this, pass the `--no-automatic-heap-samples` to the RTS *in addition to* the selected `-h` option, e.g., `./my-app +RTS -hT --no-automatic-heap-samples -RTS`.
 
-### Control Command Protocol {#control-commands--protocol}
+The [`eventlog-socket-control`](eventlog-socket-control/) package provides utilities for creating control command protocol messages to write to the eventlog socket.
+If you want to send control commands from a different programming language, see [Control Command Protocol](#control-command-protocol) for the specification of the binary control command protocol.
 
-The [`eventlog-socket-control`](eventlog-socket-control/) package provides all you need to create control commands to write to the eventlog socket.
+### Control Command Protocol
 
 A control command message starts with the magic byte sequence `0xF0` `0x9E` `0x97` `0x8C`, followed by the protocol version, followed by the namespace as a length-prefixed string, followed by the command ID byte. The following is an an ENBF grammar for control command messages:
 
@@ -114,20 +115,119 @@ namespace        = {byte}; (* must be exactly namespace-len bytes *)
 command-id       = byte;   (* commands are assigned numeric IDs *)
 ```
 
-The built-in commands live in the `"eventlog-socket"` namespace and are numbered in order starting at 0.
+The built-in commands live in the `"eventlog-socket"` namespace and are numbered in order starting at 3.
 
-1. The message for `startHeapProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x00`.
-2. The message for `stopHeapProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x01`.
-3. The message for `requestHeapCensus` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x02`.
+1. The message for `startHeapProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x03`.
+2. The message for `stopHeapProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x04`.
+3. The message for `requestHeapCensus` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x05`.
 
 For example, a simple Python client using the [`socket`](https://docs.python.org/3/library/socket.html) library could request a heap census as follows:
 
 ```python
 def request_heap_census(sock):
-  sock.sendall(b"\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x02")
+  sock.sendall(b"\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x05")
 ```
 
 Any unknown control commands or incorrectly formatted messages are ignored, so you can send control commands without worry for crashing your application.
+
+### Custom Control Commands
+
+The `eventlog-socket` package supports custom control commands.
+Currently, custom control commands can only be registered via the C API.
+Registration is a two-step process:
+
+1.  Register a namespace. This must be a string of between 1 and 255 characters. By convention, this should be your Haskell package name.
+2.  Register each command. This must be a number between 1 and 255. By convention, this should be the first non-zero number that's still available for this namespace.
+
+Commands can be passed some user data at registration time. This is intended to let you defines multiple different commands using the same handler.
+
+The following snippet defines the `register_greeters` function, which registers both the `greet_c` and `greet_haskell` commands using the `greeter` callback.
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <eventlog_socket.h>
+
+static void greeter(const EventlogSocketControlNamespace *const namespace,
+                       const EventlogSocketControlCommandId command_id,
+                       const void *user_data) {
+  (void) namespace;
+  (void) command_id;
+  printf("Hello, %s!", (const char*)user_data);
+}
+
+bool register_greeters(void) {
+  // Use the name of my Haskell package:
+  const char* const my_namespace = "my-app";
+
+  // Allocate space for the namespace object:
+  EventlogSocketControlNamespace *namespace = NULL;
+
+  // Try to register the namespace:
+  const EventlogSocketStatus namespace_status =
+    eventlog_socket_control_register_namespace(
+      strlen(my_namespace), my_namespace, &namespace);
+
+  // Handle any errors:
+  if (namespace_status.ess_status_code != EVENTLOG_SOCKET_OK) {
+    char *errmsg = eventlog_socket_strerror(namespace_status);
+    if (errmsg != NULL) {
+      fprintf(stderr, "ERROR: %s", errmsg);
+      free(errmsg);
+    }
+    return false;
+  }
+  // Otherwise, namespace contains a valid object.
+
+  // Use the first available non-zero command ID for greet_c:
+  const uint8_t greet_c_id = 1;
+
+  // Allocate data for the greet_c command, if needed:
+  static const char * const greet_c_data = "C";
+
+  // Try to register the greet_c command:
+  const EventlogSocketStatus greet_c_status =
+    eventlog_socket_control_register_command(
+      namespace, greet_c_id, greeter, greet_c_data);
+
+  // Handle any errors:
+  if (greet_c_status.ess_status_code != EVENTLOG_SOCKET_OK) {
+    char *errmsg = eventlog_socket_strerror(greet_c_status);
+    if (errmsg != NULL) {
+      fprintf(stderr, "ERROR: %s", errmsg);
+      free(errmsg);
+    }
+    return false;
+  }
+  // Otherwise, the command is registered.
+
+  // Use the next available command ID for greet_haskell:
+  const uint8_t greet_haskell_id = 2;
+
+  // Allocate data for the greet_haskell command, if needed:
+  static const char * const greet_haskell_data = "Haskell";
+
+  // Try to register the greet_haskell command:
+  const EventlogSocketStatus greet_haskell_status =
+    eventlog_socket_control_register_command(
+      namespace, greet_haskell_id, greeter, greet_haskell_data);
+
+  // Handle any errors:
+  if (greet_haskell_status.ess_status_code != EVENTLOG_SOCKET_OK) {
+    char *errmsg = eventlog_socket_strerror(greet_haskell_status);
+    if (errmsg != NULL) {
+      fprintf(stderr, "ERROR: %s", errmsg);
+      free(errmsg);
+    }
+    return false;
+  }
+  // Otherwise, the command is registered.
+
+  return true;
+}
+```
+
+For a full example using custom control commands, see [`examples/custom-command`](examples/custom-command/).
 
 ## Contributing
 
