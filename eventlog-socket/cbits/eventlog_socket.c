@@ -811,9 +811,9 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
   if (g_control_thread_ptr == NULL) {
     return STATUS_FROM_ERRNO(); // `malloc` sets errno.
   }
-  RETURN_ON_ERROR(eventlog_socket_control_start(
-      g_control_thread_ptr, &g_client_fd, &g_write_buffer_and_client_fd_mutex,
-      &g_new_conn_cond));
+  RETURN_ON_ERROR(control_start(g_control_thread_ptr, &g_client_fd,
+                                &g_write_buffer_and_client_fd_mutex,
+                                &g_new_conn_cond));
 #endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
 
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
@@ -858,7 +858,7 @@ RtsConfig eventlog_socket_attach_rts_config(RtsConfig rts_config) {
 /* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
-  return eventlog_socket_control_signal_ghc_rts_ready();
+  return control_signal_ghc_rts_ready();
 #else
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 #endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
@@ -1086,4 +1086,36 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
         getenv(EVENTLOG_SOCKET_ENV_WAIT) != NULL; // NOLINT
   }
   return STATUS_FROM_CODE(status_code);
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+EventlogSocketStatus eventlog_socket_control_register_namespace(
+    uint8_t namespace_len, const char namespace[namespace_len],
+    EventlogSocketControlNamespace **namespace_out) {
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
+  return control_register_namespace(namespace_len, namespace, namespace_out);
+#else
+  (void)namespace_len;
+  (void)namespace;
+  (void)namespace_out;
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT);
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+EventlogSocketStatus eventlog_socket_control_register_command(
+    EventlogSocketControlNamespace *namespace,
+    EventlogSocketControlCommandId command_id,
+    EventlogSocketControlCommandHandler command_handler,
+    const void *command_data) {
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
+  return control_register_command(namespace, command_id, command_handler,
+                                  command_data);
+#else
+  (void)namespace;
+  (void)command_id;
+  (void)command_handler;
+  (void)command_data;
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT);
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
 }

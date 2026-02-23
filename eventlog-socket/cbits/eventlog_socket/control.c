@@ -75,14 +75,20 @@ static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
 /// @brief The name of the builtin namespace.
 #define BUILTIN_NAMESPACE "eventlog-socket"
 
+/// @brief The ID reserved for the builtin `StartEventLogging` command.
+#define BUILTIN_COMMAND_ID_START_EVENT_LOGGING 1
+
+/// @brief The ID reserved for the builtin `EndEventLogging` command.
+#define BUILTIN_COMMAND_ID_END_EVENT_LOGGING 2
+
 /// @brief The ID of the builtin `StartHeapProfiling` command.
-#define BUILTIN_COMMAND_ID_START_HEAP_PROFILING 0
+#define BUILTIN_COMMAND_ID_START_HEAP_PROFILING 3
 
 /// @brief The ID of the builtin `StopHeapProfiling` command.
-#define BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING 1
+#define BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING 4
 
 /// @brief The ID of the builtin `RequestHeapCensus` command.
-#define BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS 2
+#define BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS 5
 
 /******************************************************************************
  * Handlers for Builtin Commands
@@ -263,9 +269,10 @@ control_namespace_store_resolve(const size_t namespace_len,
   return false;
 }
 
-/* PUBLIC - see documentation in eventlog_socket.h */
-EventlogSocketControlNamespace *eventlog_socket_control_register_namespace(
-    const uint8_t namespace_len, const char namespace[namespace_len]) {
+/* HIDDEN - see documentation in control.h */
+EventlogSocketStatus HIDDEN control_register_namespace(
+    const uint8_t namespace_len, const char namespace[namespace_len],
+    EventlogSocketControlNamespace **namespace_out) {
 
   // Acquire the lock on g_control_namespace_store.
   pthread_mutex_lock(&g_control_namespace_registry_mutex);
@@ -281,7 +288,7 @@ EventlogSocketControlNamespace *eventlog_socket_control_register_namespace(
                                       namespace)) {
       // If so, return false.
       pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-      return NULL;
+      return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_CTL_EXISTS);
     }
     // Is this the last namespace_entry?
     if (namespace_entry->next == NULL) {
@@ -311,7 +318,8 @@ EventlogSocketControlNamespace *eventlog_socket_control_register_namespace(
   pthread_mutex_unlock(&g_control_namespace_registry_mutex);
 
   // Return the namespace entry.
-  return namespace_entry->next;
+  *namespace_out = namespace_entry->next;
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /// @brief Resolve a command by namespace and ID.
@@ -346,12 +354,12 @@ const EventlogSocketControlCommand *control_command_store_resolve(
   return NULL;
 }
 
-/* PUBLIC - see documentation in eventlog_socket.h */
-EventlogSocketStatus eventlog_socket_control_register_command(
-    EventlogSocketControlNamespace *const namespace,
-    const EventlogSocketControlCommandId command_id,
-    EventlogSocketControlCommandHandler command_handler,
-    const void *command_data) {
+/* HIDDEN - see documentation in control.h */
+EventlogSocketStatus HIDDEN
+control_register_command(EventlogSocketControlNamespace *const namespace,
+                         const EventlogSocketControlCommandId command_id,
+                         EventlogSocketControlCommandHandler command_handler,
+                         const void *command_data) {
 
   DEBUG_TRACE("Received request to register command 0x%02x in namespace %.*s",
               command_id, namespace->namespace_len, namespace->namespace);
@@ -397,7 +405,7 @@ EventlogSocketStatus eventlog_socket_control_register_command(
                     command_id, (void *)namespace);
         // If so, fail.
         pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-        return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_CMD_EXISTS);
+        return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_CTL_EXISTS);
       }
     } while (command_entry->next != NULL);
     assert(command_entry != NULL);
@@ -479,7 +487,7 @@ static void control_wait_ghc_rts_ready(void) {
 }
 
 /* HIDDEN - see documentation in control.h */
-EventlogSocketStatus eventlog_socket_control_signal_ghc_rts_ready(void) {
+EventlogSocketStatus control_signal_ghc_rts_ready(void) {
   DEBUG_DEBUG("%s", "Sending signal that GHC RTS is ready.");
   {
     const int success_or_errno = pthread_mutex_lock(&g_ghc_rts_ready_mutex);
@@ -1135,7 +1143,7 @@ onexit:
 }
 
 /* HIDDEN - see documentation in control.h */
-EventlogSocketStatus HIDDEN eventlog_socket_control_start(
+EventlogSocketStatus HIDDEN control_start(
     pthread_t *const control_thread, const volatile int *const control_fd_ptr,
     pthread_mutex_t *const control_fd_mutex_ptr,
     pthread_cond_t *const new_conn_cond_ptr) {

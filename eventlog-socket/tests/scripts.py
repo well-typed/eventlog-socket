@@ -31,19 +31,19 @@ def control_send_command(
 
 
 def start_heap_profiling(ctx: ControlContext) -> None:
-    control_send_command(ctx, b"eventlog-socket", 0x00)
+    control_send_command(ctx, b"eventlog-socket", 0x03)
 
 
 def stop_heap_profiling(ctx: ControlContext) -> None:
-    control_send_command(ctx, b"eventlog-socket", 0x01)
+    control_send_command(ctx, b"eventlog-socket", 0x04)
 
 
 def request_heap_profile(ctx: ControlContext) -> None:
-    control_send_command(ctx, b"eventlog-socket", 0x02)
+    control_send_command(ctx, b"eventlog-socket", 0x05)
 
 
 def send_custom_command(ctx: ControlContext) -> None:
-    control_send_command(ctx, b"custom-command", 0x00)
+    control_send_command(ctx, b"custom-command", 0x01)
 
 
 def sleep(ctx: ControlContext, seconds: float) -> None:

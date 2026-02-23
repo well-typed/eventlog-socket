@@ -9,6 +9,9 @@
 /* PUBLIC - see documentation in eventlog_socket.h */
 char *eventlog_socket_strerror(EventlogSocketStatus status) {
   switch (status.ess_status_code) {
+  case EVENTLOG_SOCKET_OK: {
+    break;
+  }
   case EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT: {
     return ess_strdup("The GHC RTS does not support the eventlog.");
   }
@@ -29,9 +32,13 @@ char *eventlog_socket_strerror(EventlogSocketStatus status) {
     return ess_strdup(
         "A TCP/IP host name was found, but no port number was found.");
   }
-  case EVENTLOG_SOCKET_ERR_CMD_EXISTS: {
-    return ess_strdup("The requested combination of namespace and command ID "
-                      "is already in use.");
+  case EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT: {
+    return ess_strdup(
+        "This binary was compiled without support for control commands.");
+  }
+  case EVENTLOG_SOCKET_ERR_CTL_EXISTS: {
+    return ess_strdup(
+        "The requested namespace or command ID is already in use.");
   }
   case EVENTLOG_SOCKET_ERR_GAI: {
     return ess_strdup(gai_strerror(status.ess_error_code));
@@ -55,9 +62,7 @@ char *eventlog_socket_strerror(EventlogSocketStatus status) {
     }
     return strerrbuf;
   }
-  default: {
-    errno = EINVAL;
-    return NULL;
   }
-  }
+  errno = EINVAL;
+  return NULL;
 }

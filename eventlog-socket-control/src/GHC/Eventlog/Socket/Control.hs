@@ -217,10 +217,10 @@ instance Binary Command where
 --------------------------------------------------------------------------------
 
 startHeapProfiling :: Command
-startHeapProfiling = Command eventlogSocketNamespace (CommandId 0)
+startHeapProfiling = Command eventlogSocketNamespace (CommandId 3)
 
 stopHeapProfiling :: Command
-stopHeapProfiling = Command eventlogSocketNamespace (CommandId 1)
+stopHeapProfiling = Command eventlogSocketNamespace (CommandId 4)
 
 requestHeapCensus :: Command
-requestHeapCensus = Command eventlogSocketNamespace (CommandId 2)
+requestHeapCensus = Command eventlogSocketNamespace (CommandId 5)
