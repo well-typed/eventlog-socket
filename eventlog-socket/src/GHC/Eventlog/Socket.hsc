@@ -116,6 +116,12 @@ The following socket options are available:
 
     See the documentation for @SO_SNDBUF@ in @socket.h@.
 
+
+[@`esoLinger` ~ `Foreign.C.Types.CInt`@]:
+    The number of seconds to linger on shutdown.
+
+    See the documentation for @SO_LINGER@ in @socket.h@.
+
 @since 0.1.1.0
 -}
 data
@@ -123,6 +129,7 @@ data
     EventlogSocketOpts = EventlogSocketOpts
         { esoWait :: Bool
         , esoSndbuf :: Maybe #{type int}
+        , esoLinger :: Maybe #{type int}
         }
     deriving (Eq, Show)
 
@@ -471,10 +478,13 @@ peekEventlogSocketOpts ::
 peekEventlogSocketOpts esoPtr = do
     esoWait <- toBool . CBool <$> #{peek EventlogSocketOpts, eso_wait} esoPtr
     esoSndbuf <- #{peek EventlogSocketOpts, eso_sndbuf} esoPtr
+    esoLinger <- #{peek EventlogSocketOpts, eso_linger} esoPtr
     pure EventlogSocketOpts
         { esoWait = esoWait
         , esoSndbuf =
             if esoSndbuf <= 0 then Nothing else Just esoSndbuf
+        , esoLinger =
+            if esoLinger <= 0 then Nothing else Just esoLinger
         }
 
 {- |
@@ -488,6 +498,7 @@ withEventlogSocketOpts eso action =
     allocaBytes #{size EventlogSocketOpts} $ \esoPtr -> do
         #{poke EventlogSocketOpts, eso_wait} esoPtr . CBool . fromBool $ esoWait eso
         #{poke EventlogSocketOpts, eso_sndbuf} esoPtr . fromMaybe 0 $ esoSndbuf eso
+        #{poke EventlogSocketOpts, eso_linger} esoPtr . fromMaybe 0 $ esoLinger eso
         action esoPtr
 
 {- |
