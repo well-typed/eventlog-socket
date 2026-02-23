@@ -360,6 +360,9 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
         catch @IOError tryConnect $ \ioe ->
             if isDoesNotExistError ioe || isResourceVanishedError ioe
                 then do
+                    -- Log the error:
+                    debugInfo $ "Caught IOError: " <> displayException ioe
+
                     -- Check if program is still running:
                     maybePid <- ?programInfo.programPidIO
                     when (isNothing maybePid) $
