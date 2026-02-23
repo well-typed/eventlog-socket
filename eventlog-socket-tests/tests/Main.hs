@@ -71,8 +71,6 @@ test_fibber =
 
 {- |
 Test that @fibber-c-main 35@ produces a parseable eventlog.
-
-__Note:__ This test does not support TCP sockets.
 -}
 test_fibberCMain :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_fibberCMain =
