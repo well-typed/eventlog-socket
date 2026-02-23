@@ -124,6 +124,8 @@ typedef struct EventlogSocketOpts {
   ///
   /// See the documentation for `SO_SNDBUF` in `socket.h`.
   int eso_sndbuf;
+  /// @brief The number of seconds to linger.
+  int eso_linger;
 } EventlogSocketOpts;
 
 /// @brief The address for an eventlog socket.

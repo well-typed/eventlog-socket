@@ -540,23 +540,6 @@ worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
     return STATUS_FROM_ERRNO(); // `ess_strdup` sets errno.
   }
 
-  // Set socket linger.
-  {
-    const struct linger so_linger = {
-        .l_onoff = true,
-        .l_linger = 10,
-    };
-    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_LINGER, &so_linger,
-                   sizeof(so_linger)) == -1) {
-      DEBUG_ERRNO("setsockopt() failed for SO_LINGER");
-      const int setsockopt_errno = errno; // `setsockopt` sets errno.
-      close(g_listen_fd);
-      g_listen_fd = -1;
-      errno = setsockopt_errno;
-      return STATUS_FROM_ERRNO();
-    }
-  }
-
   // Set socket receive low water mark.
   if (setsockopt(g_listen_fd, SOL_SOCKET, SO_RCVLOWAT, &(int){1},
                  sizeof(int)) == -1) {
@@ -573,6 +556,23 @@ worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
     if (setsockopt(g_listen_fd, SOL_SOCKET, SO_SNDBUF, &opts->eso_sndbuf,
                    sizeof(opts->eso_sndbuf)) == -1) {
       DEBUG_ERRNO("setsockopt() failed for SO_SNDBUF");
+      const int setsockopt_errno = errno; // `setsockopt` sets errno.
+      close(g_listen_fd);
+      g_listen_fd = -1;
+      errno = setsockopt_errno;
+      return STATUS_FROM_ERRNO();
+    }
+  }
+
+  // Set socket linger.
+  if (opts != NULL && opts->eso_linger > 0) {
+    const struct linger so_linger = {
+        .l_onoff = true,
+        .l_linger = opts->eso_linger,
+    };
+    if (setsockopt(g_listen_fd, SOL_SOCKET, SO_LINGER, &so_linger,
+                   sizeof(so_linger)) == -1) {
+      DEBUG_ERRNO("setsockopt() failed for SO_LINGER");
       const int setsockopt_errno = errno; // `setsockopt` sets errno.
       close(g_listen_fd);
       g_listen_fd = -1;
@@ -963,6 +963,7 @@ void eventlog_socket_opts_init(EventlogSocketOpts *eventlog_socket_opts) {
   }
   eventlog_socket_opts->eso_wait = false;
   eventlog_socket_opts->eso_sndbuf = 0;
+  eventlog_socket_opts->eso_linger = 0;
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
