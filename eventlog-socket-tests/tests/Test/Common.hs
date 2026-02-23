@@ -411,13 +411,6 @@ fromSocket _timeoutMSec chunkSizeBytes socket = construct go
         yield chunk
         go
 
--- liftIO (isReady timeoutMSec handle) >>= \case
---     Just ready
---         | ready -> liftIO (BS.hGetSome handle chunkSizeBytes) >>= yield >> go
---         | otherwise -> go
---     Nothing ->
---         liftIO $ debugInfo $ "Handle closed."
-
 isReady ::
     (HasLogger, HasTestInfo) =>
     Int ->
