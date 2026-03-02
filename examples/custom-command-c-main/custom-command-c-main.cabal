@@ -1,5 +1,5 @@
 cabal-version: 2.2
-name:          custom-command
+name:          custom-command-c-main
 version:       0.1.0.0
 synopsis:      Example program that registers a custom command
 description:   Example program that registers a custom command.
@@ -14,12 +14,14 @@ build-type:    Simple
 executable custom-command
   main-is:          Main.hs
   hs-source-dirs:   app
+  c-sources:        cbits/custom-command-c-main.c
+  include-dirs:     cbits
   default-language: Haskell2010
   build-depends:
     , base             >=4.14  && <5
     , eventlog-socket  >=0.1.1 && <0.2
 
-  ghc-options:      -threaded
+  ghc-options:      -threaded -no-hs-main
 
   if impl(ghc <9.4)
     ghc-options: -eventlog
