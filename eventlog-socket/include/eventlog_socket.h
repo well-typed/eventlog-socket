@@ -444,23 +444,39 @@ typedef void EventlogSocketControlCommandHandler(
 
 /// @brief Register a new namespace.
 ///
-/// @return If there is no existing namespace with the given name, this function
-/// registers a new namespace and returns a stable pointer to it. Otherwise, it
-/// returns NULL. The returned pointer should not be freed.
+/// @return Upon successful completion, this function registers a new namespace,
+/// writes a pointer to it to @p namespace_out, and returns a status with code
+/// @c EVENTLOG_SOCKET_OK.
+///
+/// @return If the given namespace is already registered, this function returns
+/// a status with code @c EVENTLOG_SOCKET_ERR_CTL_EXISTS and the object pointer
+/// to by @p namespace_out is unchanged.
+///
+/// @return If @p namespace_out is @c NULL, this function returns a status with
+/// code @c EVENTLOG_SOCKET_ERR_SYS and error code @c EINVAL.
+///
+/// @return If the binary was compiled without control support, this function
+/// returns a status with code @c EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT.
 EventlogSocketStatus eventlog_socket_control_register_namespace(
     uint8_t namespace_len, const char namespace[namespace_len],
     EventlogSocketControlNamespace **namespace_out);
 
 /// @brief Register a new command.
 ///
-/// @return Upon successful completion, `EVENTLOG_SOCKET_REGISTER_COMMAND_OK` is
-/// returned.
+/// @return Upon successful completion, this function registers the command and
+/// returns a status with code @c EVENTLOG_SOCKET_OK.
 ///
-/// @return If there is an existing command in the given namespace with the
-/// given ID, `EVENTLOG_SOCKET_REGISTER_COMMAND_EXISTS` is returned.
+/// @return If the given command is already registered, this function returns
+/// a status with code @c EVENTLOG_SOCKET_ERR_CTL_EXISTS.
 ///
-/// @return If a system error occurs, `EVENTLOG_SOCKET_REGISTER_COMMAND_SYSTEM`
-/// is returned and errno is set to indicate the error.
+/// @return If @p namespace is @c NULL, this function returns a status with
+/// code @c EVENTLOG_SOCKET_ERR_SYS and error code @c EINVAL.
+///
+/// @return If a system error occurs, this function returns a status with code
+/// @c EVENTLOG_SOCKET_ERR_SYS and the error code set to indicate the error.
+///
+/// @return If the binary was compiled without control support, this function
+/// returns a status with code @c EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT.
 EventlogSocketStatus eventlog_socket_control_register_command(
     EventlogSocketControlNamespace *namespace,
     EventlogSocketControlCommandId command_id,

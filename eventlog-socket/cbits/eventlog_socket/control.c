@@ -361,6 +361,12 @@ control_register_command(EventlogSocketControlNamespace *const namespace,
                          EventlogSocketControlCommandHandler command_handler,
                          const void *command_data) {
 
+  // Check if namespace is NULL.
+  if (namespace == NULL) {
+    errno = EINVAL;
+    return STATUS_FROM_ERRNO();
+  }
+
   DEBUG_TRACE("Received request to register command 0x%02x in namespace %.*s",
               command_id, namespace->namespace_len, namespace->namespace);
 
