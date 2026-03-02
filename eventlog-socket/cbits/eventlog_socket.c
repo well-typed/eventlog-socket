@@ -1090,6 +1090,17 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
+const char *eventlog_socket_control_strnamespace(
+    EventlogSocketControlNamespace *namespace) {
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
+  return control_strnamespace(namespace);
+#else
+  (void)namespace;
+  return NULL;
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketStatus eventlog_socket_control_register_namespace(
     uint8_t namespace_len, const char namespace[namespace_len],
     EventlogSocketControlNamespace **namespace_out) {
@@ -1107,7 +1118,7 @@ EventlogSocketStatus eventlog_socket_control_register_namespace(
 EventlogSocketStatus eventlog_socket_control_register_command(
     EventlogSocketControlNamespace *namespace,
     EventlogSocketControlCommandId command_id,
-    EventlogSocketControlCommandHandler command_handler,
+    EventlogSocketControlCommandHandler *command_handler,
     const void *command_data) {
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
   return control_register_command(namespace, command_id, command_handler,

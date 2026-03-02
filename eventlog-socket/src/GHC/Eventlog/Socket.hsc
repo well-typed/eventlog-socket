@@ -1,41 +1,78 @@
+{-|
+Module      : GHC.Eventlog.Socket
+Description : Haskell API for @eventlog-socket@.
+Stability   : experimental
+Portability : POSIX
+
+This module exports the Haskell API for @eventlog-socket@.
+
+To start streaming GHC eventlog events to a socket, use `startWith` with a [socket address](#t:EventlogSocketAddr) and [options](#t:EventlogSocketOpts).
+For instance, the following code starts @eventlog-socket@ configured to wait for a connection and then stream events to @\/tmp\/my_app.sock@.
+
+@
+let addr = `EventlogSocketUnixAddr` "\/tmp\/my_app.sock"
+let opts = `defaultEventlogSocketOpts` {`esoWait` = True}
+`startWith` addr opts
+@
+
+To register custom control commands, use `registerNamespace` and `registerCommand`.
+For instance, the following code registers the namespace @"ping"@ with one command at ID 1 that prints "Ping!" when called.
+
+@
+pingNamespace <- `registerNamespace` "ping"
+let pingId = v`CommandId` 1
+let pingHandler = putStrLn "Ping!"
+`registerCommand` pingNamespace pingId pingHandler
+@
+-}
+
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TypeApplications #-}
 
 module GHC.Eventlog.Socket (
-    -- * High-level API
+    -- * High-level API #high_level_api#
     startWith,
 
-    -- ** Configuration types
+    -- ** Configuration types #configuration_types#
     EventlogSocketAddr (..),
-    EventlogSocketOpts (..),
+    EventlogSocketOpts (esoWait, esoSndbuf, esoLinger),
     defaultEventlogSocketOpts,
 
-    -- ** Configuration via environment
+    -- ** Configuration via environment #configuration_via_environment#
     startFromEnv,
     fromEnv,
+    EventlogSocketAddrError(..),
 
-    -- ** Error types
-    EventlogSocketAddrInvalid(..),
+    -- ** Control commands #control_commands#
+    Namespace,
+    CommandId(..),
+    CommandHandler,
+    namespaceName,
+    registerNamespace,
+    registerCommand,
+    EventlogSocketControlError(..),
 
-    -- * Legacy API
+    -- * Legacy API #legacy_api#
     startWait,
     start,
     wait,
 ) where
 
-import Control.Exception (Exception (..), bracket, bracket_, throwIO)
+import Control.Exception (Exception (..), assert, bracket, bracket_, bracketOnError, throwIO)
 import Control.Monad((<=<), when)
 import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe)
+import Data.Void (Void)
 import Data.Word (Word8, Word32)
 import Foreign.C (CBool (..))
-import Foreign.C.String (CString, peekCString, withCString)
-import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
+import Foreign.C.String (CString, peekCString, withCString, withCStringLen)
+import Foreign.Ptr (FunPtr, freeHaskellFunPtr, Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (Storable (..))
-import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Marshal.Alloc (alloca, allocaBytes, free)
 import Foreign.Marshal.Utils (fromBool, toBool, with)
 import GHC.Enum (toEnumError)
 import System.IO.Unsafe (unsafePerformIO)
@@ -108,16 +145,15 @@ myEventlogSocketOpts = defaultEventlogSocketOpts
 
 The following socket options are available:
 
-[@`esoWait` :: `Bool`@]:
-    Whether or not to wait for a client to connect.
+[@`esoWait` :: `Bool`@ #v:esoWait#]:
+Whether or not to wait for a client to connect.
 
-[@`esoSndbuf` ~ `Foreign.C.Types.CInt`@]:
+[@`esoSndbuf` ~ `Foreign.C.Types.CInt`@ #v:esoSndbuf#]:
     The size of the socket send buffer.
 
     See the documentation for @SO_SNDBUF@ in @socket.h@.
 
-
-[@`esoLinger` ~ `Foreign.C.Types.CInt`@]:
+[@`esoLinger` ~ `Foreign.C.Types.CInt`@ #v:esoLinger#]:
     The number of seconds to linger on shutdown.
 
     See the documentation for @SO_LINGER@ in @socket.h@.
@@ -227,12 +263,12 @@ eventlogSocketEnvWait :: String
 eventlogSocketEnvWait = #{const_str EVENTLOG_SOCKET_ENV_WAIT}
 
 --------------------------------------------------------------------------------
--- Error types
+-- Errors
 
 {- |
 The type of exceptions thrown by `fromEnv`.
 -}
-data EventlogSocketAddrInvalid
+data EventlogSocketAddrError
     = EventlogSocketAddrUnixPathTooLong FilePath
       -- ^ The found Unix domain socket path was too long.
     | EventlogSocketAddrInetHostMissing String
@@ -241,29 +277,260 @@ data EventlogSocketAddrInvalid
       -- ^ A TCP/IP host name was found, but no port number was found.
     deriving (Eq, Show)
 
-instance Exception EventlogSocketAddrInvalid where
-    displayException (EventlogSocketAddrUnixPathTooLong esaUnixPath) =
-        "Unix domain socket paths are limited to 107 characters. "
-            <> "Found path with "
-            <> show (length esaUnixPath)
-            <> " characters:\n"
-            <> esaUnixPath
-    displayException (EventlogSocketAddrInetHostMissing esaInetPort) =
-        "The port number "
-            <> eventlogSocketEnvInetPort
-            <> " was set to "
-            <> esaInetPort
-            <> ", but the host name "
-            <> eventlogSocketEnvInetHost
-            <> " was not set."
-    displayException (EventlogSocketAddrInetPortMissing esaInetHost) =
-        "The host name  "
-            <> eventlogSocketEnvInetHost
-            <> " was set to "
-            <> esaInetHost
-            <> ", but the port number "
-            <> eventlogSocketEnvInetPort
-            <> " was not set."
+instance Exception EventlogSocketAddrError where
+    displayException = \case
+        EventlogSocketAddrUnixPathTooLong esaUnixPath ->
+            "Unix domain socket paths are limited to 107 characters. "
+                <> "Found path with "
+                <> show (length esaUnixPath)
+                <> " characters:\n"
+                <> esaUnixPath
+        EventlogSocketAddrInetHostMissing esaInetPort ->
+            "The port number "
+                <> eventlogSocketEnvInetPort
+                <> " was set to "
+                <> esaInetPort
+                <> ", but the host name "
+                <> eventlogSocketEnvInetHost
+                <> " was not set."
+        EventlogSocketAddrInetPortMissing esaInetHost ->
+            "The host name  "
+                <> eventlogSocketEnvInetHost
+                <> " was set to "
+                <> esaInetHost
+                <> ", but the port number "
+                <> eventlogSocketEnvInetPort
+                <> " was not set."
+
+--------------------------------------------------------------------------------
+-- Control Commands API
+--------------------------------------------------------------------------------
+
+{- |
+The type of namespaces.
+
+Namespaces are opaque and can only be obtained using `registerNamespace`.
+
+@since 0.1.1.0
+-}
+newtype
+    {-# CTYPE "eventlog_socket.h" "EventlogSocketControlNamespace" #-}
+    Namespace = Namespace (Ptr Namespace)
+
+{- |
+Get the `String` name for the given t`Namespace`.
+
+@since 0.1.1.0
+-}
+namespaceName :: Namespace -> IO String
+namespaceName (Namespace namespacePtr) = do
+    peekNullableCString =<< eventlog_socket_control_strnamespace namespacePtr
+
+{- |
+The type of command IDs.
+
+Command IDs must be non-zero integers between 1 and 255.
+
+@since 0.1.1.0
+-}
+newtype
+    {-# CTYPE "eventlog_socket.h" "EventlogSocketControlCommandId" #-}
+    CommandId = CommandId #{type EventlogSocketControlCommandId}
+    deriving (Eq, Show)
+
+{- |
+The type of command handlers.
+
+The command handler is evaluated once each time the control socket receives a request for the associated command.
+
+__Warning__: The command handler /must not/ call back into the @eventlog-socket@ API.
+
+@since 0.1.1.0
+-}
+type CommandHandler = IO ()
+
+{- |
+Register an @eventlog-socket@ control namespace with the given name and returns an opaque t`Namespace` object.
+
+To avoid conflicts, the namespace should use the name of the Haskell package that registers the commands.
+
+If the size of the given name exceeds 255 bytes, this function throws v`EventlogSocketControlNamespaceTooLong`.
+
+If a namespace is already registered under the given name, this function throws v`EventlogSocketControlNamespaceExists`.
+
+If the binary was built without support for control commands, this function throws v`EventlogSocketControlUnsupported`.
+
+__Warning__: Namespaces cannot be unregistered and will be kept in memory until program exit.
+
+@since 0.1.1.0
+-}
+registerNamespace ::
+    -- | The name for the namespace.
+    String ->
+    IO Namespace
+registerNamespace namespace =
+    alloca @(Ptr Namespace) $ \namespaceOut -> do
+        -- Try to register the namespace:
+        status <-
+            -- Allocate space for the return status:
+            allocaBytes #{size EventlogSocketStatus} $ \essPtr ->
+                withCStringLen namespace $ \(namespacePtr, namespaceLen) -> do
+
+                    -- Check the namespace length:
+                    let maxNamespaceLen = fromIntegral (maxBound :: #{type uint8_t})
+                    when (namespaceLen > maxNamespaceLen) $
+                        throwIO $
+                            EventlogSocketControlNamespaceTooLong
+                                namespace
+                                namespaceLen
+                                maxNamespaceLen
+
+                    -- Try to register the namespace:
+                    eventlog_socket_control_register_namespace
+                        essPtr
+                        (fromIntegral namespaceLen)
+                        namespacePtr
+                        namespaceOut
+
+                    -- Marshal the return status:
+                    peekEventlogSocketStatus essPtr
+
+        -- Handle the return status:
+        case essStatusCode status of
+            -- The return status is OK, marshal and return the namespace.
+            EVENTLOG_SOCKET_OK -> Namespace <$> peek namespaceOut
+
+            -- The binary was compiled without support for the control server.
+            EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT -> throwIO EventlogSocketControlUnsupported
+
+            -- The namespace was already registered.
+            EVENTLOG_SOCKET_ERR_CTL_EXISTS -> throwIO $ EventlogSocketControlNamespaceExists namespace
+
+            -- The remaining errors are all system errors:
+            _otherwise ->
+                withEventlogSocketStatus status $ \essPtr -> do
+                    strPtr <- eventlog_socket_strerror essPtr
+                    str <- peekNullableCString strPtr
+                    throwIO $ userError str
+
+{- |
+Register an @eventlog-socket@ control command with the given ID and handler in the given namespace.
+
+If a command is already registered under the given ID in the given namespace, this function throws v`EventlogSocketControlCommandExists`.
+
+If the binary was built without support for control commands, this function throws v`EventlogSocketControlUnsupported`.
+
+__Warning__: Commands cannot be unregistered and will be kept in memory until program exit.
+
+@since 0.1.1.0
+-}
+registerCommand ::
+    -- | The namespace.
+    Namespace ->
+    -- | The command ID.
+    CommandId ->
+    -- | The command handler.
+    CommandHandler ->
+    IO ()
+registerCommand (Namespace namespacePtr) commandId commandHandler = do
+    -- Wrap the Haskell command handler for the C API
+    let c_commandHandler namespacePtr' commandId' commandDataPtr =
+            assert (namespacePtr == namespacePtr') $
+            assert (commandId == commandId') $
+            assert (commandDataPtr == nullPtr) $
+            commandHandler
+
+    -- Allocate a C function pointer for the command handler:
+    --
+    -- NOTE: This function pointer is only deallocated if registration fails.
+    bracketOnError (makeCommandHandlerFunPtr c_commandHandler) freeHaskellFunPtr $ \c_commandHandlerPtr -> do
+
+        -- Try to register the command:
+        status <-
+            -- Allocate space for the return status:
+            allocaBytes #{size EventlogSocketStatus} $ \essPtr -> do
+
+                -- Try to register the command:
+                eventlog_socket_control_register_command
+                    essPtr
+                    namespacePtr
+                    commandId
+                    c_commandHandlerPtr
+                    nullPtr
+
+                -- Marshal the return status:
+                peekEventlogSocketStatus essPtr
+
+        -- Handle the return status:
+        case essStatusCode status of
+            -- The return status is OK.
+            EVENTLOG_SOCKET_OK -> pure ()
+
+            -- The binary was compiled without support for the control server.
+            EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT ->
+                throwIO EventlogSocketControlUnsupported
+
+            -- The namespace was already registered.
+            EVENTLOG_SOCKET_ERR_CTL_EXISTS -> do
+                namespace <- namespaceName (Namespace namespacePtr)
+                throwIO $ EventlogSocketControlCommandExists namespace commandId
+
+            -- The remaining errors are all system errors:
+            _otherwise ->
+                withEventlogSocketStatus status $ \essPtr -> do
+                    strPtr <- eventlog_socket_strerror essPtr
+                    str <- peekNullableCString strPtr
+                    throwIO $ userError str
+
+--------------------------------------------------------------------------------
+-- Errors
+
+{- |
+The type of exceptions thrown by `registerNamespace` and `registerCommand`.
+
+@since 0.1.1.0
+-}
+data EventlogSocketControlError
+  = EventlogSocketControlNamespaceTooLong
+        -- | The requested name for the namespace.
+        String
+        -- | The size of the requested name in bytes.
+        Int
+        -- | The maximum size in bytes.
+        Int
+  | EventlogSocketControlNamespaceExists
+        -- | The requested name for the namespace.
+        String
+  | EventlogSocketControlCommandExists
+        -- | The name for the namespace.
+        String
+        -- | The requested ID for the command.
+        CommandId
+  | EventlogSocketControlUnsupported
+  deriving (Eq, Show)
+
+instance Exception EventlogSocketControlError where
+    displayException = \case
+        EventlogSocketControlNamespaceTooLong namespace namespaceLen maxNamespaceLen ->
+            "The name '"
+                <> namespace
+                <> "' was "
+                <> show namespaceLen
+                <> " bytes. The maximum length is "
+                <> show maxNamespaceLen
+                <> " bytes."
+        EventlogSocketControlNamespaceExists namespace ->
+            "The name '"
+                <> namespace
+                <> "' is already registered."
+        EventlogSocketControlCommandExists namespace (CommandId commandId) ->
+            "The ID "
+                <> show commandId
+                <> " is already registered for "
+                <> namespace
+                <> "."
+        EventlogSocketControlUnsupported ->
+            "The binary was built without support for control commands."
 
 --------------------------------------------------------------------------------
 -- Legacy API
@@ -470,7 +737,7 @@ withEventlogSocketAddr esa action =
                         action esaPtr
 
 {- |
-Marshal an `EventlogSocketOpts` from C.
+Marshal an t`EventlogSocketOpts` from C.
 -}
 peekEventlogSocketOpts ::
     Ptr EventlogSocketOpts ->
@@ -488,7 +755,7 @@ peekEventlogSocketOpts esoPtr = do
         }
 
 {- |
-Marshal an `EventlogSocketOpts` to C.
+Marshal an t`EventlogSocketOpts` to C.
 -}
 withEventlogSocketOpts ::
     EventlogSocketOpts ->
@@ -502,7 +769,7 @@ withEventlogSocketOpts eso action =
         action esoPtr
 
 {- |
-Marshal an `EventlogSocketStatus` from C.
+Marshal an t`EventlogSocketStatus` from C.
 -}
 peekEventlogSocketStatus ::
     Ptr EventlogSocketStatus ->
@@ -520,7 +787,7 @@ peekEventlogSocketStatus essPtr = do
         }
 
 {- |
-Marshal an `EventlogSocketStatus` to C.
+Marshal an t`EventlogSocketStatus` to C.
 -}
 withEventlogSocketStatus ::
     EventlogSocketStatus ->
@@ -536,26 +803,40 @@ withEventlogSocketStatus ess action =
 Variant of `peekCString` that checks for `nullPtr`.
 -}
 peekNullableCString :: CString -> IO String
-peekNullableCString charPtr =
-    if charPtr == nullPtr then pure "" else peekCString charPtr
+peekNullableCString charPtr
+    | charPtr == nullPtr = pure ""
+    | otherwise = peekCString charPtr
 
 --------------------------------------------------------------------------------
 -- Foreign imports
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_addr_free
 
 foreign import capi safe "eventlog_socket.h eventlog_socket_addr_free"
     eventlog_socket_addr_free ::
         Ptr EventlogSocketAddr ->
         IO ()
 
+--------------------------------------------------------------------------------
+-- eventlog_socket_opts_init
+
 foreign import capi safe "eventlog_socket.h eventlog_socket_opts_init"
     eventlog_socket_opts_init ::
         Ptr EventlogSocketOpts ->
         IO ()
 
+--------------------------------------------------------------------------------
+-- eventlog_socket_opts_free
+
 foreign import capi safe "eventlog_socket.h eventlog_socket_opts_free"
     eventlog_socket_opts_free ::
         Ptr EventlogSocketOpts ->
         IO ()
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_start
 
 foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_start"
     eventlog_socket_start ::
@@ -571,10 +852,16 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_start"
     EventlogSocketOpts *eventlog_socket_opts
   )
   {
-    const EventlogSocketStatus status = eventlog_socket_start(eventlog_socket_addr, eventlog_socket_opts);
+    const EventlogSocketStatus status = eventlog_socket_start(
+      eventlog_socket_addr,
+      eventlog_socket_opts
+    );
     memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
   }
 }
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_from_env
 
 foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_from_env"
     eventlog_socket_from_env ::
@@ -590,14 +877,22 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_from_e
     EventlogSocketOpts *eventlog_socket_opts
   )
   {
-    const EventlogSocketStatus status = eventlog_socket_from_env(eventlog_socket_addr, eventlog_socket_opts);
+    const EventlogSocketStatus status = eventlog_socket_from_env(
+      eventlog_socket_addr,
+      eventlog_socket_opts
+    );
     memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
   }
 }
 
+--------------------------------------------------------------------------------
+-- eventlog_socket_wait
+
 foreign import capi safe "eventlog_socket.h eventlog_socket_wait"
     eventlog_socket_wait :: IO ()
 
+--------------------------------------------------------------------------------
+-- eventlog_socket_strerror
 
 foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_strerror"
     eventlog_socket_strerror ::
@@ -610,5 +905,78 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_strerr
   )
   {
     return eventlog_socket_strerror(*eventlog_socket_status);
+  }
+}
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_control_strnamespace
+
+-- NOTE: This uses `ccall` rather than `capi` because the underlying function
+--       returns a `const char*` and `ConstPtr` wasn't added until GHC 9.6.1.
+
+foreign import ccall safe "eventlog_socket.h eventlog_socket_control_strnamespace"
+    eventlog_socket_control_strnamespace ::
+        Ptr Namespace ->
+        IO CString
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_control_register_namespace
+
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_control_register_namespace"
+    eventlog_socket_control_register_namespace ::
+        Ptr EventlogSocketStatus ->
+        ( #{type uint8_t} ) ->
+        CString ->
+        Ptr (Ptr Namespace) ->
+        IO ()
+
+#{def
+  void _wrap_eventlog_socket_control_register_namespace(
+    EventlogSocketStatus *eventlog_socket_status,
+    uint8_t eventlog_socket_namespace_len,
+    char eventlog_socket_namespace[eventlog_socket_namespace_len],
+    EventlogSocketControlNamespace **eventlog_socket_namespace_out
+  ) {
+    const EventlogSocketStatus status = eventlog_socket_control_register_namespace(
+      eventlog_socket_namespace_len,
+      eventlog_socket_namespace,
+      eventlog_socket_namespace_out
+    );
+    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
+  }
+}
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_control_register_command
+
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_control_register_command"
+    eventlog_socket_control_register_command ::
+        Ptr EventlogSocketStatus ->
+        Ptr Namespace ->
+        CommandId ->
+        FunPtr (Ptr Namespace -> CommandId -> Ptr a -> IO ()) ->
+        Ptr a ->
+        IO ()
+
+foreign import ccall "wrapper"
+    makeCommandHandlerFunPtr ::
+        (Ptr Namespace -> CommandId -> Ptr a -> IO ()) ->
+        IO (FunPtr (Ptr Namespace -> CommandId -> Ptr a -> IO ()))
+
+#{def
+  void _wrap_eventlog_socket_control_register_command(
+    EventlogSocketStatus *eventlog_socket_status,
+    EventlogSocketControlNamespace *eventlog_socket_namespace,
+    EventlogSocketControlCommandId eventlog_socket_command_id,
+    EventlogSocketControlCommandHandler eventlog_socket_command_handler,
+    const void *eventlog_socket_command_data
+  ) {
+    const EventlogSocketStatus status = eventlog_socket_control_register_command(
+      eventlog_socket_namespace,
+      eventlog_socket_command_id,
+      eventlog_socket_command_handler,
+      eventlog_socket_command_data
+    );
+    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
   }
 }

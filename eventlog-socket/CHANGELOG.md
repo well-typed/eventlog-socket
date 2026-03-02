@@ -8,7 +8,7 @@
 * Added support for reading the configuration from environment variables (`fromEnv` and `startFromEnv`).
 * Added public C API.
 * Added support for control commands (if compiled with `+control`).
-* Added support for custom control commands via C API.
+* Added support for custom control commands.
 
 ## 0.1.0.0 -- 2023-04-14
 

@@ -68,6 +68,7 @@ library
     CApiFFI
     GeneralizedNewtypeDeriving
     PatternSynonyms
+    TypeApplications
 
   -- Use base lower bound as proxy for GHC >= 8.10
   build-depends:      base >=4.14 && <5
