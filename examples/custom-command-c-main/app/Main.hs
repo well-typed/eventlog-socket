@@ -4,21 +4,14 @@ module Main where
 
 import Control.Concurrent (threadDelay)
 import Debug.Trace (flushEventLog, traceEventIO, traceMarkerIO)
-import GHC.Eventlog.Socket (CommandId (..), registerCommand, registerNamespace, startFromEnv)
+import GHC.Eventlog.Socket (wait)
 import System.Environment (getArgs)
 import Text.Read (readMaybe)
 
 main :: IO ()
 main = do
-    -- Register custom commands
-    myNamespace <- registerNamespace "custom-command"
-    registerCommand myNamespace (CommandId 1) (traceEventIO "handled ping")
-    registerCommand myNamespace (CommandId 2) (traceEventIO "handled pong")
-
-    -- Start eventlog-socket from the environment
-    startFromEnv
-
-    -- Do stuff
+    traceEventIO "custom-command example running"
+    traceEventIO "client connected; emitting workload"
     maybeEnd <- parseArgs <$> getArgs
     putStrLn . maybe "looping forever" (\n -> "looping " <> show n <> " times") $ maybeEnd
     loopFromTo 0 maybeEnd
