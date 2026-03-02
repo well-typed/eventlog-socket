@@ -55,15 +55,9 @@ For more detailed configuration options, including TCP/IP sockets, you should us
 
 ### Instrument your application from C
 
-The `eventlog-socket` package installs a C header file, `eventlog_socket.h`, which enables you to instrument your application from a C main function. There are two reasons you may want to instrument your application from C:
-
-1. You want to capture *all* of the GHC eventlog. If your application is instrumented from Haskell, it loses the first few events. See the note [above](#default-writer).
-
-2. You want to register custom commands for use with the control command protocol. Custom commands are currently only supported from C. For details, see [Control Commands](#control-commands).
+The `eventlog-socket` package installs a C header file, `eventlog_socket.h`, which enables you to instrument your application from a C main function. There is one reason you may want to instrument your application from C, which is that you want to capture *all* of the GHC eventlog. If your application is instrumented from Haskell, it loses the first few events. See the note [above](#default-writer).
 
 For an example of an application instrumented from a custom C main, see [`examples/fibber-c-main`](examples/fibber-c-main/).
-
-For an example of an application instrumented with custom control commands, see [`examples/custom-command`](examples/custom-command/).
 
 ### Configure your application to enable the eventlog
 
@@ -133,15 +127,35 @@ Any unknown control commands or incorrectly formatted messages are ignored, so y
 ### Custom Control Commands
 
 The `eventlog-socket` package supports custom control commands.
-Currently, custom control commands can only be registered via the C API.
+Custom control commands can be registered via both the Haskell and the C API.
 Registration is a two-step process:
 
-1.  Register a namespace. This must be a string of between 1 and 255 characters. By convention, this should be your Haskell package name.
+1.  Register a namespace. This must be a string of between 1 and 255 bytes. By convention, this should be your Haskell package name.
 2.  Register each command. This must be a number between 1 and 255. By convention, this should be the first non-zero number that's still available for this namespace.
 
 Commands can be passed some user data at registration time. This is intended to let you defines multiple different commands using the same handler.
 
-The following snippet defines the `register_greeters` function, which registers both the `greet_c` and `greet_haskell` commands using the `greeter` callback.
+For an example of an application instrumented with custom control commands using the Haskell API, see [`examples/custom-command`](examples/custom-command/).
+
+For an example of an application instrumented with custom control commands using the C API, see [`examples/custom-command-c-main`](examples/custom-command-c-main/).
+
+The following snippet defines the `registerGreeters` function, which registers two commands via the Haskell API:
+
+```haskell
+import GHC.Eventlog.Socket
+
+greeter :: String -> IO ()
+greeter name =
+  putStrLn $ "Hello, " <> name <> "!"
+
+registerGreeters :: IO ()
+registerGreeters = do
+  myNamespace <- registerNamespace "greeters"
+  registerCommand myNamespace (CommandId 1) (greeter "C")
+  registerCommand myNamespace (CommandId 2) (greeter "Haskell")
+```
+
+The following snippet defines the `register_greeters` function, which registers two equivalent commands via the C API:
 
 ```c
 #include <stdio.h>
