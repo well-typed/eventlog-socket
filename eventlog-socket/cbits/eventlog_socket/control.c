@@ -271,13 +271,13 @@ control_namespace_store_resolve(const size_t namespace_len,
 }
 
 /* HIDDEN - see documentation in control.h */
-const char *HIDDEN
+HIDDEN const char *
 control_strnamespace(EventlogSocketControlNamespace *namespace) {
   return namespace == NULL ? NULL : namespace->namespace;
 }
 
 /* HIDDEN - see documentation in control.h */
-EventlogSocketStatus HIDDEN control_register_namespace(
+HIDDEN EventlogSocketStatus control_register_namespace(
     const uint8_t namespace_len, const char namespace[namespace_len],
     EventlogSocketControlNamespace **namespace_out) {
 
@@ -348,7 +348,7 @@ EventlogSocketStatus HIDDEN control_register_namespace(
 }
 
 /* HIDDEN - see documentation in control.h */
-EventlogSocketStatus HIDDEN
+HIDDEN EventlogSocketStatus
 control_register_command(EventlogSocketControlNamespace *const namespace,
                          const EventlogSocketControlCommandId command_id,
                          EventlogSocketControlCommandHandler command_handler,
@@ -520,7 +520,7 @@ static void control_wait_ghc_rts_ready(void) {
 }
 
 /* HIDDEN - see documentation in control.h */
-EventlogSocketStatus control_signal_ghc_rts_ready(void) {
+HIDDEN EventlogSocketStatus control_signal_ghc_rts_ready(void) {
   DEBUG_DEBUG("%s", "Sending signal that GHC RTS is ready.");
   {
     const int success_or_errno = pthread_mutex_lock(&g_ghc_rts_ready_mutex);
@@ -1176,7 +1176,7 @@ onexit:
 }
 
 /* HIDDEN - see documentation in control.h */
-EventlogSocketStatus HIDDEN control_start(
+HIDDEN EventlogSocketStatus control_start(
     pthread_t *const control_thread, const volatile int *const control_fd_ptr,
     pthread_mutex_t *const control_fd_mutex_ptr,
     pthread_cond_t *const new_conn_cond_ptr) {

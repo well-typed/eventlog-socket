@@ -31,25 +31,25 @@
 /// @parblock
 /// `EAGAIN`, `EINVAL`, `EPERM`, or `ESRCH`.
 /// @endparblock
-EventlogSocketStatus HIDDEN control_start(pthread_t *control_thread,
+HIDDEN EventlogSocketStatus control_start(pthread_t *control_thread,
                                           const volatile int *control_fd_ptr,
                                           pthread_mutex_t *control_fd_mutex_ptr,
                                           pthread_cond_t *new_conn_cond_ptr);
 
 /// @see eventlog_socket_signal_ghc_rts_ready
-EventlogSocketStatus HIDDEN control_signal_ghc_rts_ready(void);
+HIDDEN EventlogSocketStatus control_signal_ghc_rts_ready(void);
 
 /// @see eventlog_socket_control_strnamespace
-const char *HIDDEN
+HIDDEN const char *
 control_strnamespace(EventlogSocketControlNamespace *namespace);
 
 /// @see eventlog_socket_control_register_namespace
-EventlogSocketStatus HIDDEN control_register_namespace(
+HIDDEN EventlogSocketStatus control_register_namespace(
     uint8_t namespace_len, const char namespace[namespace_len],
     EventlogSocketControlNamespace **namespace_out);
 
 /// @see eventlog_socket_control_register_command
-EventlogSocketStatus HIDDEN
+HIDDEN EventlogSocketStatus
 control_register_command(EventlogSocketControlNamespace *namespace,
                          EventlogSocketControlCommandId command_id,
                          EventlogSocketControlCommandHandler command_handler,
