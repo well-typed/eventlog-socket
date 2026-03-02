@@ -144,7 +144,7 @@ PROGRAM_SCENARIOS: list[ProgramScenario] = [
         args=["35", "36", "37", "38"],
     ),
     ProgramScenario(
-        target="custom-command",
+        target="custom-command-c-main",
         socket_type="unix",
         args=[],
         supports_reconnect=False,
