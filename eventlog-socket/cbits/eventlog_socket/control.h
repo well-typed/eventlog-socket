@@ -39,6 +39,10 @@ EventlogSocketStatus HIDDEN control_start(pthread_t *control_thread,
 /// @see eventlog_socket_signal_ghc_rts_ready
 EventlogSocketStatus HIDDEN control_signal_ghc_rts_ready(void);
 
+/// @see eventlog_socket_control_strnamespace
+const char *HIDDEN
+control_strnamespace(EventlogSocketControlNamespace *namespace);
+
 /// @see eventlog_socket_control_register_namespace
 EventlogSocketStatus HIDDEN control_register_namespace(
     uint8_t namespace_len, const char namespace[namespace_len],

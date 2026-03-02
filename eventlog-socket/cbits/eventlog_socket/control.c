@@ -19,6 +19,7 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -246,7 +247,7 @@ const EventlogSocketControlNamespace *
 control_namespace_store_resolve(const size_t namespace_len,
                                 const char namespace[namespace_len]) {
 
-  // Acquire a lock on g_control_namespace_store.
+  // Acquire a lock on g_control_namespace_registry.
   pthread_mutex_lock(&g_control_namespace_registry_mutex);
 
   // Initialise the namespace_entry pointer.
@@ -257,16 +258,22 @@ control_namespace_store_resolve(const size_t namespace_len,
     // Is this the namespace you are looking for?
     if (control_namespace_store_match(namespace_entry, namespace_len,
                                       namespace)) {
-      // Release the lock on g_control_namespace_store.
+      // Release the lock on g_control_namespace_registry.
       pthread_mutex_unlock(&g_control_namespace_registry_mutex);
       return namespace_entry;
     }
     // Otherwise, continue with the next namespace_entry.
     namespace_entry = namespace_entry->next;
   }
-  // Release the lock on g_control_namespace_store.
+  // Release the lock on g_control_namespace_registry.
   pthread_mutex_unlock(&g_control_namespace_registry_mutex);
   return false;
+}
+
+/* HIDDEN - see documentation in control.h */
+const char *HIDDEN
+control_strnamespace(EventlogSocketControlNamespace *namespace) {
+  return namespace == NULL ? NULL : namespace->namespace;
 }
 
 /* HIDDEN - see documentation in control.h */
@@ -274,8 +281,20 @@ EventlogSocketStatus HIDDEN control_register_namespace(
     const uint8_t namespace_len, const char namespace[namespace_len],
     EventlogSocketControlNamespace **namespace_out) {
 
-  // Acquire the lock on g_control_namespace_store.
-  pthread_mutex_lock(&g_control_namespace_registry_mutex);
+  // Check if namespace_out is NULL.
+  if (namespace_out == NULL) {
+    errno = EINVAL;
+    return STATUS_FROM_ERRNO();
+  }
+
+  // Acquire the lock on g_control_namespace_registry.
+  {
+    const int success_or_errno =
+        pthread_mutex_lock(&g_control_namespace_registry_mutex);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
+  }
 
   // Initialise the namespace_entry pointer.
   EventlogSocketControlNamespace *namespace_entry =
@@ -314,44 +333,18 @@ EventlogSocketStatus HIDDEN control_register_namespace(
   memcpy(namespace_entry->next, &next, sizeof(EventlogSocketControlNamespace));
   DEBUG_DEBUG("Registered namespace %.*s", (int)namespace_len, namespace);
 
-  // Release the lock on g_control_namespace_store.
-  pthread_mutex_unlock(&g_control_namespace_registry_mutex);
+  // Release the lock on g_control_namespace_registry.
+  {
+    const int success_or_errno =
+        pthread_mutex_unlock(&g_control_namespace_registry_mutex);
+    if (success_or_errno != 0) {
+      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
+    }
+  }
 
   // Return the namespace entry.
   *namespace_out = namespace_entry->next;
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
-}
-
-/// @brief Resolve a command by namespace and ID.
-///
-/// @return If the command is found, this function returns a stable pointer to
-/// it. Otherwise, it returns NULL. The returned pointer should not be freed.
-const EventlogSocketControlCommand *control_command_store_resolve(
-    const EventlogSocketControlNamespace *const namespace,
-    const EventlogSocketControlCommandId command_id) {
-
-  // Acquire the lock on g_control_namespace_store.
-  pthread_mutex_lock(&g_control_namespace_registry_mutex);
-
-  // Traverse the command_store to find the command....
-  EventlogSocketControlCommand *command = namespace->command_registry;
-
-  while (command != NULL) {
-    // If this is the command we're looking for, then...
-    if (command->command_id == command_id) {
-      // ...release the lock on g_control_namespace_store...
-      pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-      // ...and return the command.
-      return command;
-    }
-    // Otherwise, continue with the next command...
-    command = command->next;
-  }
-  // If the command was not found...
-  // ...release the lock on g_control_namespace_store...
-  pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-  // ...and return NULL.
-  return NULL;
 }
 
 /* HIDDEN - see documentation in control.h */
@@ -367,10 +360,16 @@ control_register_command(EventlogSocketControlNamespace *const namespace,
     return STATUS_FROM_ERRNO();
   }
 
+  // Check if namespace is the builtin namespace.
+  if (namespace == &g_control_namespace_registry) {
+    errno = EINVAL;
+    return STATUS_FROM_ERRNO();
+  }
+
   DEBUG_TRACE("Received request to register command 0x%02x in namespace %.*s",
               command_id, namespace->namespace_len, namespace->namespace);
 
-  // Acquire the lock on g_control_namespace_store.
+  // Acquire the lock on g_control_namespace_registry.
   {
     const int success_or_errno =
         pthread_mutex_lock(&g_control_namespace_registry_mutex);
@@ -396,6 +395,7 @@ control_register_command(EventlogSocketControlNamespace *const namespace,
     namespace->command_registry = malloc(sizeof(EventlogSocketControlCommand));
     command_entry = namespace->command_registry;
     if (command_entry == NULL) {
+      pthread_mutex_unlock(&g_control_namespace_registry_mutex);
       return STATUS_FROM_ERRNO();
     }
   }
@@ -421,6 +421,7 @@ control_register_command(EventlogSocketControlNamespace *const namespace,
     command_entry->next = malloc(sizeof(EventlogSocketControlCommand));
     command_entry = command_entry->next;
     if (command_entry == NULL) {
+      pthread_mutex_unlock(&g_control_namespace_registry_mutex);
       return STATUS_FROM_ERRNO();
     }
   }
@@ -429,7 +430,7 @@ control_register_command(EventlogSocketControlNamespace *const namespace,
               namespace->namespace_len, namespace->namespace);
   memcpy(command_entry, &next, sizeof(EventlogSocketControlCommand));
 
-  // Release the lock on g_control_namespace_store.
+  // Release the lock on g_control_namespace_registry.
   {
     const int success_or_errno =
         pthread_mutex_unlock(&g_control_namespace_registry_mutex);
@@ -444,28 +445,54 @@ control_register_command(EventlogSocketControlNamespace *const namespace,
 static bool
 control_command_handle(const EventlogSocketControlNamespace *const namespace,
                        const EventlogSocketControlCommandId command_id) {
+
+  assert(namespace != NULL);
+
   DEBUG_TRACE("Handle command 0x%02x in namespace %.*s", command_id,
               namespace->namespace_len, namespace->namespace);
 
-  // Resolve the command.
-  const EventlogSocketControlCommand *command =
-      control_command_store_resolve(namespace, command_id);
+  // Acquire the lock on g_control_namespace_registry.
+  {
+    const int success_or_errno =
+        pthread_mutex_lock(&g_control_namespace_registry_mutex);
+    if (success_or_errno != 0) {
+      return false;
+    }
+  }
 
+  // Traverse the command_registry to find the command....
+  {
+    EventlogSocketControlCommand *command_entry = namespace->command_registry;
+    while (command_entry != NULL) {
+      // If this is the command we're looking for, then...
+      if (command_entry->command_id == command_id) {
+        // ...call the command handler...
+        assert(command_entry->command_handler != NULL);
+        command_entry->command_handler(namespace, command_id,
+                                       command_entry->command_data);
+        // ...release the lock on g_control_namespace_registry...
+        pthread_mutex_unlock(&g_control_namespace_registry_mutex);
+        // ...and return true.
+        return true;
+      }
+      // Otherwise, continue with the next command...
+      command_entry = command_entry->next;
+    }
+  }
   // If the command was not found, then...
-  if (command == NULL) {
-    // ...return false.
-    DEBUG_ERROR("Could not resolve command 0x%02x in namespace %.*s",
-                command_id, namespace->namespace_len, namespace->namespace);
-    return false;
+  // ...log an error...
+  DEBUG_ERROR("Could not resolve command 0x%02x in namespace %.*s", command_id,
+              namespace->namespace_len, namespace->namespace);
+  // ...release the lock on g_control_namespace_registry...
+  {
+    const int success_or_errno =
+        pthread_mutex_unlock(&g_control_namespace_registry_mutex);
+    if (success_or_errno != 0) {
+      return false;
+    }
   }
-  // Otherwise...
-  else {
-    // ...call the command handler...
-    assert(command->command_handler != NULL);
-    command->command_handler(namespace, command_id, command->command_data);
-    // ...and return true.
-    return true;
-  }
+  // ...and return false.
+  return false;
 }
 
 /******************************************************************************

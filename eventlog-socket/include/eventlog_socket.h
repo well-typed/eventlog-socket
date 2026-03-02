@@ -442,6 +442,18 @@ typedef void EventlogSocketControlCommandHandler(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *command_data);
 
+/// @brief Get the name of a registered namespace.
+///
+/// @return Upon successful completion, this function returns an allocated
+/// string with the namespace name.
+///
+/// @return If @p namespace is @c NULL, this function returns @c NULL.
+///
+/// @return If the binary was compiled without control support, this function
+/// returns @c NULL.
+const char *
+eventlog_socket_control_strnamespace(EventlogSocketControlNamespace *namespace);
+
 /// @brief Register a new namespace.
 ///
 /// @return Upon successful completion, this function registers a new namespace,
@@ -458,7 +470,7 @@ typedef void EventlogSocketControlCommandHandler(
 /// @return If the binary was compiled without control support, this function
 /// returns a status with code @c EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT.
 EventlogSocketStatus eventlog_socket_control_register_namespace(
-    uint8_t namespace_len, const char namespace[namespace_len],
+    uint8_t namespace_len, const char namespace[namespace_len + 1],
     EventlogSocketControlNamespace **namespace_out);
 
 /// @brief Register a new command.
@@ -472,15 +484,20 @@ EventlogSocketStatus eventlog_socket_control_register_namespace(
 /// @return If @p namespace is @c NULL, this function returns a status with
 /// code @c EVENTLOG_SOCKET_ERR_SYS and error code @c EINVAL.
 ///
+/// @return If @p namespace is the builtin namespace, this function returns a
+/// status with code @c EVENTLOG_SOCKET_ERR_SYS and error code @c EINVAL.
+///
 /// @return If a system error occurs, this function returns a status with code
 /// @c EVENTLOG_SOCKET_ERR_SYS and the error code set to indicate the error.
 ///
 /// @return If the binary was compiled without control support, this function
 /// returns a status with code @c EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT.
+///
+/// @note The @p command_handler should not use the functions from this header.
 EventlogSocketStatus eventlog_socket_control_register_command(
     EventlogSocketControlNamespace *namespace,
     EventlogSocketControlCommandId command_id,
-    EventlogSocketControlCommandHandler command_handler,
+    EventlogSocketControlCommandHandler *command_handler,
     const void *command_data);
 
 #endif /* EVENGLOG_SOCKET_H */

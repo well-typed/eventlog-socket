@@ -87,12 +87,12 @@ void custom_command_init(void) {
 
   // Register the "ping" command.
   EXIT_ON_ERROR(eventlog_socket_control_register_command(
-      namespace, CUSTOM_COMMAND_PING, handle_ping, (void *)NULL));
+      namespace, CUSTOM_COMMAND_PING, &handle_ping, (void *)NULL));
 
   // Register the "pong" command.
   static const char *pong_label = "this is a label";
   EXIT_ON_ERROR(eventlog_socket_control_register_command(
-      namespace, CUSTOM_COMMAND_PONG, handle_pong, pong_label));
+      namespace, CUSTOM_COMMAND_PONG, &handle_pong, pong_label));
 }
 
 // Get the main closure.
