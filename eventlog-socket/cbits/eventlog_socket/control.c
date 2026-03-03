@@ -162,6 +162,13 @@ control_end_event_logging(const EventlogSocketControlNamespace *const namespace,
   (void)namespace;
   (void)command_id;
   (void)user_data;
+  // TODO: There's a serious race condition between this custom command
+  // and the call to endEventLogging that results from closing the connection.
+  // If the client calls this command and then disconnects, endEventLogging
+  // is called WITHOUT cleaning up the connection on this end, and the second
+  // call to endEventLogging due to the disconnect, which normally cleans up
+  // the connection, is ignored because eventLogStatus no longer returns that
+  // event logging is running.
   DEBUG_DEBUG("%s", "Received request to end event logging.");
   switch (eventLogStatus()) {
   case EVENTLOG_NOT_SUPPORTED:
