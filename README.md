@@ -241,8 +241,6 @@ bool register_greeters(void) {
 }
 ```
 
-For a full example using custom control commands, see [`examples/custom-command`](examples/custom-command/).
-
 ## Contributing
 
 The `scripts` directory contains various scripts for contributors to this repository.
