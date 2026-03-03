@@ -9,7 +9,7 @@ import Data.Functor ((<&>))
 import Data.Machine ((~>))
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Text as T
-import GHC.Eventlog.Socket.Control (CommandId (..), requestHeapCensus, startHeapProfiling, stopHeapProfiling, userCommand, userNamespace)
+import GHC.Eventlog.Socket.Control (CommandId (..), endEventLogging, requestHeapCensus, startEventLogging, startHeapProfiling, stopHeapProfiling, userCommand, userNamespace)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withTempDirectory)
@@ -43,6 +43,7 @@ main = do
         , test_oddball_NoAutomaticHeapSamples
         , test_oddball_Reconnect
         , test_oddball_ResetOnReconnect
+        , test_oddball_StartAndEndEventLogging
         , test_oddball_StartAndStopHeapProfiling
         , test_oddball_RequestHeapCensus
         , test_oddball_Junk ("\0\0", "TOASTY")
@@ -178,6 +179,32 @@ test_oddball_ResetOnReconnect =
                     &> sendJunk socket requestHeapCensusPart2
                     !> hasNoHeapProfSampleString
                     ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+
+{- |
+Test that the `StartEventLogging` and `EndEventLogging` commands are respected,
+i.e., that once the `EndEventLogging` command is sent, after some iterations,
+no more events are received, and once the `StartEventLogging` command is sent,
+after some iterations, events are once again received.
+-}
+test_oddball_StartAndEndEventLogging :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
+test_oddball_StartAndEndEventLogging =
+    testCaseFor "test_oddball_StartAndEndEventLogging" $ \eventlogSocket -> do
+        let oddball =
+                Program
+                    { name = "oddball"
+                    , args = []
+                    , rtsopts = ["-l-au", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                    , eventlogSocketBuildFlags = ["+control"]
+                    , eventlogSocketAddr = eventlogSocket
+                    }
+        withProgram oddball $
+            assertEventlogWith' eventlogSocket $ \socket ->
+                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    &> sendCommand socket endEventLogging
+                    !> droppingFor 5.0
+                    ~> hasNoEventWithinSec 5.0
+                    &> sendCommand socket startEventLogging
+                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 
 {- |
 Test that the `StartHeapProfiling` and `StopHeapProfiling` commands are

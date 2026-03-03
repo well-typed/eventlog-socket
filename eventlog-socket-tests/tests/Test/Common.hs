@@ -24,6 +24,8 @@ module Test.Common (
     anyOf,
     allOf,
     droppingFor,
+    hasEventWithinSec,
+    hasNoEventWithinSec,
     isHeapProfSampleBegin,
     hasHeapProfSampleBeginWithinSec,
     hasHeapProfSampleBeginWithin,
@@ -564,6 +566,26 @@ Drop all inputs for the given number of seconds.
 -}
 droppingFor :: Double -> ProcessT IO a x
 droppingFor timeoutSec = withTimeoutSec timeoutSec droppingForever
+
+{- |
+Assert that the input stream contains an event within the given timeout.
+-}
+hasEventWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
+hasEventWithinSec timeoutSec =
+    anyFor timeoutSec (const True) onSuccess onFailure
+  where
+    onSuccess = printf "Found event within %0.2f seconds." timeoutSec
+    onFailure = printf "Did not find event within %0.2f seconds." timeoutSec
+
+{- |
+Assert that the input stream contains no events within the given timeout.
+-}
+hasNoEventWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
+hasNoEventWithinSec timeoutSec =
+    allFor timeoutSec (const False) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find event within %0.2f seconds." timeoutSec
+    onFailure = printf "Found event within %0.2f seconds." timeoutSec
 
 {- |
 Test if an `Event` is a `HeapProfSampleBegin` event.
