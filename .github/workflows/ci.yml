@@ -37,11 +37,8 @@ jobs:
         with:
           ghc-version: ${{ matrix.ghc-version }}
 
-      - name: 🏗️ Build source distribution
-        run: cabal sdist all
-
       - name: 🏗️ Build
-        run: cabal build all
+        run: ./scripts/build-from-sdist.sh
 
       - name: 🛠️ Setup ghc-events
         uses: ./.github/actions/setup-ghc-events
