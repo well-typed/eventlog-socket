@@ -4,7 +4,7 @@ version:            0.1.1.0
 synopsis:           Stream GHC eventlog events to external processes.
 description:
   The @eventlog-socket@ package lets you stream the GHC eventlog over a socket in realtime.
-  This package exports both a Haskell API (from "GHC.Eventlog.Socket") and a C API (from [@eventlog_socket.h@](./c/index.html)).
+  This package exports both a Haskell API (from "GHC.Eventlog.Socket") and a C API (from [@eventlog_socket.h@](./docs/c/index.html)).
   For most uses, the Haskell API is sufficient.
   However, if you want to instrument your application from a C main or install custom command handlers you need the C API.
 
@@ -45,6 +45,12 @@ extra-doc-files:
 source-repository head
   type:     git
   location: https://github.com/well-typed/eventlog-socket.git
+  subdir:   eventlog-socket
+
+source-repository this
+  type:     git
+  location: https://github.com/well-typed/eventlog-socket.git
+  tag:      eventlog-socket-0.1.1.0
   subdir:   eventlog-socket
 
 flag debug
