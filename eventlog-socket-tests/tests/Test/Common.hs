@@ -149,9 +149,9 @@ withProgram program action =
 
 defaultBuildFlags :: [String]
 #if defined(DEBUG)
-defaultBuildFlags = ["+debug"]
+defaultBuildFlags = ["+optimise-heavily", "+debug"]
 #else
-defaultBuildFlags = []
+defaultBuildFlags = ["+optimise-heavily"]
 #endif
 
 start :: (HasLogger, HasTestInfo) => Program -> IO ProgramHandle
