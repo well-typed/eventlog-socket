@@ -15,6 +15,8 @@ module GHC.Eventlog.Socket.Control (
     Command,
     CommandId (..),
     userCommand,
+    startEventLogging,
+    endEventLogging,
     startHeapProfiling,
     stopHeapProfiling,
     requestHeapCensus,
@@ -215,6 +217,12 @@ instance Binary Command where
 --------------------------------------------------------------------------------
 -- Builtin Commands
 --------------------------------------------------------------------------------
+
+startEventLogging :: Command
+startEventLogging = Command eventlogSocketNamespace (CommandId 1)
+
+endEventLogging :: Command
+endEventLogging = Command eventlogSocketNamespace (CommandId 2)
 
 startHeapProfiling :: Command
 startHeapProfiling = Command eventlogSocketNamespace (CommandId 3)
