@@ -354,12 +354,12 @@ eventlog_socket_init(const EventlogSocketAddr *eventlog_socket_addr,
 void eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
                                   StgClosure *main_closure);
 
-/// @brief Attaches the global `EventLogWriter` object to an @c RtsConfig.
+/// @brief The global `EventLogWriter` object.
 ///
 /// @note You do not need to call this function if you're starting eventlog
 /// socket using the Haskell API, via `eventlog_socket_start`, or via
 /// `eventlog_socket_wrap_hs_main`.
-RtsConfig eventlog_socket_attach_rts_config(RtsConfig rts_config);
+extern const EventLogWriter SocketEventLogWriter;
 
 /// @brief Signal that the GHC RTS is ready.
 ///

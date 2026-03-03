@@ -36,6 +36,7 @@
 #include "./error.h"
 #include "./poll.h"
 #include "eventlog_socket.h"
+#include "rts/EventLogWriter.h"
 
 // CONTROL_MAGIC should be the UTF-8 encoding of some code point between
 // U+010000 and U+10FFFF. Let's pick code point U+01E5CC, for Eventlog
@@ -92,38 +93,134 @@ static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
 #define BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS 5
 
 /******************************************************************************
+ * Global Variables
+ ******************************************************************************/
+
+/// @brief The control thread reads chunks of this size from the eventlog
+/// socket.
+#define CHUNK_SIZE 256
+
+/// @brief A volatile view of the eventlog socket file descriptor.
+///
+/// This file descriptor is *not* managed by the control thread.
+static const volatile int *g_control_fd_ptr = NULL;
+
+/// @brief A pointer to the mutex that guards the eventlog socket file
+/// descriptor.
+///
+/// See `g_control_fd_ptr`.
+static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
+
+/// @brief A pointer to the condition used to signal a new connection on the
+/// eventlog socket file descriptor.
+///
+/// This condition should be used with `g_control_fd_mutex_ptr`.
+static pthread_cond_t *g_new_conn_cond_ptr = NULL;
+
+/// @brief A pointer to @c g_keep_conn in @c eventlog_socket.c.
+///        Used to ignore incoming calls to @c stopEventLogWriter from the RTS
+///        that result from calling @c endEventLogging in the handler below.
+static volatile int *g_keep_conn_ptr = NULL;
+
+/// @brief A stable view the eventlog socket file descriptor.
+///
+/// See `g_control_fd_ptr`.
+static int g_control_fd = -1;
+
+/******************************************************************************
  * Handlers for Builtin Commands
  ******************************************************************************/
 
-/// @brief Handler for "StartHeapProfiling" command (eventlog-socket::0).
+/// @brief Handler for "StartEventLogging" command (eventlog-socket::1).
+static void control_start_event_logging(
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *user_data) {
+  (void)namespace;
+  (void)command_id;
+  (void)user_data;
+  DEBUG_DEBUG("%s", "Received request to start event logging.");
+  switch (eventLogStatus()) {
+  case EVENTLOG_NOT_SUPPORTED:
+    DEBUG_DEBUG("%s", "Event logging is not supported.");
+    break;
+  case EVENTLOG_NOT_CONFIGURED:
+    DEBUG_DEBUG("%s", "Starting event logging.");
+    startEventLogging(&SocketEventLogWriter);
+    DEBUG_DEBUG("%s", "Started event logging.");
+    break;
+  case EVENTLOG_RUNNING:
+    DEBUG_DEBUG("%s", "Event logging is already running.");
+    break;
+  }
+}
+
+/// @brief Handler for "EndEventLogging" command (eventlog-socket::1).
+static void
+control_end_event_logging(const EventlogSocketControlNamespace *const namespace,
+                          const EventlogSocketControlCommandId command_id,
+                          const void *user_data) {
+  (void)namespace;
+  (void)command_id;
+  (void)user_data;
+  DEBUG_DEBUG("%s", "Received request to end event logging.");
+  switch (eventLogStatus()) {
+  case EVENTLOG_NOT_SUPPORTED:
+    DEBUG_DEBUG("%s", "Event logging is not supported.");
+    break;
+  case EVENTLOG_NOT_CONFIGURED:
+    DEBUG_DEBUG("%s", "Event logging is not running.");
+    break;
+  case EVENTLOG_RUNNING:
+    DEBUG_DEBUG("%s", "Stopping event logging.");
+    assert(g_keep_conn_ptr != NULL);
+    assert(g_control_fd_mutex_ptr != NULL);
+    // Acquire a lock on g_control_fd_mutex_ptr.
+    pthread_mutex_lock(g_control_fd_mutex_ptr);
+    // Increment the number of stopEventLogging requests to ignore.
+    ++(*g_keep_conn_ptr);
+    // Release the lock on g_control_fd_mutex_ptr.
+    pthread_mutex_unlock(g_control_fd_mutex_ptr);
+    // NOTE: Should we flush before stopping?
+    // flushEventLog(NULL);
+    // Stop the GHC RTS event logging.
+    endEventLogging();
+    DEBUG_DEBUG("%s", "Stopped event logging.");
+    break;
+  }
+}
+
+/// @brief Handler for "StartHeapProfiling" command (eventlog-socket::3).
 static void control_start_heap_profiling(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
   (void)command_id;
   (void)user_data;
+  DEBUG_DEBUG("%s", "Received request to start heap profiling.");
   startHeapProfTimer();
   DEBUG_DEBUG("%s", "Started heap profiling.");
 }
 
-/// @brief Handler for "StopHeapProfiling" command (eventlog-socket::1).
+/// @brief Handler for "StopHeapProfiling" command (eventlog-socket::4).
 static void control_stop_heap_profiling(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
   (void)command_id;
   (void)user_data;
+  DEBUG_DEBUG("%s", "Received request to stop heap profiling.");
   stopHeapProfTimer();
   DEBUG_DEBUG("%s", "Stopped heap profiling.");
 }
 
-/// @brief Handler for "RequestHeapCensus" command (eventlog-socket::2).
+/// @brief Handler for "RequestHeapCensus" command (eventlog-socket::5).
 static void control_request_heap_census(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
   (void)command_id;
   (void)user_data;
+  DEBUG_DEBUG("%s", "Received request to request heap census.");
   requestHeapCensus();
   DEBUG_DEBUG("%s", "Requested heap census.");
 }
@@ -192,21 +289,37 @@ EventlogSocketControlNamespace g_control_namespace_registry = {
     .next = NULL,
     .command_registry =
         &(EventlogSocketControlCommand){
-            .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
-            .command_handler = control_start_heap_profiling,
+            .command_id = BUILTIN_COMMAND_ID_START_EVENT_LOGGING,
+            .command_handler = control_start_event_logging,
             .command_data = NULL,
             .next =
                 &(EventlogSocketControlCommand){
-                    .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
-                    .command_handler = control_stop_heap_profiling,
+                    .command_id = BUILTIN_COMMAND_ID_END_EVENT_LOGGING,
+                    .command_handler = control_end_event_logging,
                     .command_data = NULL,
                     .next =
                         &(EventlogSocketControlCommand){
                             .command_id =
-                                BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS,
-                            .command_handler = control_request_heap_census,
+                                BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
+                            .command_handler = control_start_heap_profiling,
                             .command_data = NULL,
-                            .next = NULL,
+                            .next =
+                                &(EventlogSocketControlCommand){
+                                    .command_id =
+                                        BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
+                                    .command_handler =
+                                        control_stop_heap_profiling,
+                                    .command_data = NULL,
+                                    .next =
+                                        &(EventlogSocketControlCommand){
+                                            .command_id =
+                                                BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS,
+                                            .command_handler =
+                                                control_request_heap_census,
+                                            .command_data = NULL,
+                                            .next = NULL,
+                                        },
+                                },
                         },
                 },
         },
@@ -932,32 +1045,6 @@ control_command_parser_handle_chunk(const size_t chunk_size,
  * Control Thread
  ******************************************************************************/
 
-/// @brief The control thread reads chunks of this size from the eventlog
-/// socket.
-#define CHUNK_SIZE 256
-
-/// @brief A volatile view of the eventlog socket file descriptor.
-///
-/// This file descriptor is *not* managed by the control thread.
-static const volatile int *g_control_fd_ptr = NULL;
-
-/// @brief A pointer to the mutex that guards the eventlog socket file
-/// descriptor.
-///
-/// See `g_control_fd_ptr`.
-static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
-
-/// @brief A pointer to the condition used to signal a new connection on the
-/// eventlog socket file descriptor.
-///
-/// This condition should be used with `g_control_fd_mutex_ptr`.
-static pthread_cond_t *g_new_conn_cond_ptr = NULL;
-
-/// @brief A stable view the eventlog socket file descriptor.
-///
-/// See `g_control_fd_ptr`.
-static int g_control_fd = -1;
-
 /// Reset the control thread state when the connection changes.
 ///
 /// @param new_control_fd The new eventlog socket file descriptor. May be `-1`.
@@ -1179,11 +1266,13 @@ onexit:
 HIDDEN EventlogSocketStatus control_start(
     pthread_t *const control_thread, const volatile int *const control_fd_ptr,
     pthread_mutex_t *const control_fd_mutex_ptr,
-    pthread_cond_t *const new_conn_cond_ptr) {
+    pthread_cond_t *const new_conn_cond_ptr,
+    volatile int *const keep_conn_ptr) {
   DEBUG_DEBUG("%s", "Starting control thread.");
   g_control_fd_ptr = control_fd_ptr;
   g_control_fd_mutex_ptr = control_fd_mutex_ptr;
   g_new_conn_cond_ptr = new_conn_cond_ptr;
+  g_keep_conn_ptr = keep_conn_ptr;
   {
     const int success_or_errno =
         pthread_create(control_thread, NULL, control_loop, NULL);

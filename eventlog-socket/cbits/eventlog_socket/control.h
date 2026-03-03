@@ -21,6 +21,9 @@
 /// @param new_conn_cond_ptr
 ///   The control thread uses this condition together with
 ///   `control_fd_mutex_ptr` to wait for changes in `control_fd_ptr`.
+/// @param g_keep_conn_ptr
+///   The control thread uses this value to instruct the writer to ignore calls
+///   to @c stopEventLogWriter that result from control commands.
 ///
 /// @return Upon successful completion, 0 is returned.
 ///
@@ -34,7 +37,8 @@
 HIDDEN EventlogSocketStatus control_start(pthread_t *control_thread,
                                           const volatile int *control_fd_ptr,
                                           pthread_mutex_t *control_fd_mutex_ptr,
-                                          pthread_cond_t *new_conn_cond_ptr);
+                                          pthread_cond_t *new_conn_cond_ptr,
+                                          volatile int *g_keep_conn_ptr);
 
 /// @see eventlog_socket_signal_ghc_rts_ready
 HIDDEN EventlogSocketStatus control_signal_ghc_rts_ready(void);

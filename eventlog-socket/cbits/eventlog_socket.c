@@ -74,11 +74,17 @@ static pthread_mutex_t g_write_buffer_and_client_fd_mutex =
     PTHREAD_MUTEX_INITIALIZER;
 
 // variables accessed by multiple threads and guarded by mutex:
-//  * client_fd: written by worker, writer_stop, and control receiver to signal
+//
+//  * g_client_fd: written by worker, writer_stop, and control receiver to
+//  signal
 //    when a client connects/disconnects. The lock ensures the fd value does not
 //    change while other threads inspect or write to it.
-//  * wt: queue of pending eventlog chunks. RTS writers append while the worker
+//  * g_write_buffer: queue of pending eventlog chunks. RTS writers append while
+//  the worker
 //    thread consumes; the lock ensures push/pop operations stay consistent.
+//  * g_keep_conn: used to ignore some number of incoming calls to
+//  stopEventLogWriter
+//    that result from control commands.
 //
 // Note: RTS writes client_fd in writer_stop.
 static volatile int g_client_fd = -1;
@@ -86,6 +92,7 @@ static WriteBuffer g_write_buffer = {
     .head = NULL,
     .last = NULL,
 };
+static volatile int g_keep_conn = 0;
 
 static void cleanup(void) {
   // Remove socket file.
@@ -251,11 +258,21 @@ static void writer_flush(void) {
 static void writer_stop(void) {
   // RTS shutdown path must hold mutex so updates to client_fd/wt stay ordered
   // with the worker thread noticing the disconnect.
+  DEBUG_DEBUG("%s", "Received call to stopEventLogWriter.");
   pthread_mutex_lock(&g_write_buffer_and_client_fd_mutex);
-  if (g_client_fd >= 0) {
-    close(g_client_fd);
-    g_client_fd = -1;
-    write_buffer_free(&g_write_buffer);
+  // The g_keep_conn counter counts how many calls to writer_stop to ignore.
+  if (g_keep_conn > 0) {
+    DEBUG_DEBUG("%s", "Ignored call to stopEventLogWriter.");
+    --g_keep_conn;
+  } else {
+    DEBUG_DEBUG("%s", "Stopping eventlog writer.");
+    if (g_client_fd >= 0) {
+      DEBUG_DEBUG("Closing connection (g_client_fd=%d).", g_client_fd);
+      close(g_client_fd);
+      g_client_fd = -1;
+      DEBUG_DEBUG("%s", "Cleaning up write buffer.");
+      write_buffer_free(&g_write_buffer);
+    }
   }
   pthread_mutex_unlock(&g_write_buffer_and_client_fd_mutex);
 }
@@ -264,11 +281,10 @@ static void writer_stop(void) {
 ///
 /// @warning It is only safe to pass this value to the GHC RTS *after*
 /// `eventlog_socket_init` or `eventlog_socket_start` is called.
-static const EventLogWriter SocketEventLogWriter = {
-    .initEventLogWriter = writer_init,
-    .writeEventLog = writer_write,
-    .flushEventLog = writer_flush,
-    .stopEventLogWriter = writer_stop};
+const EventLogWriter SocketEventLogWriter = {.initEventLogWriter = writer_init,
+                                             .writeEventLog = writer_write,
+                                             .flushEventLog = writer_flush,
+                                             .stopEventLogWriter = writer_stop};
 
 /*********************************************************************************
  * Main worker (in own thread)
@@ -813,7 +829,7 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
   }
   RETURN_ON_ERROR(control_start(g_control_thread_ptr, &g_client_fd,
                                 &g_write_buffer_and_client_fd_mutex,
-                                &g_new_conn_cond));
+                                &g_new_conn_cond, &g_keep_conn));
 #endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
 
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
@@ -850,12 +866,6 @@ EventlogSocketStatus eventlog_socket_wait(void) {
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-RtsConfig eventlog_socket_attach_rts_config(RtsConfig rts_config) {
-  rts_config.eventlog_writer = &SocketEventLogWriter;
-  return rts_config;
-}
-
-/* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
   return control_signal_ghc_rts_ready();
@@ -871,7 +881,7 @@ void eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
   int exit_status;
 
   // Set the eventlog socket writer.
-  rts_config = eventlog_socket_attach_rts_config(rts_config);
+  rts_config.eventlog_writer = &SocketEventLogWriter;
 
   // Initialize the GHC RTS.
   hs_init_ghc(&argc, &argv, rts_config);
