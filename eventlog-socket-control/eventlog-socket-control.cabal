@@ -3,7 +3,7 @@ name:            eventlog-socket-control
 version:         0.1.0.0
 synopsis:        Control command protocol for eventlog-socket.
 description:
-  The @eventlog-socket-control@ package contains utilities for creating messages in the control command protocol for @eventlog-socket@.
+  The @eventlog-socket-control@ package contains utilities for creating messages for @eventlog-socket@'s control command protocol.
 
 license:         BSD-3-Clause
 license-file:    LICENSE
@@ -29,6 +29,7 @@ source-repository head
 common language
   ghc-options:        -Wall
   default-extensions:
+    FlexibleInstances
     ImportQualifiedPost
     InstanceSigs
 
