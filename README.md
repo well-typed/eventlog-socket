@@ -3,6 +3,8 @@
 The `eventlog-socket` package supports streaming the GHC eventlog over Unix domain and TCP/IP sockets.
 It streams the GHC eventlog in the [standard binary format](https://downloads.haskell.org/ghc/latest/docs/users_guide/eventlog-formats.html), identical to the contents of a binary `.eventlog` file, which can be parsed using [ghc-events](https://hackage.haskell.org/package/ghc-events). Whenever a new client connects, the event header is repeated, which guarantees that the client receives important events such as [`RTS_IDENTIFIER`](https://downloads.haskell.org/ghc/latest/docs/users_guide/eventlog-formats.html#event-type-RTS_IDENTIFIER) and [`WALL_CLOCK_TIME`](https://downloads.haskell.org/ghc/latest/docs/users_guide/eventlog-formats.html#event-type-WALL_CLOCK_TIME).
 
+When compiled with `+control` the `eventlog-socket` package also exposes a control command server over the socket, which receives and executes builtin or pre-registered commands, which allows you to dynamically enable, e.g., heap profiling from the external monitoring process. The `eventlog-socket-control` package provides utilities for constructing messages for the the control command protocol used by this feature.
+
 ## Getting Started
 
 To use the code in this repository to profile your own application, follow these steps.
