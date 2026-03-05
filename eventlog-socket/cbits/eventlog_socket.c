@@ -777,6 +777,11 @@ worker_start(const EventlogSocketAddr *const eventlog_socket_addr,
     DEBUG_ERRNO("pthread_create() failed");
     return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
   }
+
+  // wait for a connection
+  if (eventlog_socket_opts->eso_wait) {
+    eventlog_socket_wait();
+  }
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
