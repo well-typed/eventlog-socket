@@ -14,6 +14,9 @@ parseArgs args = (Finite, args)
 
 main :: IO ()
 main = do
+    -- Emit Initialising marker.
+    traceMarkerIO "Initialising fibber"
+    -- Wait for connection – if requested.
     traverse_ (const wait) =<< lookupEnv "GHC_EVENTLOG_SOCKET"
     args <- getArgs
     let (mode, fibArgs) = parseArgs args
