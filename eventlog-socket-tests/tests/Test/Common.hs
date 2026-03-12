@@ -24,6 +24,10 @@ module Test.Common (
     anyOf,
     allOf,
     droppingFor,
+    isWallClockTime,
+    hasWallClockTimeWithinSec,
+    hasWallClockTimeWithin,
+    hasWallClockTime,
     isHeapProfSampleBegin,
     hasHeapProfSampleBeginWithinSec,
     hasHeapProfSampleBeginWithin,
@@ -564,6 +568,40 @@ Drop all inputs for the given number of seconds.
 -}
 droppingFor :: Double -> ProcessT IO a x
 droppingFor timeoutSec = withTimeoutSec timeoutSec droppingForever
+
+{- |
+Test if an `Event` is a `WallClockTime` event.
+-}
+isWallClockTime :: Event -> Bool
+isWallClockTime ev
+    | E.WallClockTime{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
+-}
+hasWallClockTimeWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
+hasWallClockTimeWithinSec timeoutSec =
+    anyFor timeoutSec isWallClockTime onSuccess onFailure
+  where
+    onSuccess = printf "Found WallClockTime within %0.2f seconds." timeoutSec
+    onFailure = printf "Did not find WallClockTime within %0.2f seconds." timeoutSec
+
+{- |
+Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
+-}
+hasWallClockTimeWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
+hasWallClockTimeWithin count = taking count ~> hasWallClockTime
+
+{- |
+Assert that the input stream contains a `HeapProfSampleString` event.
+-}
+hasWallClockTime :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasWallClockTime =
+    anyOf isWallClockTime onSuccess onFailure
+  where
+    onSuccess = printf "Found WallClockTime after %d events."
+    onFailure = printf "Did not find WallClockTime after %d events."
 
 {- |
 Test if an `Event` is a `HeapProfSampleBegin` event.
