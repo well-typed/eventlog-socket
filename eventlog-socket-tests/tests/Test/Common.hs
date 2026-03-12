@@ -271,9 +271,9 @@ shouldInherit = (`elem` ["PATH"]) . fst
 eventlogSocketEnv :: EventlogSocketAddr -> [(String, String)]
 eventlogSocketEnv = \case
     EventlogSocketUnixAddr{..} ->
-        [("GHC_EVENTLOG_UNIX_PATH", esaUnixPath)]
+        [("GHC_EVENTLOG_UNIX_PATH", esaUnixPath), ("GHC_EVENTLOG_WAIT", "1")]
     EventlogSocketInetAddr{..} ->
-        [("GHC_EVENTLOG_INET_HOST", esaInetHost), ("GHC_EVENTLOG_INET_PORT", esaInetPort)]
+        [("GHC_EVENTLOG_INET_HOST", esaInetHost), ("GHC_EVENTLOG_INET_PORT", esaInetPort), ("GHC_EVENTLOG_WAIT", "1")]
 
 --------------------------------------------------------------------------------
 -- Eventlog Validation
