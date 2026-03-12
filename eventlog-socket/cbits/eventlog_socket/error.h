@@ -30,7 +30,17 @@
     if (status.ess_status_code != EVENTLOG_SOCKET_OK) {                        \
       char *strerr = eventlog_socket_strerror(status);                         \
       DEBUG_ERROR("%s", strerr);                                               \
+      free(strerr);                                                            \
       return status;                                                           \
+    }                                                                          \
+  } while (0)
+
+/// @brief If the @p expr returns a pthread error code, immediately return it.
+#define RETURN_ON_ERROR_PTHREAD(expr)                                          \
+  do {                                                                         \
+    const int success_or_errno = (expr);                                       \
+    if (success_or_errno != 0) {                                               \
+      RETURN_ON_ERROR(STATUS_FROM_PTHREAD_ERROR(success_or_errno));            \
     }                                                                          \
   } while (0)
 

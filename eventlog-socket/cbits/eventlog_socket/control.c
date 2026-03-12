@@ -36,6 +36,7 @@
 #include "./error.h"
 #include "./poll.h"
 #include "eventlog_socket.h"
+#include "init_state.h"
 
 // CONTROL_MAGIC should be the UTF-8 encoding of some code point between
 // U+010000 and U+10FFFF. Let's pick code point U+01E5CC, for Eventlog
@@ -316,6 +317,9 @@ HIDDEN EventlogSocketStatus control_register_namespace(
     }
     // Otherwise, continue with the next entry.
     namespace_entry = namespace_entry->next;
+
+    // Ensure the loop has a cancellation point.
+    pthread_testcancel();
   } while (true);
 
   // Register the requested namespace.
@@ -493,55 +497,6 @@ control_command_handle(const EventlogSocketControlNamespace *const namespace,
   }
   // ...and return false.
   return false;
-}
-
-/******************************************************************************
- * Waiting for the GHC RTS
- ******************************************************************************/
-
-/// @brief A global variable that tracks whether the GHC RTS is ready.
-static volatile bool g_ghc_rts_ready = false;
-
-/// @brief The condition on which to wait for the signal that the GHC RTS is
-/// ready.
-static pthread_cond_t g_ghc_rts_ready_cond = PTHREAD_COND_INITIALIZER;
-
-/// @brief The mutex that corresponds to `g_ghc_rts_ready_cond`.
-static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-/// @brief Wait for the signal that the GHC RTS is ready.
-static void control_wait_ghc_rts_ready(void) {
-  DEBUG_DEBUG("%s", "Waiting for signal that GHC RTS is ready.");
-  pthread_mutex_lock(&g_ghc_rts_ready_mutex);
-  while (!g_ghc_rts_ready) {
-    pthread_cond_wait(&g_ghc_rts_ready_cond, &g_ghc_rts_ready_mutex);
-  }
-  pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
-}
-
-/* HIDDEN - see documentation in control.h */
-HIDDEN EventlogSocketStatus control_signal_ghc_rts_ready(void) {
-  DEBUG_DEBUG("%s", "Sending signal that GHC RTS is ready.");
-  {
-    const int success_or_errno = pthread_mutex_lock(&g_ghc_rts_ready_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
-  if (!g_ghc_rts_ready) {
-    g_ghc_rts_ready = true;
-    const int success_or_errno = pthread_cond_broadcast(&g_ghc_rts_ready_cond);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
-  {
-    const int success_or_errno = pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
-  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
 /******************************************************************************
@@ -936,27 +891,16 @@ control_command_parser_handle_chunk(const size_t chunk_size,
 /// socket.
 #define CHUNK_SIZE 256
 
-/// @brief A volatile view of the eventlog socket file descriptor.
+/// @brief The state that is shared with the control thread.
 ///
-/// This file descriptor is *not* managed by the control thread.
-static const volatile int *g_control_fd_ptr = NULL;
-
-/// @brief A pointer to the mutex that guards the eventlog socket file
-/// descriptor.
-///
-/// See `g_control_fd_ptr`.
-static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
-
-/// @brief A pointer to the condition used to signal a new connection on the
-/// eventlog socket file descriptor.
-///
-/// This condition should be used with `g_control_fd_mutex_ptr`.
-static pthread_cond_t *g_new_conn_cond_ptr = NULL;
+/// **NOTE**: Initialising with @c {0} should guarantee that all pointers are
+/// NULL pointers.
+static ControlState g_control_state = {0};
 
 /// @brief A stable view the eventlog socket file descriptor.
 ///
-/// See `g_control_fd_ptr`.
-static int g_control_fd = -1;
+/// See `g_control_state`.
+static int g_client_fd = -1;
 
 /// Reset the control thread state when the connection changes.
 ///
@@ -964,9 +908,41 @@ static int g_control_fd = -1;
 static void control_fd_reset_to(const int new_control_fd) {
   DEBUG_DEBUG("%s", "Resetting control server state.");
   // Reset eventlog socket file descriptor.
-  g_control_fd = new_control_fd;
+  g_client_fd = new_control_fd;
   // Reset parser state.
   control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC, NULL);
+}
+
+/******************************************************************************
+ * Waiting for the GHC RTS
+ ******************************************************************************/
+
+/// @brief Check if the GHC RTS is ready.
+
+/// @brief Wait for the signal that the GHC RTS is ready.
+static void control_wait_ghc_rts_ready(void) {
+  DEBUG_DEBUG("%s", "Waiting for signal that GHC RTS is ready.");
+  assert(g_control_state.init_state_ptr != NULL);
+  assert(g_control_state.mutex_ptr != NULL);
+  assert(g_control_state.ghc_rts_ready_cond_ptr != NULL);
+  pthread_mutex_lock(g_control_state.mutex_ptr);
+  while (true) {
+    // Check whether or not the GHC RTS is ready.
+    const bool ghc_rts_ready =
+        (*g_control_state.init_state_ptr) & EVENTLOG_SOCKET_SIG_RTS_READY;
+    if (ghc_rts_ready) {
+      // If the GHC RTS is ready, break from the loop.
+      break;
+    } else {
+      // If the GHC RTS is NOT ready, wait on the relevant condition and
+      // re-enter the loop.
+      //
+      // NOTE: This call acts as the cancellation point for this infinite loop.
+      pthread_cond_wait(g_control_state.ghc_rts_ready_cond_ptr,
+                        g_control_state.mutex_ptr);
+    }
+  }
+  pthread_mutex_unlock(g_control_state.mutex_ptr);
 }
 
 /// @brief Wait for a new connection.
@@ -974,16 +950,19 @@ static void control_fd_reset_to(const int new_control_fd) {
 /// @pre The caller must have a lock on `g_control_fd_mutex_ptr`.
 /// @post The caller will have a lock on `g_control_fd_mutex_ptr`.
 static void control_fd_wait_for_connection(void) {
+  assert(g_control_state.mutex_ptr != NULL);
+  assert(g_control_state.new_connection_cond_ptr != NULL);
   DEBUG_DEBUG("%s", "Waiting to be notified of new connection.");
-  pthread_cond_wait(g_new_conn_cond_ptr, g_control_fd_mutex_ptr);
+  pthread_cond_wait(g_control_state.new_connection_cond_ptr,
+                    g_control_state.mutex_ptr);
 }
 
 static void *control_loop(void *arg) {
   (void)arg;
 
-  assert(g_control_fd_ptr != NULL);
-  assert(g_control_fd_mutex_ptr != NULL);
-  assert(g_new_conn_cond_ptr != NULL);
+  assert(g_control_state.client_fd_ptr != NULL);
+  assert(g_control_state.mutex_ptr != NULL);
+  assert(g_control_state.new_connection_cond_ptr != NULL);
 
   // Allocate memory for chunks:
   uint8_t *const chunk = malloc(CHUNK_SIZE);
@@ -995,33 +974,36 @@ static void *control_loop(void *arg) {
   while (true) {
     DEBUG_TRACE("%s", "Starting new control iteration.");
 
+    // Ensure the loop has a cancellation point.
+    pthread_testcancel();
+
     /* BEGIN: Wake up. */
     // At the start of each control iteration, we update the eventlog socket
     // file descriptor.
 
     // Acquire the lock on the connection file description.
-    pthread_mutex_lock(g_control_fd_mutex_ptr);
+    pthread_mutex_lock(g_control_state.mutex_ptr);
 
     // Read current connection file description.
-    const int new_control_fd = *g_control_fd_ptr;
-    if (g_control_fd != new_control_fd) {
-      DEBUG_TRACE("Old connection fd: %d", g_control_fd);
+    const int new_control_fd = *g_control_state.client_fd_ptr;
+    if (g_client_fd != new_control_fd) {
+      DEBUG_TRACE("Old connection fd: %d", g_client_fd);
       DEBUG_TRACE("New connection fd: %d", new_control_fd);
     }
 
     // If there WAS NO connection and there IS NO connection, then...
-    if (g_control_fd == -1 && new_control_fd == -1) {
+    if (g_client_fd == -1 && new_control_fd == -1) {
       DEBUG_TRACE("%s", "There WAS NO connection and there IS NO connection.");
       // ...wait to be notified of a new connection...
       control_fd_wait_for_connection();
       // ...release the lock...
-      pthread_mutex_unlock(g_control_fd_mutex_ptr);
+      pthread_mutex_unlock(g_control_state.mutex_ptr);
       // ...and re-enter the loop.
       continue;
     }
 
     // If there WAS NO connection but there IS A connection, then...
-    else if (g_control_fd == -1 && new_control_fd != -1) {
+    else if (g_client_fd == -1 && new_control_fd != -1) {
       DEBUG_TRACE("%s", "There WAS NO connection but there IS A connection.");
       // ...DON'T wait to be notified of a new connection...
       // ...we may we have already missed the signal...
@@ -1031,22 +1013,22 @@ static void *control_loop(void *arg) {
     }
 
     // If there WAS A connection but there IS NO connection, then...
-    else if (g_control_fd != -1 && new_control_fd == -1) {
+    else if (g_client_fd != -1 && new_control_fd == -1) {
       DEBUG_TRACE("%s", "There WAS A connection but there IS NO connection.");
       // ...reset the control server state...
       control_fd_reset_to(new_control_fd);
       // ...wait to be notified of a new connection...
       control_fd_wait_for_connection();
       // ...release the lock...
-      pthread_mutex_unlock(g_control_fd_mutex_ptr);
+      pthread_mutex_unlock(g_control_state.mutex_ptr);
       // ...and re-enter the loop.
       continue;
     }
 
     // If there WAS A connection and there IS A connection, then...
-    else if (g_control_fd != -1 && new_control_fd != -1) {
+    else if (g_client_fd != -1 && new_control_fd != -1) {
       // If it is A DIFFERENT connection, then...
-      if (g_control_fd != new_control_fd) {
+      if (g_client_fd != new_control_fd) {
         DEBUG_TRACE(
             "%s",
             "There WAS A connection and there IS A DIFFERENT connection.");
@@ -1071,10 +1053,10 @@ static void *control_loop(void *arg) {
     }
 
     // Release the lock on the connection file description.
-    pthread_mutex_unlock(g_control_fd_mutex_ptr);
+    pthread_mutex_unlock(g_control_state.mutex_ptr);
 
     // Check that g_control_fd is up-to-date:
-    assert(g_control_fd == new_control_fd);
+    assert(g_client_fd == new_control_fd);
     /* END: Wake up. */
 
     /* BEGIN: Wait for input. */
@@ -1085,7 +1067,7 @@ static void *control_loop(void *arg) {
 
     // note: POLLHUP and POLLRDHUP are output only and are ignored input.
     struct pollfd pfds[1] = {{
-        .fd = g_control_fd,
+        .fd = g_client_fd,
         .events = POLLIN,
         .revents = 0,
     }};
@@ -1118,7 +1100,7 @@ static void *control_loop(void *arg) {
       //       so this condition should be checked _after_ POLLIN.
       if ((revents & POLLNVAL) || (revents & POLLHUP) || (revents & POLLERR)) {
         // todo: wait for a new connection...
-        DEBUG_TRACE("Connection on fd %d closed.", g_control_fd);
+        DEBUG_TRACE("Connection on fd %d closed.", g_client_fd);
         continue;
       }
       // otherwise, the POLLIN bit should be set...
@@ -1132,8 +1114,7 @@ static void *control_loop(void *arg) {
     // Once we know that there is some input, we read and handle one chunk.
 
     // read a chunk:
-    const ssize_t chunk_size_or_error =
-        recv(g_control_fd, chunk, CHUNK_SIZE, 0);
+    const ssize_t chunk_size_or_error = recv(g_client_fd, chunk, CHUNK_SIZE, 0);
     // if num_bytes_or_error == -1, an error occurred...
     if (chunk_size_or_error == -1) {
       // if errno is EINTR, the receive was interrupted...
@@ -1156,7 +1137,7 @@ static void *control_loop(void *arg) {
     else if (chunk_size_or_error == 0) {
       DEBUG_TRACE("%s", "recv() failed: the connection was closed.");
       // todo: wait for a new connection...
-      DEBUG_TRACE("Connection on fd %d closed.", g_control_fd);
+      DEBUG_TRACE("Connection on fd %d closed.", g_client_fd);
       continue;
     }
     // otherwise, handle the received chunk...
@@ -1176,24 +1157,32 @@ onexit:
 }
 
 /* HIDDEN - see documentation in control.h */
-HIDDEN EventlogSocketStatus control_start(
-    pthread_t *const control_thread, const volatile int *const control_fd_ptr,
-    pthread_mutex_t *const control_fd_mutex_ptr,
-    pthread_cond_t *const new_conn_cond_ptr) {
+HIDDEN EventlogSocketStatus control_start(const ControlState control_state) {
+  assert(control_state.control_thread != NULL);
+  assert(control_state.client_fd_ptr != NULL);
+  assert(control_state.mutex_ptr != NULL);
+  assert(control_state.init_state_ptr != NULL);
+  assert(control_state.new_connection_cond_ptr != NULL);
+  assert(control_state.ghc_rts_ready_cond_ptr != NULL);
   DEBUG_DEBUG("%s", "Starting control thread.");
-  g_control_fd_ptr = control_fd_ptr;
-  g_control_fd_mutex_ptr = control_fd_mutex_ptr;
-  g_new_conn_cond_ptr = new_conn_cond_ptr;
+  memcpy(&g_control_state, &control_state, sizeof(ControlState));
+  assert(g_control_state.control_thread != NULL);
+  assert(g_control_state.client_fd_ptr != NULL);
+  assert(g_control_state.mutex_ptr != NULL);
+  assert(g_control_state.init_state_ptr != NULL);
+  assert(g_control_state.new_connection_cond_ptr != NULL);
+  assert(g_control_state.ghc_rts_ready_cond_ptr != NULL);
   {
-    const int success_or_errno =
-        pthread_create(control_thread, NULL, control_loop, NULL);
+    const int success_or_errno = pthread_create(g_control_state.control_thread,
+                                                NULL, control_loop, NULL);
     if (success_or_errno != 0) {
       DEBUG_ERRNO("pthread_create() failed");
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
     }
   }
   {
-    const int success_or_errno = pthread_detach(*control_thread);
+    const int success_or_errno =
+        pthread_detach(*g_control_state.control_thread);
     if (success_or_errno != 0) {
       DEBUG_ERRNO("pthread_detach() failed");
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
