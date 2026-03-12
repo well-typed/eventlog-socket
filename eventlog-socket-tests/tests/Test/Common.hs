@@ -102,7 +102,7 @@ import System.Exit (ExitCode (..))
 import System.FilePath (splitFileName, (</>))
 import System.IO
 import qualified System.IO as IO
-import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError, isResourceVanishedError)
+import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (CreateProcess (..), Pid, ProcessHandle, StdStream (..), createProcess_, getPid, getProcessExitCode, proc, readProcessWithExitCode, showCommandForUser, terminateProcess, waitForProcess)
 import System.Process.Internals (ignoreSigPipe)
@@ -358,7 +358,7 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
 
     connectLoop timeoutS = do
         catch @IOError tryConnect $ \ioe ->
-            if isDoesNotExistError ioe || isResourceVanishedError ioe
+            if isDoesNotExistError ioe
                 then do
                     -- Log the error:
                     debugInfo $ "Caught IOError: " <> displayException ioe
