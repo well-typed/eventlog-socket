@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Control.Concurrent (threadDelay)
 import qualified Data.Binary as B
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BSL
@@ -83,10 +84,13 @@ test_fibberCMain =
                     , eventlogSocketBuildFlags = []
                     , eventlogSocketAddr = eventlogSocket
                     }
-        withProgram fibber $
+        withProgram fibber $ do
+            threadDelay 3_000_000
             assertEventlogWith eventlogSocket $
-                -- Validate that the Finished marker is seen.
-                hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
+                -- Validate that the Starting marker is seen.
+                hasMatchingUserMarker ("Starting" `T.isPrefixOf`)
+                    -- Validate that the Finished marker is seen.
+                    &> hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
 
 {- |
 Test that @oddball@ produces heap profile samples.
