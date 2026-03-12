@@ -87,8 +87,10 @@ test_fibberCMain =
         withProgram fibber $ do
             threadDelay 3_000_000
             assertEventlogWith eventlogSocket $
-                -- Validate that the Starting marker is seen.
-                hasMatchingUserMarker ("Starting" `T.isPrefixOf`)
+                -- Validate that the Initialising marker is seen.
+                hasMatchingUserMarker ("Initialising" `T.isPrefixOf`)
+                    -- Validate that the Starting marker is seen.
+                    &> hasMatchingUserMarker ("Starting" `T.isPrefixOf`)
                     -- Validate that the Finished marker is seen.
                     &> hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
 
