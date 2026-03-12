@@ -34,6 +34,8 @@ extra-source-files:
   cbits/eventlog_socket/poll.h
   cbits/eventlog_socket/string.c
   cbits/eventlog_socket/string.h
+  cbits/eventlog_socket/worker.c
+  cbits/eventlog_socket/worker.h
   cbits/eventlog_socket/write_buffer.c
   cbits/eventlog_socket/write_buffer.h
   cbits/eventlog_socket.c
@@ -87,6 +89,7 @@ library
   c-sources:
     cbits/eventlog_socket/error.c
     cbits/eventlog_socket/string.c
+    cbits/eventlog_socket/worker.c
     cbits/eventlog_socket/write_buffer.c
     cbits/eventlog_socket.c
 

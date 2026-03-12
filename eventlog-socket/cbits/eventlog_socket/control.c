@@ -1158,7 +1158,7 @@ onexit:
 
 /* HIDDEN - see documentation in control.h */
 HIDDEN EventlogSocketStatus control_start(const ControlState control_state) {
-  assert(control_state.control_thread != NULL);
+  assert(control_state.control_thread_ptr != NULL);
   assert(control_state.client_fd_ptr != NULL);
   assert(control_state.mutex_ptr != NULL);
   assert(control_state.init_state_ptr != NULL);
@@ -1166,15 +1166,15 @@ HIDDEN EventlogSocketStatus control_start(const ControlState control_state) {
   assert(control_state.ghc_rts_ready_cond_ptr != NULL);
   DEBUG_DEBUG("%s", "Starting control thread.");
   memcpy(&g_control_state, &control_state, sizeof(ControlState));
-  assert(g_control_state.control_thread != NULL);
+  assert(g_control_state.control_thread_ptr != NULL);
   assert(g_control_state.client_fd_ptr != NULL);
   assert(g_control_state.mutex_ptr != NULL);
   assert(g_control_state.init_state_ptr != NULL);
   assert(g_control_state.new_connection_cond_ptr != NULL);
   assert(g_control_state.ghc_rts_ready_cond_ptr != NULL);
   {
-    const int success_or_errno = pthread_create(g_control_state.control_thread,
-                                                NULL, control_loop, NULL);
+    const int success_or_errno = pthread_create(
+        g_control_state.control_thread_ptr, NULL, control_loop, NULL);
     if (success_or_errno != 0) {
       DEBUG_ERRNO("pthread_create() failed");
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
@@ -1182,7 +1182,7 @@ HIDDEN EventlogSocketStatus control_start(const ControlState control_state) {
   }
   {
     const int success_or_errno =
-        pthread_detach(*g_control_state.control_thread);
+        pthread_detach(*g_control_state.control_thread_ptr);
     if (success_or_errno != 0) {
       DEBUG_ERRNO("pthread_detach() failed");
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
