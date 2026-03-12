@@ -361,6 +361,9 @@ void eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
 /// `eventlog_socket_wrap_hs_main`.
 RtsConfig eventlog_socket_attach_rts_config(RtsConfig rts_config);
 
+// TODO: documentation.
+extern const EventLogWriter SocketEventLogWriter;
+
 /// @brief Signal that the GHC RTS is ready.
 ///
 /// Since control command handlers may call function from the GHC RTS API, no

@@ -12,7 +12,7 @@
 typedef struct {
   /// @brief The function writes the thread handle to this location. It should
   /// be nonnull.
-  pthread_t *const control_thread;
+  pthread_t *const control_thread_ptr;
   /// @brief The control thread reads the eventlog socket file descriptor from
   /// this pointer. It should be nonnull.
   const volatile int *const client_fd_ptr;
