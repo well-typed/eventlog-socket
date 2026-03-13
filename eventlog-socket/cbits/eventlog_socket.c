@@ -281,7 +281,7 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
       .init_state_ptr = &g_init_state,
       .new_connection_cond_ptr = &g_new_connection_cond,
       .ghc_rts_ready_cond_ptr = &g_ghc_rts_ready_cond};
-  RETURN_ON_ERROR(control_start(control_state));
+  RETURN_ON_ERROR(es_control_start(control_state));
 #endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
 
   // Wait for a connection.
@@ -587,7 +587,7 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 const char *eventlog_socket_control_strnamespace(
     EventlogSocketControlNamespace *namespace) {
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
-  return control_strnamespace(namespace);
+  return es_control_strnamespace(namespace);
 #else
   (void)namespace;
   return NULL;
@@ -615,8 +615,8 @@ EventlogSocketStatus eventlog_socket_control_register_command(
     EventlogSocketControlCommandHandler *command_handler,
     const void *command_data) {
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
-  return control_register_command(namespace, command_id, command_handler,
-                                  command_data);
+  return es_control_register_command(namespace, command_id, command_handler,
+                                     command_data);
 #else
   (void)namespace;
   (void)command_id;

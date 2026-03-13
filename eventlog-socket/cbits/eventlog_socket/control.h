@@ -47,11 +47,11 @@ typedef struct {
 /// @parblock
 /// `EAGAIN`, `EINVAL`, `EPERM`, or `ESRCH`.
 /// @endparblock
-HIDDEN EventlogSocketStatus control_start(ControlState control_thread_state);
+HIDDEN EventlogSocketStatus es_control_start(ControlState control_thread_state);
 
 /// @see eventlog_socket_control_strnamespace
 HIDDEN const char *
-control_strnamespace(EventlogSocketControlNamespace *namespace);
+es_control_strnamespace(EventlogSocketControlNamespace *namespace);
 
 /// @see eventlog_socket_control_register_namespace
 HIDDEN EventlogSocketStatus control_register_namespace(
@@ -60,9 +60,9 @@ HIDDEN EventlogSocketStatus control_register_namespace(
 
 /// @see eventlog_socket_control_register_command
 HIDDEN EventlogSocketStatus
-control_register_command(EventlogSocketControlNamespace *namespace,
-                         EventlogSocketControlCommandId command_id,
-                         EventlogSocketControlCommandHandler command_handler,
-                         const void *command_data);
+es_control_register_command(EventlogSocketControlNamespace *namespace,
+                            EventlogSocketControlCommandId command_id,
+                            EventlogSocketControlCommandHandler command_handler,
+                            const void *command_data);
 
 #endif /* EVENTLOG_SOCKET_CONTROL_H */
