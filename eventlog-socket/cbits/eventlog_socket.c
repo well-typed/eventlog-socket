@@ -251,6 +251,23 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
     return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_RTS_NOSUPPORT);
   }
 
+  // Start worker thread.
+  g_worker_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
+  if (g_worker_thread_ptr == NULL) {
+    return STATUS_FROM_ERRNO(); // `malloc` sets errno.
+  }
+  const WorkerState worker_state = {
+      .worker_thread_ptr = g_worker_thread_ptr,
+      .client_fd_ptr = &g_client_fd,
+      .write_buffer_ptr = &g_write_buffer,
+      .mutex_ptr = &g_mutex,
+      .init_state_ptr = &g_init_state,
+      .new_connection_cond_ptr = &g_new_connection_cond,
+      .ghc_rts_ready_cond_ptr = &g_ghc_rts_ready_cond,
+  };
+  RETURN_ON_ERROR(worker_init(worker_state));
+  RETURN_ON_ERROR(worker_start(eventlog_socket_addr, eventlog_socket_opts));
+
   // Start control thread.
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
   g_control_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
@@ -266,29 +283,6 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
       .ghc_rts_ready_cond_ptr = &g_ghc_rts_ready_cond};
   RETURN_ON_ERROR(control_start(control_state));
 #endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
-
-  // Start worker thread.
-  g_worker_thread_ptr = (pthread_t *)malloc(sizeof(pthread_t));
-  if (g_worker_thread_ptr == NULL) {
-    return STATUS_FROM_ERRNO(); // `malloc` sets errno.
-  }
-  const WorkerState worker_state = {
-      .worker_thread_ptr = g_worker_thread_ptr,
-      .control_thread_ptr =
-#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
-          g_control_thread_ptr,
-#else
-          NULL,
-#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
-      .client_fd_ptr = &g_client_fd,
-      .write_buffer_ptr = &g_write_buffer,
-      .mutex_ptr = &g_mutex,
-      .init_state_ptr = &g_init_state,
-      .new_connection_cond_ptr = &g_new_connection_cond,
-      .ghc_rts_ready_cond_ptr = &g_ghc_rts_ready_cond,
-  };
-  RETURN_ON_ERROR(worker_init(worker_state));
-  RETURN_ON_ERROR(worker_start(eventlog_socket_addr, eventlog_socket_opts));
 
   // Wait for a connection.
   if (eventlog_socket_opts->eso_wait) {

@@ -41,7 +41,11 @@ static int g_wake_pipe[2] = {-1, -1};
 /// NULL pointers.
 static WorkerState g_worker_state = {0};
 
-static void cleanup(void) {
+/// @brief Cleanup handler for the worker thread.
+///
+/// TODO: Move the first portion of this handler into a pthread_cleanup_push
+/// handler.
+static void worker_cleanup(void) {
   // Remove socket file.
   if (g_sock_path) {
     unlink(g_sock_path);
@@ -55,21 +59,6 @@ static void cleanup(void) {
     close(g_wake_pipe[1]);
     g_wake_pipe[1] = -1;
   }
-  // Stop the control thread.
-#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
-  if (g_worker_state.control_thread_ptr != NULL) {
-    DEBUG_DEBUG("%s", "Cancelling control thread.");
-    if (pthread_cancel(*g_worker_state.control_thread_ptr) != 0) {
-      DEBUG_ERRNO("pthread_cancel() failed for control thread");
-    } else {
-      if (pthread_join(*g_worker_state.control_thread_ptr, NULL) != 0) {
-        DEBUG_ERRNO("pthread_join() failed for control thread");
-      }
-    }
-    free((void *)g_worker_state.control_thread_ptr);
-  }
-
-#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
   // Stop the worker thread.
   if (g_worker_state.worker_thread_ptr != NULL) {
     DEBUG_DEBUG("%s", "Cancelling worker thread.");
@@ -660,7 +649,7 @@ HIDDEN EventlogSocketStatus worker_init(const WorkerState worker_state) {
         return STATUS_FROM_ERRNO();
       }
     }
-    atexit(cleanup);
+    atexit(worker_cleanup);
     *g_worker_state.init_state_ptr |= EVENTLOG_SOCKET_SIG_INITIALIZED;
   }
   {
