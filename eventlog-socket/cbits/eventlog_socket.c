@@ -15,7 +15,6 @@
 #include <unistd.h>
 
 #include <Rts.h>
-#include <rts/prof/Heap.h>
 
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
 #include "./eventlog_socket/control.h"
