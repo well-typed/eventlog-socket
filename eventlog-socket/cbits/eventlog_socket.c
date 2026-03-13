@@ -135,7 +135,7 @@ static void writer_enqueue(uint8_t *data, size_t size) {
 
   DEBUG_TRACE("wt.head = %p", (void *)g_write_buffer.head);
   if (was_empty) {
-    worker_wake();
+    es_worker_wake();
   }
 }
 
@@ -265,8 +265,8 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
       .new_connection_cond_ptr = &g_new_connection_cond,
       .ghc_rts_ready_cond_ptr = &g_ghc_rts_ready_cond,
   };
-  RETURN_ON_ERROR(worker_init(worker_state));
-  RETURN_ON_ERROR(worker_start(eventlog_socket_addr, eventlog_socket_opts));
+  RETURN_ON_ERROR(es_worker_init(worker_state));
+  RETURN_ON_ERROR(es_worker_start(eventlog_socket_addr, eventlog_socket_opts));
 
   // Start control thread.
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL

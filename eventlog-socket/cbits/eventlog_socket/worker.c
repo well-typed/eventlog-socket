@@ -45,7 +45,7 @@ static WorkerState g_worker_state = {0};
 ///
 /// TODO: Move the first portion of this handler into a pthread_cleanup_push
 /// handler.
-static void worker_cleanup(void) {
+static void es_worker_cleanup(void) {
   // Remove socket file.
   if (g_sock_path) {
     unlink(g_sock_path);
@@ -75,7 +75,7 @@ static void worker_cleanup(void) {
 
 #define EVENTLOG_SOCKET_WORKER_CHUNK_SIZE 32
 
-static void worker_wake_drain(void) {
+static void es_worker_wake_drain(void) {
   if (g_wake_pipe[0] == -1) {
     return;
   }
@@ -100,7 +100,7 @@ static void worker_wake_drain(void) {
 }
 
 /* HIDDEN - see documentation in worker.h */
-HIDDEN void worker_wake(void) {
+HIDDEN void es_worker_wake(void) {
   if (g_wake_pipe[1] == -1) {
     return;
   }
@@ -252,7 +252,7 @@ static void worker_step_listen(void) {
 // nothing to write iteration.
 //
 // we poll only for whether the connection is closed.
-static void worker_step_nonwrite(int fd) {
+static void es_worker_step_nonwrite(int fd) {
   DEBUG_TRACE("(%d)", fd);
 
   // Wait for socket to disconnect or for pending data.
@@ -278,7 +278,7 @@ static void worker_step_nonwrite(int fd) {
   }
 
   if (nfds == 2 && (pfds[1].revents & POLLIN)) {
-    worker_wake_drain();
+    es_worker_wake_drain();
     return;
   }
 
@@ -296,7 +296,7 @@ static void worker_step_nonwrite(int fd) {
 // write iteration.
 //
 // we poll for both: can we write, and whether the connection is closed.
-static void worker_step_write(int fd) {
+static void es_worker_step_write(int fd) {
   DEBUG_TRACE("(%d)", fd);
 
   // Wait for socket to disconnect
@@ -373,7 +373,7 @@ static void worker_step_write(int fd) {
   }
 }
 
-static void worker_step(void) {
+static void es_worker_step(void) {
   // Snapshot shared state under lock so worker decisions (listen vs write)
   // align with the current connection/queue state.
   pthread_mutex_lock(g_worker_state.mutex_ptr);
@@ -385,9 +385,9 @@ static void worker_step(void) {
 
   if (client != -1) {
     if (write_buffer_empty) {
-      worker_step_nonwrite(client);
+      es_worker_step_nonwrite(client);
     } else {
-      worker_step_write(client);
+      es_worker_step_write(client);
     }
   } else {
     worker_step_listen();
@@ -400,14 +400,14 @@ static void worker_step(void) {
  * connection).
  * - or we don't have, then we poll for accept.
  */
-static void *worker_loop(void *arg) {
+static void *es_worker_loop(void *arg) {
   (void)arg;
   while (true) {
     // Ensure the loop has a cancellation point.
     pthread_testcancel();
 
     // Perform one worker step.
-    worker_step();
+    es_worker_step();
   }
   return NULL; // unreachable
 }
@@ -428,8 +428,8 @@ static void *worker_loop(void *arg) {
 /// `EPROTONOSUPPORT`, or `EROFS`.
 /// @endparblock
 static EventlogSocketStatus
-worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
-                        const EventlogSocketOpts *const opts) {
+es_worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
+                           const EventlogSocketOpts *const opts) {
   DEBUG_TRACE("init Unix listener: %s", unix_addr->esa_unix_path);
 
   // Create a socket.
@@ -523,8 +523,8 @@ worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
 /// `EAI_SYSTEM`.
 /// @endparblock
 static EventlogSocketStatus
-worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
-                        const EventlogSocketOpts *const opts) {
+es_worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
+                           const EventlogSocketOpts *const opts) {
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -608,7 +608,7 @@ worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
 /// `EACCES`, `EAGAIN`, `EBADF`, `EFAULT`, `EINVAL`, `EMFILE`, `ENFILE`,
 /// `ENFILE`, or `ENOPKG`.
 /// @endparblock
-HIDDEN EventlogSocketStatus worker_init(const WorkerState worker_state) {
+HIDDEN EventlogSocketStatus es_worker_init(const WorkerState worker_state) {
   assert(worker_state.worker_thread_ptr != NULL);
   assert(worker_state.client_fd_ptr != NULL);
   assert(worker_state.write_buffer_ptr != NULL);
@@ -649,7 +649,7 @@ HIDDEN EventlogSocketStatus worker_init(const WorkerState worker_state) {
         return STATUS_FROM_ERRNO();
       }
     }
-    atexit(worker_cleanup);
+    atexit(es_worker_cleanup);
     *g_worker_state.init_state_ptr |= EVENTLOG_SOCKET_SIG_INITIALIZED;
   }
   {
@@ -686,18 +686,18 @@ HIDDEN EventlogSocketStatus worker_init(const WorkerState worker_state) {
 /// `ENOTSOCK`, `EOPNOTSUPP`, `EPERM`, `EPROTONOSUPPORT`, or `EROFS`.
 /// @endparblock
 HIDDEN EventlogSocketStatus
-worker_start(const EventlogSocketAddr *const eventlog_socket_addr,
-             const EventlogSocketOpts *const eventlog_socket_opts) {
+es_worker_start(const EventlogSocketAddr *const eventlog_socket_addr,
+                const EventlogSocketOpts *const eventlog_socket_opts) {
   // Bind the eventlog socket.
   DEBUG_TRACE("%s", "Binding eventlog socket.");
   switch (eventlog_socket_addr->esa_tag) {
   case EVENTLOG_SOCKET_UNIX: {
-    RETURN_ON_ERROR(worker_socket_init_unix(
+    RETURN_ON_ERROR(es_worker_socket_init_unix(
         &eventlog_socket_addr->esa_unix_addr, eventlog_socket_opts));
     break;
   }
   case EVENTLOG_SOCKET_INET: {
-    RETURN_ON_ERROR(worker_socket_init_inet(
+    RETURN_ON_ERROR(es_worker_socket_init_inet(
         &eventlog_socket_addr->esa_inet_addr, eventlog_socket_opts));
     break;
   }
@@ -710,8 +710,8 @@ worker_start(const EventlogSocketAddr *const eventlog_socket_addr,
 
   // Start the worker thread.
   DEBUG_TRACE("%s", "Starting worker thread.");
-  const int success_or_errno =
-      pthread_create(g_worker_state.worker_thread_ptr, NULL, worker_loop, NULL);
+  const int success_or_errno = pthread_create(g_worker_state.worker_thread_ptr,
+                                              NULL, es_worker_loop, NULL);
   if (success_or_errno != 0) {
     DEBUG_ERRNO("pthread_create() failed");
     return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
