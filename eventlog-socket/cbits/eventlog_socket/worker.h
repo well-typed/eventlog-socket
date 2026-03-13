@@ -34,12 +34,12 @@ typedef struct {
   pthread_cond_t *const restrict ghc_rts_ready_cond_ptr;
 } WorkerState;
 
-HIDDEN EventlogSocketStatus worker_init(WorkerState worker_state);
+HIDDEN EventlogSocketStatus es_worker_init(WorkerState worker_state);
 
 HIDDEN EventlogSocketStatus
-worker_start(const EventlogSocketAddr *eventlog_socket_addr,
-             const EventlogSocketOpts *eventlog_socket_opts);
+es_worker_start(const EventlogSocketAddr *eventlog_socket_addr,
+                const EventlogSocketOpts *eventlog_socket_opts);
 
-HIDDEN void worker_wake(void);
+HIDDEN void es_worker_wake(void);
 
 #endif /* EVENTLOG_SOCKET_WORKER_H */
