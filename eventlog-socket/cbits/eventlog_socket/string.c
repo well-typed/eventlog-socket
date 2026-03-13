@@ -1,6 +1,6 @@
 #include "./string.h"
 
-HIDDEN char *ess_strdup(const char *const str) {
+HIDDEN char *es_strdup(const char *const str) {
   if (str == NULL) {
     errno = EINVAL;
     return NULL;
@@ -13,7 +13,7 @@ HIDDEN char *ess_strdup(const char *const str) {
   return str_dup;
 }
 
-HIDDEN char *ess_strndup(const size_t str_len, const char str[str_len + 1]) {
+HIDDEN char *es_strndup(const size_t str_len, const char str[str_len + 1]) {
   if (str == NULL) {
     errno = EINVAL;
     return NULL;
