@@ -14,7 +14,7 @@
 ///
 /// @return On error, a null pointer is returned and errno is set to indicate
 /// the error.
-HIDDEN char *ess_strdup(const char *str);
+HIDDEN char *es_strdup(const char *str);
 
 /// @brief Copy the first @p str_len bytes of @p str into allocated memory.
 ///
@@ -23,6 +23,6 @@ HIDDEN char *ess_strdup(const char *str);
 ///
 /// @return On error, a null pointer is returned and errno is set to indicate
 /// the error.
-HIDDEN char *ess_strndup(size_t str_len, const char str[str_len + 1]);
+HIDDEN char *es_strndup(size_t str_len, const char str[str_len + 1]);
 
 #endif /* EVENTLOG_SOCKET_STRING_H */

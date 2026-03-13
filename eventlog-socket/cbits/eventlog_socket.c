@@ -517,9 +517,9 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     }
 
     // Write the configuration:
-    char *unix_path_copy = ess_strndup(unix_path_len, unix_path);
+    char *unix_path_copy = es_strndup(unix_path_len, unix_path);
     if (unix_path_copy == NULL) {
-      return STATUS_FROM_ERRNO(); // `ess_strndup` sets errno.
+      return STATUS_FROM_ERRNO(); // `es_strndup` sets errno.
     }
     *eventlog_socket_addr_out = (EventlogSocketAddr){
         .esa_tag = EVENTLOG_SOCKET_UNIX,
@@ -543,18 +543,18 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
     if (has_inet_host || has_inet_port) {
       // Copy the inet_host:
       char *inet_host_copy = (has_inet_host)
-                                 ? ess_strndup(strlen(inet_host), inet_host)
-                                 : ess_strndup(0, "");
+                                 ? es_strndup(strlen(inet_host), inet_host)
+                                 : es_strndup(0, "");
       if (inet_host_copy == NULL) {
-        return STATUS_FROM_ERRNO(); // `ess_strndup` sets errno.
+        return STATUS_FROM_ERRNO(); // `es_strndup` sets errno.
       }
       // Copy the inet_port:
       char *inet_port_copy = (has_inet_port)
-                                 ? ess_strndup(strlen(inet_port), inet_port)
-                                 : ess_strndup(0, "");
+                                 ? es_strndup(strlen(inet_port), inet_port)
+                                 : es_strndup(0, "");
       if (inet_port_copy == NULL) {
         free(inet_host_copy);
-        return STATUS_FROM_ERRNO(); // `ess_strndup` sets errno.
+        return STATUS_FROM_ERRNO(); // `es_strndup` sets errno.
       }
       // Write the configuration:
       *eventlog_socket_addr_out =

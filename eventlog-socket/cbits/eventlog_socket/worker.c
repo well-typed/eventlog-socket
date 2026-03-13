@@ -439,9 +439,9 @@ es_worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
   }
 
   // Record the sock_path so it can be unlinked at exit
-  g_sock_path = ess_strdup(unix_addr->esa_unix_path);
+  g_sock_path = es_strdup(unix_addr->esa_unix_path);
   if (g_sock_path == NULL) {
-    return STATUS_FROM_ERRNO(); // `ess_strdup` sets errno.
+    return STATUS_FROM_ERRNO(); // `es_strdup` sets errno.
   }
 
   // Set socket receive low water mark.
