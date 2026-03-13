@@ -287,7 +287,7 @@ static void es_worker_step_nonwrite(int fd) {
 
     pthread_mutex_lock(g_worker_state.mutex_ptr);
     *g_worker_state.client_fd_ptr = -1;
-    write_buffer_free(g_worker_state.write_buffer_ptr);
+    es_write_buffer_free(g_worker_state.write_buffer_ptr);
     pthread_mutex_unlock(g_worker_state.mutex_ptr);
     return;
   }
@@ -325,7 +325,7 @@ static void es_worker_step_write(int fd) {
     pthread_mutex_lock(g_worker_state.mutex_ptr);
     assert(fd == *g_worker_state.client_fd_ptr);
     *g_worker_state.client_fd_ptr = -1;
-    write_buffer_free(g_worker_state.write_buffer_ptr);
+    es_write_buffer_free(g_worker_state.write_buffer_ptr);
     pthread_mutex_unlock(g_worker_state.mutex_ptr);
     return;
   }
@@ -346,7 +346,7 @@ static void es_worker_step_write(int fd) {
           // do nothing.
         } else if (errno == EPIPE) {
           *g_worker_state.client_fd_ptr = -1;
-          write_buffer_free(g_worker_state.write_buffer_ptr);
+          es_write_buffer_free(g_worker_state.write_buffer_ptr);
         } else {
           DEBUG_ERRNO("write() failed");
         }
@@ -360,7 +360,7 @@ static void es_worker_step_write(int fd) {
         // we wrote something
         if (num_bytes_written >= item->size) {
           // we wrote whole element, try to write next element too
-          write_buffer_pop(g_worker_state.write_buffer_ptr);
+          es_write_buffer_pop(g_worker_state.write_buffer_ptr);
           continue;
         } else {
           item->size -= num_bytes_written;

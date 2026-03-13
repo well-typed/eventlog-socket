@@ -5,7 +5,7 @@
 #include "./debug.h"
 #include "./write_buffer.h"
 
-void HIDDEN write_buffer_push(WriteBuffer *wb, uint8_t *data, size_t size) {
+void HIDDEN es_write_buffer_push(WriteBuffer *wb, uint8_t *data, size_t size) {
   DEBUG_TRACE("%p, %lu\n", (void *)data, size);
   uint8_t *copy = malloc(size);
   memcpy(copy, data, size);
@@ -30,7 +30,7 @@ void HIDDEN write_buffer_push(WriteBuffer *wb, uint8_t *data, size_t size) {
   DEBUG_TRACE("%p %p\n", (void *)wb, (void *)wb->head);
 }
 
-void HIDDEN write_buffer_pop(WriteBuffer *wb) {
+void HIDDEN es_write_buffer_pop(WriteBuffer *wb) {
   WriteBufferItem *head = wb->head;
   if (head == NULL) {
     // buffer is empty: nothing to do.
@@ -45,10 +45,10 @@ void HIDDEN write_buffer_pop(WriteBuffer *wb) {
   }
 }
 
-void HIDDEN write_buffer_free(WriteBuffer *wb) {
+void HIDDEN es_write_buffer_free(WriteBuffer *wb) {
   // not the most efficient implementation,
   // but should be obviously correct.
   while (wb->head) {
-    write_buffer_pop(wb);
+    es_write_buffer_pop(wb);
   }
 }
