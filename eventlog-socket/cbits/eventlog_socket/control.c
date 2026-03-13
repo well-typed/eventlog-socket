@@ -1156,6 +1156,21 @@ onexit:
   return NULL;
 }
 
+/// @brief Control cleanup.
+static void control_cleanup(void) {
+  if (g_control_state.control_thread_ptr != NULL) {
+    DEBUG_DEBUG("%s", "Cancelling control thread.");
+    if (pthread_cancel(*g_control_state.control_thread_ptr) != 0) {
+      DEBUG_ERRNO("pthread_cancel() failed for control thread");
+    } else {
+      if (pthread_join(*g_control_state.control_thread_ptr, NULL) != 0) {
+        DEBUG_ERRNO("pthread_join() failed for control thread");
+      }
+    }
+    free((void *)g_control_state.control_thread_ptr);
+  }
+}
+
 /* HIDDEN - see documentation in control.h */
 HIDDEN EventlogSocketStatus control_start(const ControlState control_state) {
   assert(control_state.control_thread_ptr != NULL);
@@ -1188,5 +1203,6 @@ HIDDEN EventlogSocketStatus control_start(const ControlState control_state) {
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
     }
   }
+  atexit(control_cleanup);
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }

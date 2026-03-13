@@ -11,8 +11,6 @@ typedef struct {
   /// @brief The function writes the thread handle to this location. It should
   /// be nonnull.
   pthread_t *const worker_thread_ptr;
-  /// @brief A pointer to the control thread. It should be nonnull.
-  pthread_t *const control_thread_ptr;
   /// @brief The worker thread reads the eventlog socket file descriptor from
   /// this pointer. If EVENTLOG_SOCKET_FEATURE_CONTROL is defined, it should be
   /// nonnull.
