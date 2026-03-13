@@ -131,7 +131,7 @@ static void writer_enqueue(uint8_t *data, size_t size) {
   // if it's too big, we can start dropping blocks.
 
   // for now, we just push everythinb to the back of the buffer.
-  write_buffer_push(&g_write_buffer, data, size);
+  es_write_buffer_push(&g_write_buffer, data, size);
 
   DEBUG_TRACE("wt.head = %p", (void *)g_write_buffer.head);
   if (was_empty) {
@@ -208,7 +208,7 @@ static void writer_stop(void) {
   if (g_client_fd >= 0) {
     close(g_client_fd);
     g_client_fd = -1;
-    write_buffer_free(&g_write_buffer);
+    es_write_buffer_free(&g_write_buffer);
   }
   pthread_mutex_unlock(&g_mutex);
 }
