@@ -25,14 +25,14 @@ struct WriteBufferItem {
 // push to the back.
 // Caller must serialize externally (writer_write/write_iteration hold mutex)
 // so that head/last invariants stay intact.
-void HIDDEN write_buffer_push(WriteBuffer *wb, uint8_t *data, size_t size);
+HIDDEN void es_write_buffer_push(WriteBuffer *wb, uint8_t *data, size_t size);
 
 // pop from the front.
 // Requires the same external synchronization as write_buffer_push.
-void HIDDEN write_buffer_pop(WriteBuffer *wb);
+HIDDEN void es_write_buffer_pop(WriteBuffer *wb);
 
 // buf itself is not freed.
 // it's safe to call write_buffer_free multiple times on the same buf.
-void HIDDEN write_buffer_free(WriteBuffer *wb);
+HIDDEN void es_write_buffer_free(WriteBuffer *wb);
 
 #endif /* EVENTLOG_SOCKET_WRITE_BUFFER_H */

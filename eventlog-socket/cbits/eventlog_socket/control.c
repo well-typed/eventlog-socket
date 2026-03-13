@@ -36,6 +36,7 @@
 #include "./error.h"
 #include "./poll.h"
 #include "eventlog_socket.h"
+#include "init_state.h"
 
 // CONTROL_MAGIC should be the UTF-8 encoding of some code point between
 // U+010000 and U+10FFFF. Let's pick code point U+01E5CC, for Eventlog
@@ -96,7 +97,7 @@ static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
  ******************************************************************************/
 
 /// @brief Handler for "StartHeapProfiling" command (eventlog-socket::0).
-static void control_start_heap_profiling(
+static void es_control_start_heap_profiling(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
@@ -107,7 +108,7 @@ static void control_start_heap_profiling(
 }
 
 /// @brief Handler for "StopHeapProfiling" command (eventlog-socket::1).
-static void control_stop_heap_profiling(
+static void es_control_stop_heap_profiling(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
@@ -118,7 +119,7 @@ static void control_stop_heap_profiling(
 }
 
 /// @brief Handler for "RequestHeapCensus" command (eventlog-socket::2).
-static void control_request_heap_census(
+static void es_control_request_heap_census(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
@@ -193,18 +194,18 @@ EventlogSocketControlNamespace g_control_namespace_registry = {
     .command_registry =
         &(EventlogSocketControlCommand){
             .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
-            .command_handler = control_start_heap_profiling,
+            .command_handler = es_control_start_heap_profiling,
             .command_data = NULL,
             .next =
                 &(EventlogSocketControlCommand){
                     .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
-                    .command_handler = control_stop_heap_profiling,
+                    .command_handler = es_control_stop_heap_profiling,
                     .command_data = NULL,
                     .next =
                         &(EventlogSocketControlCommand){
                             .command_id =
                                 BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS,
-                            .command_handler = control_request_heap_census,
+                            .command_handler = es_control_request_heap_census,
                             .command_data = NULL,
                             .next = NULL,
                         },
@@ -221,7 +222,7 @@ pthread_mutex_t g_control_namespace_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 /// name.
 ///
 /// @pre namespace_entry != NULL
-bool control_namespace_store_match(
+bool es_control_namespace_store_match(
     const EventlogSocketControlNamespace *const namespace_entry,
     const size_t namespace_len, const char namespace[namespace_len]) {
   // if namespace_entry == NULL, then...
@@ -244,8 +245,8 @@ bool control_namespace_store_match(
 /// @return If the namespace is found, this function returns a stable pointer to
 /// it. Otherwise, it returns NULL. The returned pointer should not be freed.
 const EventlogSocketControlNamespace *
-control_namespace_store_resolve(const size_t namespace_len,
-                                const char namespace[namespace_len]) {
+es_control_namespace_store_resolve(const size_t namespace_len,
+                                   const char namespace[namespace_len]) {
 
   // Acquire a lock on g_control_namespace_registry.
   pthread_mutex_lock(&g_control_namespace_registry_mutex);
@@ -256,8 +257,8 @@ control_namespace_store_resolve(const size_t namespace_len,
 
   while (namespace_entry != NULL) {
     // Is this the namespace you are looking for?
-    if (control_namespace_store_match(namespace_entry, namespace_len,
-                                      namespace)) {
+    if (es_control_namespace_store_match(namespace_entry, namespace_len,
+                                         namespace)) {
       // Release the lock on g_control_namespace_registry.
       pthread_mutex_unlock(&g_control_namespace_registry_mutex);
       return namespace_entry;
@@ -272,7 +273,7 @@ control_namespace_store_resolve(const size_t namespace_len,
 
 /* HIDDEN - see documentation in control.h */
 HIDDEN const char *
-control_strnamespace(EventlogSocketControlNamespace *namespace) {
+es_control_strnamespace(EventlogSocketControlNamespace *namespace) {
   return namespace == NULL ? NULL : namespace->namespace;
 }
 
@@ -303,8 +304,8 @@ HIDDEN EventlogSocketStatus control_register_namespace(
   // Is the requested namespace already registered?
   do {
     // Is this the namespace you are trying to register?
-    if (control_namespace_store_match(namespace_entry, namespace_len,
-                                      namespace)) {
+    if (es_control_namespace_store_match(namespace_entry, namespace_len,
+                                         namespace)) {
       // If so, return false.
       pthread_mutex_unlock(&g_control_namespace_registry_mutex);
       return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_CTL_EXISTS);
@@ -316,6 +317,9 @@ HIDDEN EventlogSocketStatus control_register_namespace(
     }
     // Otherwise, continue with the next entry.
     namespace_entry = namespace_entry->next;
+
+    // Ensure the loop has a cancellation point.
+    pthread_testcancel();
   } while (true);
 
   // Register the requested namespace.
@@ -349,10 +353,10 @@ HIDDEN EventlogSocketStatus control_register_namespace(
 
 /* HIDDEN - see documentation in control.h */
 HIDDEN EventlogSocketStatus
-control_register_command(EventlogSocketControlNamespace *const namespace,
-                         const EventlogSocketControlCommandId command_id,
-                         EventlogSocketControlCommandHandler command_handler,
-                         const void *command_data) {
+es_control_register_command(EventlogSocketControlNamespace *const namespace,
+                            const EventlogSocketControlCommandId command_id,
+                            EventlogSocketControlCommandHandler command_handler,
+                            const void *command_data) {
 
   // Check if namespace is NULL.
   if (namespace == NULL) {
@@ -443,8 +447,8 @@ control_register_command(EventlogSocketControlNamespace *const namespace,
 
 /// @brief Call a command by namespace and ID.
 static bool
-control_command_handle(const EventlogSocketControlNamespace *const namespace,
-                       const EventlogSocketControlCommandId command_id) {
+es_control_command_handle(const EventlogSocketControlNamespace *const namespace,
+                          const EventlogSocketControlCommandId command_id) {
 
   assert(namespace != NULL);
 
@@ -496,55 +500,6 @@ control_command_handle(const EventlogSocketControlNamespace *const namespace,
 }
 
 /******************************************************************************
- * Waiting for the GHC RTS
- ******************************************************************************/
-
-/// @brief A global variable that tracks whether the GHC RTS is ready.
-static volatile bool g_ghc_rts_ready = false;
-
-/// @brief The condition on which to wait for the signal that the GHC RTS is
-/// ready.
-static pthread_cond_t g_ghc_rts_ready_cond = PTHREAD_COND_INITIALIZER;
-
-/// @brief The mutex that corresponds to `g_ghc_rts_ready_cond`.
-static pthread_mutex_t g_ghc_rts_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-/// @brief Wait for the signal that the GHC RTS is ready.
-static void control_wait_ghc_rts_ready(void) {
-  DEBUG_DEBUG("%s", "Waiting for signal that GHC RTS is ready.");
-  pthread_mutex_lock(&g_ghc_rts_ready_mutex);
-  while (!g_ghc_rts_ready) {
-    pthread_cond_wait(&g_ghc_rts_ready_cond, &g_ghc_rts_ready_mutex);
-  }
-  pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
-}
-
-/* HIDDEN - see documentation in control.h */
-HIDDEN EventlogSocketStatus control_signal_ghc_rts_ready(void) {
-  DEBUG_DEBUG("%s", "Sending signal that GHC RTS is ready.");
-  {
-    const int success_or_errno = pthread_mutex_lock(&g_ghc_rts_ready_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
-  if (!g_ghc_rts_ready) {
-    g_ghc_rts_ready = true;
-    const int success_or_errno = pthread_cond_broadcast(&g_ghc_rts_ready_cond);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
-  {
-    const int success_or_errno = pthread_mutex_unlock(&g_ghc_rts_ready_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
-  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
-}
-
-/******************************************************************************
  * Command Parser
  ******************************************************************************/
 
@@ -568,7 +523,8 @@ typedef enum ControlCommandParserStateTag {
 
 /// @brief Show a value of type `ControlCommandParserStateTag` as a
 /// string.
-const char *ControlCommandParserStateag_show(ControlCommandParserStateTag tag) {
+const char *
+es_show_ControlCommandParserStateTag(ControlCommandParserStateTag tag) {
   switch (tag) {
   case CONTROL_COMMAND_PARSER_STATE_MAGIC:
     return "CONTROL_COMMAND_PARSER_STATE_MAGIC";
@@ -656,12 +612,12 @@ ControlCommandParserState g_control_command_parser_state = {
 /// pointer to the namespace length may be provided as the second argument. This
 /// function will use this byte to initialise the new state.
 static void
-control_command_parser_enter_state(const ControlCommandParserStateTag tag,
-                                   const uint8_t *const data) {
+es_control_command_parser_enter_state(const ControlCommandParserStateTag tag,
+                                      const uint8_t *const data) {
   DEBUG_TRACE(
       "%s -> %s",
-      ControlCommandParserStateag_show(g_control_command_parser_state.tag),
-      ControlCommandParserStateag_show(tag));
+      es_show_ControlCommandParserStateTag(g_control_command_parser_state.tag),
+      es_show_ControlCommandParserStateTag(tag));
 
   // this should only be called when restarting or moving to a different
   // state...
@@ -723,8 +679,8 @@ control_command_parser_enter_state(const ControlCommandParserStateTag tag,
 /// This is the incremental command parser. It parses a chunk of bytes and
 /// updates the command parser state.
 static void
-control_command_parser_handle_chunk(const size_t chunk_size,
-                                    const uint8_t chunk[chunk_size]) {
+es_control_command_parser_handle_chunk(const size_t chunk_size,
+                                       const uint8_t chunk[chunk_size]) {
   DEBUG_DEBUG("Received chunk of size %zd.", chunk_size);
   // iterate over the bytes in the chunk...
   for (size_t chunk_index = 0; chunk_index < chunk_size; ++chunk_index) {
@@ -747,7 +703,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
         // if header_pos moves out of control_magic...
         if (g_control_command_parser_state.header_pos >= CONTROL_MAGIC_LEN) {
           // ...continue reading the namespace length...
-          control_command_parser_enter_state(
+          es_control_command_parser_enter_state(
               CONTROL_COMMAND_PARSER_STATE_PROTOCOL_VERSION, NULL);
         }
         // ...continue processing with the _next_ byte...
@@ -757,8 +713,8 @@ control_command_parser_handle_chunk(const size_t chunk_size,
       else {
         // ...there has been a protocol error...
         // ...restart with the _current_ byte...
-        control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
-                                           &current_byte);
+        es_control_command_parser_enter_state(
+            CONTROL_COMMAND_PARSER_STATE_MAGIC, &current_byte);
         // ...continue processing with the _next_ byte...
         continue;
       }
@@ -770,14 +726,14 @@ control_command_parser_handle_chunk(const size_t chunk_size,
       if (current_byte == EVENTLOG_SOCKET_CONTROL_PROTOCOL_VERSION) {
         // ...then we should be able to parse the message...
         // ...continue processing with the _next_ byte...
-        control_command_parser_enter_state(
+        es_control_command_parser_enter_state(
             CONTROL_COMMAND_PARSER_STATE_NAMESPACE_LEN, NULL);
         continue;
       } else {
         // ...otherwise, let's not try and parse this message...
         // ...restart with the _current_ byte...
-        control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
-                                           &current_byte);
+        es_control_command_parser_enter_state(
+            CONTROL_COMMAND_PARSER_STATE_MAGIC, &current_byte);
       }
     }
     // the parser is currently reading the namespace length...
@@ -789,13 +745,13 @@ control_command_parser_handle_chunk(const size_t chunk_size,
         // todo: write an error to the eventlog
         DEBUG_ERROR("%s", "Received namespace length 0");
         // ...restart with the _current_ byte...
-        control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
-                                           &current_byte);
+        es_control_command_parser_enter_state(
+            CONTROL_COMMAND_PARSER_STATE_MAGIC, &current_byte);
         continue;
       } else {
         DEBUG_DEBUG("Matched namespace_len byte %d", current_byte);
         // otherwise, accept the namespace length and move to the next state...
-        control_command_parser_enter_state(
+        es_control_command_parser_enter_state(
             CONTROL_COMMAND_PARSER_STATE_NAMESPACE, &current_byte);
         continue;
       }
@@ -852,7 +808,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
 
       // ...try to resolve the namespace...
       const EventlogSocketControlNamespace *namespace =
-          control_namespace_store_resolve(
+          es_control_namespace_store_resolve(
               g_control_command_parser_state.namespace_buffer_len,
               g_control_command_parser_state.namespace_buffer);
       // if the namespace was successfully resolved, then...
@@ -865,7 +821,7 @@ control_command_parser_handle_chunk(const size_t chunk_size,
         // note: the subtraction is safe because available_bytes > 0
         chunk_index += available_bytes - 1;
         // ...move to the next state...
-        control_command_parser_enter_state(
+        es_control_command_parser_enter_state(
             CONTROL_COMMAND_PARSER_STATE_COMMAND_ID, NULL);
         g_control_command_parser_state.namespace = namespace;
         // ...continue processing with the _next_ byte...
@@ -907,8 +863,8 @@ control_command_parser_handle_chunk(const size_t chunk_size,
                     g_control_command_parser_state.namespace_buffer_len,
                     g_control_command_parser_state.namespace_buffer);
         // ...restart with the _current_ byte...
-        control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
-                                           &current_byte);
+        es_control_command_parser_enter_state(
+            CONTROL_COMMAND_PARSER_STATE_MAGIC, &current_byte);
         // ...continue processing with the _next_ byte...
         continue;
       }
@@ -916,11 +872,11 @@ control_command_parser_handle_chunk(const size_t chunk_size,
     case CONTROL_COMMAND_PARSER_STATE_COMMAND_ID: {
       DEBUG_DEBUG("Matched command_id byte 0x%02x", current_byte);
       // Handle the command.
-      control_command_handle(g_control_command_parser_state.namespace,
-                             current_byte);
+      es_control_command_handle(g_control_command_parser_state.namespace,
+                                current_byte);
       // ...restart _without_ the current byte...
-      control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
-                                         NULL);
+      es_control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
+                                            NULL);
       // ...continue processing with the _next_ byte...
       continue;
     }
@@ -936,27 +892,16 @@ control_command_parser_handle_chunk(const size_t chunk_size,
 /// socket.
 #define CHUNK_SIZE 256
 
-/// @brief A volatile view of the eventlog socket file descriptor.
+/// @brief The state that is shared with the control thread.
 ///
-/// This file descriptor is *not* managed by the control thread.
-static const volatile int *g_control_fd_ptr = NULL;
-
-/// @brief A pointer to the mutex that guards the eventlog socket file
-/// descriptor.
-///
-/// See `g_control_fd_ptr`.
-static pthread_mutex_t *g_control_fd_mutex_ptr = NULL;
-
-/// @brief A pointer to the condition used to signal a new connection on the
-/// eventlog socket file descriptor.
-///
-/// This condition should be used with `g_control_fd_mutex_ptr`.
-static pthread_cond_t *g_new_conn_cond_ptr = NULL;
+/// **NOTE**: Initialising with @c {0} should guarantee that all pointers are
+/// NULL pointers.
+static ControlState g_control_state = {0};
 
 /// @brief A stable view the eventlog socket file descriptor.
 ///
-/// See `g_control_fd_ptr`.
-static int g_control_fd = -1;
+/// See `g_control_state`.
+static int g_client_fd = -1;
 
 /// Reset the control thread state when the connection changes.
 ///
@@ -964,64 +909,103 @@ static int g_control_fd = -1;
 static void control_fd_reset_to(const int new_control_fd) {
   DEBUG_DEBUG("%s", "Resetting control server state.");
   // Reset eventlog socket file descriptor.
-  g_control_fd = new_control_fd;
+  g_client_fd = new_control_fd;
   // Reset parser state.
-  control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC, NULL);
+  es_control_command_parser_enter_state(CONTROL_COMMAND_PARSER_STATE_MAGIC,
+                                        NULL);
+}
+
+/******************************************************************************
+ * Waiting for the GHC RTS
+ ******************************************************************************/
+
+/// @brief Check if the GHC RTS is ready.
+
+/// @brief Wait for the signal that the GHC RTS is ready.
+static void es_control_wait_ghc_rts_ready(void) {
+  DEBUG_DEBUG("%s", "Waiting for signal that GHC RTS is ready.");
+  assert(g_control_state.init_state_ptr != NULL);
+  assert(g_control_state.mutex_ptr != NULL);
+  assert(g_control_state.ghc_rts_ready_cond_ptr != NULL);
+  pthread_mutex_lock(g_control_state.mutex_ptr);
+  while (true) {
+    // Check whether or not the GHC RTS is ready.
+    const bool ghc_rts_ready =
+        (*g_control_state.init_state_ptr) & EVENTLOG_SOCKET_SIG_RTS_READY;
+    if (ghc_rts_ready) {
+      // If the GHC RTS is ready, break from the loop.
+      break;
+    } else {
+      // If the GHC RTS is NOT ready, wait on the relevant condition and
+      // re-enter the loop.
+      //
+      // NOTE: This call acts as the cancellation point for this infinite loop.
+      pthread_cond_wait(g_control_state.ghc_rts_ready_cond_ptr,
+                        g_control_state.mutex_ptr);
+    }
+  }
+  pthread_mutex_unlock(g_control_state.mutex_ptr);
 }
 
 /// @brief Wait for a new connection.
 ///
 /// @pre The caller must have a lock on `g_control_fd_mutex_ptr`.
 /// @post The caller will have a lock on `g_control_fd_mutex_ptr`.
-static void control_fd_wait_for_connection(void) {
+static void es_control_wait_for_connection(void) {
+  assert(g_control_state.mutex_ptr != NULL);
+  assert(g_control_state.new_connection_cond_ptr != NULL);
   DEBUG_DEBUG("%s", "Waiting to be notified of new connection.");
-  pthread_cond_wait(g_new_conn_cond_ptr, g_control_fd_mutex_ptr);
+  pthread_cond_wait(g_control_state.new_connection_cond_ptr,
+                    g_control_state.mutex_ptr);
 }
 
-static void *control_loop(void *arg) {
+static void *es_control_loop(void *arg) {
   (void)arg;
 
-  assert(g_control_fd_ptr != NULL);
-  assert(g_control_fd_mutex_ptr != NULL);
-  assert(g_new_conn_cond_ptr != NULL);
+  assert(g_control_state.client_fd_ptr != NULL);
+  assert(g_control_state.mutex_ptr != NULL);
+  assert(g_control_state.new_connection_cond_ptr != NULL);
 
   // Allocate memory for chunks:
   uint8_t *const chunk = malloc(CHUNK_SIZE);
 
   // Wait for the GHC RTS to become ready.
-  control_wait_ghc_rts_ready();
+  es_control_wait_ghc_rts_ready();
 
   /* BEGIN: The main control loop. */
   while (true) {
     DEBUG_TRACE("%s", "Starting new control iteration.");
+
+    // Ensure the loop has a cancellation point.
+    pthread_testcancel();
 
     /* BEGIN: Wake up. */
     // At the start of each control iteration, we update the eventlog socket
     // file descriptor.
 
     // Acquire the lock on the connection file description.
-    pthread_mutex_lock(g_control_fd_mutex_ptr);
+    pthread_mutex_lock(g_control_state.mutex_ptr);
 
     // Read current connection file description.
-    const int new_control_fd = *g_control_fd_ptr;
-    if (g_control_fd != new_control_fd) {
-      DEBUG_TRACE("Old connection fd: %d", g_control_fd);
+    const int new_control_fd = *g_control_state.client_fd_ptr;
+    if (g_client_fd != new_control_fd) {
+      DEBUG_TRACE("Old connection fd: %d", g_client_fd);
       DEBUG_TRACE("New connection fd: %d", new_control_fd);
     }
 
     // If there WAS NO connection and there IS NO connection, then...
-    if (g_control_fd == -1 && new_control_fd == -1) {
+    if (g_client_fd == -1 && new_control_fd == -1) {
       DEBUG_TRACE("%s", "There WAS NO connection and there IS NO connection.");
       // ...wait to be notified of a new connection...
-      control_fd_wait_for_connection();
+      es_control_wait_for_connection();
       // ...release the lock...
-      pthread_mutex_unlock(g_control_fd_mutex_ptr);
+      pthread_mutex_unlock(g_control_state.mutex_ptr);
       // ...and re-enter the loop.
       continue;
     }
 
     // If there WAS NO connection but there IS A connection, then...
-    else if (g_control_fd == -1 && new_control_fd != -1) {
+    else if (g_client_fd == -1 && new_control_fd != -1) {
       DEBUG_TRACE("%s", "There WAS NO connection but there IS A connection.");
       // ...DON'T wait to be notified of a new connection...
       // ...we may we have already missed the signal...
@@ -1031,22 +1015,22 @@ static void *control_loop(void *arg) {
     }
 
     // If there WAS A connection but there IS NO connection, then...
-    else if (g_control_fd != -1 && new_control_fd == -1) {
+    else if (g_client_fd != -1 && new_control_fd == -1) {
       DEBUG_TRACE("%s", "There WAS A connection but there IS NO connection.");
       // ...reset the control server state...
       control_fd_reset_to(new_control_fd);
       // ...wait to be notified of a new connection...
-      control_fd_wait_for_connection();
+      es_control_wait_for_connection();
       // ...release the lock...
-      pthread_mutex_unlock(g_control_fd_mutex_ptr);
+      pthread_mutex_unlock(g_control_state.mutex_ptr);
       // ...and re-enter the loop.
       continue;
     }
 
     // If there WAS A connection and there IS A connection, then...
-    else if (g_control_fd != -1 && new_control_fd != -1) {
+    else if (g_client_fd != -1 && new_control_fd != -1) {
       // If it is A DIFFERENT connection, then...
-      if (g_control_fd != new_control_fd) {
+      if (g_client_fd != new_control_fd) {
         DEBUG_TRACE(
             "%s",
             "There WAS A connection and there IS A DIFFERENT connection.");
@@ -1071,10 +1055,10 @@ static void *control_loop(void *arg) {
     }
 
     // Release the lock on the connection file description.
-    pthread_mutex_unlock(g_control_fd_mutex_ptr);
+    pthread_mutex_unlock(g_control_state.mutex_ptr);
 
     // Check that g_control_fd is up-to-date:
-    assert(g_control_fd == new_control_fd);
+    assert(g_client_fd == new_control_fd);
     /* END: Wake up. */
 
     /* BEGIN: Wait for input. */
@@ -1085,7 +1069,7 @@ static void *control_loop(void *arg) {
 
     // note: POLLHUP and POLLRDHUP are output only and are ignored input.
     struct pollfd pfds[1] = {{
-        .fd = g_control_fd,
+        .fd = g_client_fd,
         .events = POLLIN,
         .revents = 0,
     }};
@@ -1118,7 +1102,7 @@ static void *control_loop(void *arg) {
       //       so this condition should be checked _after_ POLLIN.
       if ((revents & POLLNVAL) || (revents & POLLHUP) || (revents & POLLERR)) {
         // todo: wait for a new connection...
-        DEBUG_TRACE("Connection on fd %d closed.", g_control_fd);
+        DEBUG_TRACE("Connection on fd %d closed.", g_client_fd);
         continue;
       }
       // otherwise, the POLLIN bit should be set...
@@ -1132,8 +1116,7 @@ static void *control_loop(void *arg) {
     // Once we know that there is some input, we read and handle one chunk.
 
     // read a chunk:
-    const ssize_t chunk_size_or_error =
-        recv(g_control_fd, chunk, CHUNK_SIZE, 0);
+    const ssize_t chunk_size_or_error = recv(g_client_fd, chunk, CHUNK_SIZE, 0);
     // if num_bytes_or_error == -1, an error occurred...
     if (chunk_size_or_error == -1) {
       // if errno is EINTR, the receive was interrupted...
@@ -1156,14 +1139,14 @@ static void *control_loop(void *arg) {
     else if (chunk_size_or_error == 0) {
       DEBUG_TRACE("%s", "recv() failed: the connection was closed.");
       // todo: wait for a new connection...
-      DEBUG_TRACE("Connection on fd %d closed.", g_control_fd);
+      DEBUG_TRACE("Connection on fd %d closed.", g_client_fd);
       continue;
     }
     // otherwise, handle the received chunk...
     else {
       DEBUG_TRACE("recv() read %zd bytes", chunk_size_or_error);
       assert(chunk_size_or_error > 0);
-      control_command_parser_handle_chunk(chunk_size_or_error, chunk);
+      es_control_command_parser_handle_chunk(chunk_size_or_error, chunk);
     }
     /* END: Handle up to one chunk of input. */
   }
@@ -1175,29 +1158,53 @@ onexit:
   return NULL;
 }
 
+/// @brief Control cleanup.
+static void es_control_cleanup(void) {
+  if (g_control_state.control_thread_ptr != NULL) {
+    DEBUG_DEBUG("%s", "Cancelling control thread.");
+    if (pthread_cancel(*g_control_state.control_thread_ptr) != 0) {
+      DEBUG_ERRNO("pthread_cancel() failed for control thread");
+    } else {
+      if (pthread_join(*g_control_state.control_thread_ptr, NULL) != 0) {
+        DEBUG_ERRNO("pthread_join() failed for control thread");
+      }
+    }
+    free((void *)g_control_state.control_thread_ptr);
+  }
+}
+
 /* HIDDEN - see documentation in control.h */
-HIDDEN EventlogSocketStatus control_start(
-    pthread_t *const control_thread, const volatile int *const control_fd_ptr,
-    pthread_mutex_t *const control_fd_mutex_ptr,
-    pthread_cond_t *const new_conn_cond_ptr) {
+HIDDEN EventlogSocketStatus es_control_start(const ControlState control_state) {
+  assert(control_state.control_thread_ptr != NULL);
+  assert(control_state.client_fd_ptr != NULL);
+  assert(control_state.mutex_ptr != NULL);
+  assert(control_state.init_state_ptr != NULL);
+  assert(control_state.new_connection_cond_ptr != NULL);
+  assert(control_state.ghc_rts_ready_cond_ptr != NULL);
   DEBUG_DEBUG("%s", "Starting control thread.");
-  g_control_fd_ptr = control_fd_ptr;
-  g_control_fd_mutex_ptr = control_fd_mutex_ptr;
-  g_new_conn_cond_ptr = new_conn_cond_ptr;
+  memcpy(&g_control_state, &control_state, sizeof(ControlState));
+  assert(g_control_state.control_thread_ptr != NULL);
+  assert(g_control_state.client_fd_ptr != NULL);
+  assert(g_control_state.mutex_ptr != NULL);
+  assert(g_control_state.init_state_ptr != NULL);
+  assert(g_control_state.new_connection_cond_ptr != NULL);
+  assert(g_control_state.ghc_rts_ready_cond_ptr != NULL);
   {
-    const int success_or_errno =
-        pthread_create(control_thread, NULL, control_loop, NULL);
+    const int success_or_errno = pthread_create(
+        g_control_state.control_thread_ptr, NULL, es_control_loop, NULL);
     if (success_or_errno != 0) {
       DEBUG_ERRNO("pthread_create() failed");
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
     }
   }
   {
-    const int success_or_errno = pthread_detach(*control_thread);
+    const int success_or_errno =
+        pthread_detach(*g_control_state.control_thread_ptr);
     if (success_or_errno != 0) {
       DEBUG_ERRNO("pthread_detach() failed");
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
     }
   }
+  atexit(es_control_cleanup);
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }

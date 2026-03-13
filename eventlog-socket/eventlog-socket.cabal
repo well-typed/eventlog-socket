@@ -29,10 +29,13 @@ extra-source-files:
   cbits/eventlog_socket/debug.h
   cbits/eventlog_socket/error.c
   cbits/eventlog_socket/error.h
+  cbits/eventlog_socket/init_state.h
   cbits/eventlog_socket/macros.h
   cbits/eventlog_socket/poll.h
   cbits/eventlog_socket/string.c
   cbits/eventlog_socket/string.h
+  cbits/eventlog_socket/worker.c
+  cbits/eventlog_socket/worker.h
   cbits/eventlog_socket/write_buffer.c
   cbits/eventlog_socket/write_buffer.h
   cbits/eventlog_socket.c
@@ -86,6 +89,7 @@ library
   c-sources:
     cbits/eventlog_socket/error.c
     cbits/eventlog_socket/string.c
+    cbits/eventlog_socket/worker.c
     cbits/eventlog_socket/write_buffer.c
     cbits/eventlog_socket.c
 
@@ -97,6 +101,9 @@ library
     -- cpp-options are not passed to C code, see:
     -- https://github.com/haskell/cabal/issues/7635
     cc-options: -DDEBUG=1
+
+  else
+    cc-options: -DNDEBUG=1
 
   if flag(control)
     -- 2025-12-17:

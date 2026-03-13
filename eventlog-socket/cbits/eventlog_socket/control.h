@@ -4,23 +4,39 @@
 #include <pthread.h>
 #include <stdbool.h>
 
+#include "./init_state.h"
 #include "./macros.h"
 #include "eventlog_socket.h"
 
+/// @brief The state that is shared with the control thread.
+typedef struct {
+  /// @brief The function writes the thread handle to this location. It should
+  /// be nonnull.
+  pthread_t *const control_thread_ptr;
+  /// @brief The control thread reads the eventlog socket file descriptor from
+  /// this pointer. It should be nonnull.
+  const volatile int *const client_fd_ptr;
+  /// @brief The control thread uses this mutex to guard its reads of
+  /// `client_fd_ptr`. All other accesses of the memory location pointed to by
+  /// `client_fd_ptr` should also be guarded using this mutex. It should be
+  /// nonnull. This file descriptor is *not* managed by the control thread.
+  pthread_mutex_t *const mutex_ptr;
+  /// @brief The initialization state. Should be used with the bit flag macros
+  /// from @c init_state.h. Should be guarded by @c mutex_ptr. See @c
+  /// g_init_state in @c eventlog_socket.c.
+  const volatile EventlogSocketInitState *init_state_ptr;
+  /// @brief The control thread uses this condition together with `mutex_ptr` to
+  /// wait for changes in `client_fd_ptr`. It should be nonnull.
+  pthread_cond_t *const restrict new_connection_cond_ptr;
+  /// @brief The control thread uses this condition together with `mutex_ptr` to
+  /// wait for the GHC RTS to be initialised. It should be nonnull.
+  pthread_cond_t *const restrict ghc_rts_ready_cond_ptr;
+} ControlState;
+
 /// @brief Start the control thread.
 ///
-/// @param control_thread
-///   The function writes the thread handle to this location.
-/// @param control_fd_ptr
-///   The control thread reads the eventlog socket file descriptor from this
-///   pointer. It should be nonnull.
-/// @param control_fd_mutex_ptr
-///   The control thread uses this mutex to guard its reads of `control_fd_ptr`.
-///   All other accesses of the memory location pointed to by `control_fd_ptr`
-///   should also be guarded using this mutex. Should be nonnull.
-/// @param new_conn_cond_ptr
-///   The control thread uses this condition together with
-///   `control_fd_mutex_ptr` to wait for changes in `control_fd_ptr`.
+/// @param control_thread_state The state that is shared with the control
+/// thread.
 ///
 /// @return Upon successful completion, 0 is returned.
 ///
@@ -31,17 +47,11 @@
 /// @parblock
 /// `EAGAIN`, `EINVAL`, `EPERM`, or `ESRCH`.
 /// @endparblock
-HIDDEN EventlogSocketStatus control_start(pthread_t *control_thread,
-                                          const volatile int *control_fd_ptr,
-                                          pthread_mutex_t *control_fd_mutex_ptr,
-                                          pthread_cond_t *new_conn_cond_ptr);
-
-/// @see eventlog_socket_signal_ghc_rts_ready
-HIDDEN EventlogSocketStatus control_signal_ghc_rts_ready(void);
+HIDDEN EventlogSocketStatus es_control_start(ControlState control_thread_state);
 
 /// @see eventlog_socket_control_strnamespace
 HIDDEN const char *
-control_strnamespace(EventlogSocketControlNamespace *namespace);
+es_control_strnamespace(EventlogSocketControlNamespace *namespace);
 
 /// @see eventlog_socket_control_register_namespace
 HIDDEN EventlogSocketStatus control_register_namespace(
@@ -50,9 +60,9 @@ HIDDEN EventlogSocketStatus control_register_namespace(
 
 /// @see eventlog_socket_control_register_command
 HIDDEN EventlogSocketStatus
-control_register_command(EventlogSocketControlNamespace *namespace,
-                         EventlogSocketControlCommandId command_id,
-                         EventlogSocketControlCommandHandler command_handler,
-                         const void *command_data);
+es_control_register_command(EventlogSocketControlNamespace *namespace,
+                            EventlogSocketControlCommandId command_id,
+                            EventlogSocketControlCommandHandler command_handler,
+                            const void *command_data);
 
 #endif /* EVENTLOG_SOCKET_CONTROL_H */

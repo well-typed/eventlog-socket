@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Control.Concurrent (threadDelay)
 import qualified Data.Binary as B
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BSL
@@ -83,10 +84,15 @@ test_fibberCMain =
                     , eventlogSocketBuildFlags = []
                     , eventlogSocketAddr = eventlogSocket
                     }
-        withProgram fibber $
+        withProgram fibber $ do
+            threadDelay 3_000_000
             assertEventlogWith eventlogSocket $
-                -- Validate that the Finished marker is seen.
-                hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
+                -- Validate that the Initialising marker is seen.
+                hasMatchingUserMarker ("Initialising" `T.isPrefixOf`)
+                    -- Validate that the Starting marker is seen.
+                    &> hasMatchingUserMarker ("Starting" `T.isPrefixOf`)
+                    -- Validate that the Finished marker is seen.
+                    &> hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
 
 {- |
 Test that @oddball@ produces heap profile samples.
@@ -132,7 +138,7 @@ test_oddball_NoAutomaticHeapSamples =
                     ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
 {- |
-Test that @oddball@ produces heap profile samples even after reconnecting.
+Test that @oddball@ produces the init events and heap samples on each connection.
 -}
 test_oddball_Reconnect :: (HasLogger) => EventlogSocketAddr -> Maybe TestTree
 test_oddball_Reconnect =
@@ -146,10 +152,10 @@ test_oddball_Reconnect =
                     , eventlogSocketAddr = eventlogSocket
                     }
         withProgram oddball $ do
-            -- Validate that the event stream contains at least one heap
-            -- profile sample twice, connecting to the socket each time.
-            assertEventlogWith eventlogSocket $ hasHeapProfSampleString
-            assertEventlogWith eventlogSocket $ hasHeapProfSampleString
+            -- Validate that reconnecting works and that each stream has a WallClockTime
+            -- event (as proxy for the init events) and at least one heap profile sample.
+            assertEventlogWith eventlogSocket $ hasWallClockTime &> hasHeapProfSampleString
+            assertEventlogWith eventlogSocket $ hasWallClockTime &> hasHeapProfSampleString
 
 {- |
 Test that the command parsing state is reset on reconnect.

@@ -24,6 +24,10 @@ module Test.Common (
     anyOf,
     allOf,
     droppingFor,
+    isWallClockTime,
+    hasWallClockTimeWithinSec,
+    hasWallClockTimeWithin,
+    hasWallClockTime,
     isHeapProfSampleBegin,
     hasHeapProfSampleBeginWithinSec,
     hasHeapProfSampleBeginWithin,
@@ -102,7 +106,7 @@ import System.Exit (ExitCode (..))
 import System.FilePath (splitFileName, (</>))
 import System.IO
 import qualified System.IO as IO
-import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError, isResourceVanishedError)
+import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (CreateProcess (..), Pid, ProcessHandle, StdStream (..), createProcess_, getPid, getProcessExitCode, proc, readProcessWithExitCode, showCommandForUser, terminateProcess, waitForProcess)
 import System.Process.Internals (ignoreSigPipe)
@@ -271,9 +275,9 @@ shouldInherit = (`elem` ["PATH"]) . fst
 eventlogSocketEnv :: EventlogSocketAddr -> [(String, String)]
 eventlogSocketEnv = \case
     EventlogSocketUnixAddr{..} ->
-        [("GHC_EVENTLOG_UNIX_PATH", esaUnixPath)]
+        [("GHC_EVENTLOG_UNIX_PATH", esaUnixPath), ("GHC_EVENTLOG_WAIT", "1")]
     EventlogSocketInetAddr{..} ->
-        [("GHC_EVENTLOG_INET_HOST", esaInetHost), ("GHC_EVENTLOG_INET_PORT", esaInetPort)]
+        [("GHC_EVENTLOG_INET_HOST", esaInetHost), ("GHC_EVENTLOG_INET_PORT", esaInetPort), ("GHC_EVENTLOG_WAIT", "1")]
 
 --------------------------------------------------------------------------------
 -- Eventlog Validation
@@ -358,7 +362,7 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
 
     connectLoop timeoutS = do
         catch @IOError tryConnect $ \ioe ->
-            if isDoesNotExistError ioe || isResourceVanishedError ioe
+            if isDoesNotExistError ioe
                 then do
                     -- Log the error:
                     debugInfo $ "Caught IOError: " <> displayException ioe
@@ -564,6 +568,40 @@ Drop all inputs for the given number of seconds.
 -}
 droppingFor :: Double -> ProcessT IO a x
 droppingFor timeoutSec = withTimeoutSec timeoutSec droppingForever
+
+{- |
+Test if an `Event` is a `WallClockTime` event.
+-}
+isWallClockTime :: Event -> Bool
+isWallClockTime ev
+    | E.WallClockTime{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
+-}
+hasWallClockTimeWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
+hasWallClockTimeWithinSec timeoutSec =
+    anyFor timeoutSec isWallClockTime onSuccess onFailure
+  where
+    onSuccess = printf "Found WallClockTime within %0.2f seconds." timeoutSec
+    onFailure = printf "Did not find WallClockTime within %0.2f seconds." timeoutSec
+
+{- |
+Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
+-}
+hasWallClockTimeWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
+hasWallClockTimeWithin count = taking count ~> hasWallClockTime
+
+{- |
+Assert that the input stream contains a `HeapProfSampleString` event.
+-}
+hasWallClockTime :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasWallClockTime =
+    anyOf isWallClockTime onSuccess onFailure
+  where
+    onSuccess = printf "Found WallClockTime after %d events."
+    onFailure = printf "Did not find WallClockTime after %d events."
 
 {- |
 Test if an `Event` is a `HeapProfSampleBegin` event.
