@@ -24,6 +24,11 @@ flag debug
   default:     False
   manual:      True
 
+flag debug-verbosity-trace
+  description: Set the debug verbosity to TRACE.
+  default:     False
+  manual:      True
+
 flag debug-events
   description: Enable debug logging for events
   default:     False
@@ -84,6 +89,9 @@ test-suite eventlog-socket-tests
   if flag(debug)
     build-depends: stm >=2.5 && <2.6
     cpp-options:   -DDEBUG
+
+  if flag(debug-verbosity-trace)
+    cpp-options: -DDEBUG_VERBOSITY_TRACE
 
   if flag(debug-events)
     cpp-options: -DDEBUG_EVENTS

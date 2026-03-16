@@ -151,12 +151,22 @@ withProgram program action =
     bracket (start program) kill $ \ProgramHandle{..} ->
         let ?programInfo = info in action
 
-defaultBuildFlags :: [String]
+buildFlagDebug :: [String]
 #if defined(DEBUG)
-defaultBuildFlags = ["+optimise-heavily", "+debug"]
+buildFlagDebug = ["+debug"]
 #else
-defaultBuildFlags = ["+optimise-heavily"]
+buildFlagDebug = []
 #endif
+
+buildFlagDebugVerbosity :: [String]
+#if defined(DEBUG_VERBOSITY_TRACE)
+buildFlagDebugVerbosity = ["+debug-verbosity-trace"]
+#else
+buildFlagDebugVerbosity = []
+#endif
+
+defaultBuildFlags :: [String]
+defaultBuildFlags = ["+optimise-heavily"] <> buildFlagDebug <> buildFlagDebugVerbosity
 
 start :: (HasLogger, HasTestInfo) => Program -> IO ProgramHandle
 start program = do
@@ -385,7 +395,9 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
             case eventlogSocket of
                 EventlogSocketUnixAddr{..} -> do
                     let newSocket = S.socket S.AF_UNIX S.Stream S.defaultProtocol
-                    let closeSocket socket = S.close socket
+                    let closeSocket socket = do
+                            debugInfo $ "Disconnecting from Unix socket at " <> esaUnixPath
+                            S.close socket
                     bracket newSocket closeSocket $ \socket -> do
                         debugInfo $ "Trying to connect to Unix socket at " <> esaUnixPath
                         S.connect socket (S.SockAddrUnix esaUnixPath)
@@ -399,7 +411,9 @@ withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
                                 }
                     addr <- NE.head <$> S.getAddrInfo (Just addrInfo) (Just esaInetHost) (Just $ esaInetPort)
                     let newSocket = S.socket (S.addrFamily addr) (S.addrSocketType addr) (S.addrProtocol addr)
-                    let closeSocket socket = S.gracefulClose socket timeoutMSec
+                    let closeSocket socket = do
+                            debugInfo $ "Disconnecting from Unix socket at " <> show (S.addrAddress addr)
+                            S.gracefulClose socket timeoutMSec
                     bracket newSocket closeSocket $ \socket -> do
                         debugInfo $ "Trying to connect to TCP socket at " <> show (S.addrAddress addr)
                         S.connect socket (S.addrAddress addr)
