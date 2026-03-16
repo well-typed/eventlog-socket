@@ -7,6 +7,8 @@ cabal.project.local
 
 # Haskell test suite
 /eventlog-socket-tests.log
+/eventlog-socket-tests.err.log
+/eventlog-socket-tests.out.log
 
 # Doxygen
 /docs/html
