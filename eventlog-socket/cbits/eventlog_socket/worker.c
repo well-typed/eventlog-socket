@@ -41,6 +41,35 @@ static int g_wake_pipe[2] = {-1, -1};
 /// NULL pointers.
 static WorkerState g_worker_state = {0};
 
+/// @brief Wait for the signal that the GHC RTS is ready.
+static void es_worker_wait_rts_ready(void) {
+  assert(g_worker_state.init_state_ptr != NULL);
+  assert(g_worker_state.mutex_ptr != NULL);
+  assert(g_worker_state.ghc_rts_ready_cond_ptr != NULL);
+  pthread_mutex_lock(g_worker_state.mutex_ptr);
+  while (true) {
+    // Check whether or not the GHC RTS is ready.
+    DEBUG_DEBUG("%s", "Checking if GHC RTS is ready.");
+    const EventlogSocketInitState init_state = *g_worker_state.init_state_ptr;
+    DEBUG_TRACE("init_state: %d", init_state);
+    const bool is_rts_ready = init_state & EVENTLOG_SOCKET_SIG_RTS_READY;
+    DEBUG_TRACE("is_rts_ready: %s", is_rts_ready ? "true" : "false");
+    if (is_rts_ready) {
+      // If the GHC RTS is ready, break from the loop.
+      break;
+    } else {
+      // If the GHC RTS is NOT ready, wait on the relevant condition and
+      // re-enter the loop.
+      //
+      // NOTE: This call acts as the cancellation point for this infinite loop.
+      DEBUG_DEBUG("%s", "Waiting for signal that GHC RTS is ready.");
+      pthread_cond_wait(g_worker_state.ghc_rts_ready_cond_ptr,
+                        g_worker_state.mutex_ptr);
+    }
+  }
+  pthread_mutex_unlock(g_worker_state.mutex_ptr);
+}
+
 /// @brief Cleanup handler for the worker thread.
 ///
 /// TODO: Move the first portion of this handler into a pthread_cleanup_push
@@ -112,7 +141,7 @@ HIDDEN void es_worker_wake(void) {
   }
 }
 
-static void worker_step_listen(void) {
+static void es_worker_step_listen(void) {
   if (listen(g_listen_fd, LISTEN_BACKLOG) == -1) {
     DEBUG_ERRNO("listen() failed");
     abort();
@@ -164,6 +193,9 @@ static void worker_step_listen(void) {
     DEBUG_ERRNO("fnctl() failed for F_SETFL");
   }
 
+  // Wait for the GHC RTS to be ready.
+  es_worker_wait_rts_ready();
+
   // Figure out whether we should restart event logging.
   //
   // Do we need this mutex? Who else can edit `*g_worker_state.init_state_ptr`?
@@ -189,16 +221,26 @@ static void worker_step_listen(void) {
   //
   pthread_mutex_lock(g_worker_state.mutex_ptr);
   const EventlogSocketInitState init_state = *g_worker_state.init_state_ptr;
+  // TODO: Wait for RTS init.
   pthread_mutex_unlock(g_worker_state.mutex_ptr);
+  DEBUG_TRACE("init_state: %d", init_state);
+
+  // Whether the RTS is currently initialised.
+  const bool is_rts_ready = init_state & EVENTLOG_SOCKET_SIG_RTS_READY;
+  DEBUG_TRACE("is_rts_ready: %s", is_rts_ready ? "true" : "false");
 
   // Whether SocketEventLogWriter is currently attached.
-  const bool is_attached = (init_state)&EVENTLOG_SOCKET_SIG_ATTACHED;
+  const bool is_attached = init_state & EVENTLOG_SOCKET_SIG_ATTACHED;
+  DEBUG_TRACE("is_attached: %s", is_attached ? "true" : "false");
+
   // Whether we've had our first connection.
   const bool had_first_connection =
       init_state & EVENTLOG_SOCKET_SIG_HAD_FIRST_CONNECTION;
+  DEBUG_TRACE("had_first_connection: %s", is_attached ? "true" : "false");
 
   // Whether event logging is currently running.
   const bool is_running = eventLogStatus() == EVENTLOG_RUNNING;
+  DEBUG_TRACE("is_running: %s", is_running ? "true" : "false");
 
   // We should STOP event logging if...
   const bool should_stop =
@@ -210,6 +252,7 @@ static void worker_step_listen(void) {
                         //
                         // NOTE: This forces the RTS to resent the init events.
                         had_first_connection);
+  DEBUG_TRACE("should_stop: %s", should_stop ? "true" : "false");
 
   // We should START event logging if...
   const bool should_start =
@@ -217,6 +260,7 @@ static void worker_step_listen(void) {
       should_stop
       // ...(2) it wasn't running in the first place...
       || !is_running;
+  DEBUG_TRACE("should_start: %s", should_start ? "true" : "false");
 
   // We stop event logging.
   if (should_stop) {
@@ -237,7 +281,8 @@ static void worker_step_listen(void) {
   if (should_start) {
     DEBUG_DEBUG("%s", "Starting new event logger.");
     // TODO: Add retry loop.
-    startEventLogging(&SocketEventLogWriter);
+    const bool is_started = startEventLogging(&SocketEventLogWriter);
+    DEBUG_TRACE("is_started: %s", is_started ? "true" : "false");
   }
 
   // Update *g_worker_state.init_state_ptr to record that we've seen our first
@@ -377,20 +422,17 @@ static void es_worker_step(void) {
   // Snapshot shared state under lock so worker decisions (listen vs write)
   // align with the current connection/queue state.
   pthread_mutex_lock(g_worker_state.mutex_ptr);
-  const int client = *g_worker_state.client_fd_ptr;
+  const int client_fd = *g_worker_state.client_fd_ptr;
   const bool write_buffer_empty = g_worker_state.write_buffer_ptr->head == NULL;
-  DEBUG_TRACE("fd = %d, wt.head = %p", client,
-              (void *)g_worker_state.write_buffer_ptr->head);
   pthread_mutex_unlock(g_worker_state.mutex_ptr);
-
-  if (client != -1) {
+  if (client_fd != -1) {
     if (write_buffer_empty) {
-      es_worker_step_nonwrite(client);
+      es_worker_step_nonwrite(client_fd);
     } else {
-      es_worker_step_write(client);
+      es_worker_step_write(client_fd);
     }
   } else {
-    worker_step_listen();
+    es_worker_step_listen();
   }
 }
 
@@ -616,7 +658,7 @@ HIDDEN EventlogSocketStatus es_worker_init(const WorkerState worker_state) {
   assert(worker_state.init_state_ptr != NULL);
   assert(worker_state.new_connection_cond_ptr != NULL);
   assert(worker_state.ghc_rts_ready_cond_ptr != NULL);
-  DEBUG_DEBUG("%s", "Starting worker thread.");
+  DEBUG_DEBUG("%s", "Initialising worker thread.");
   memcpy(&g_worker_state, &worker_state, sizeof(WorkerState));
   assert(g_worker_state.worker_thread_ptr != NULL);
   assert(g_worker_state.client_fd_ptr != NULL);
@@ -632,8 +674,6 @@ HIDDEN EventlogSocketStatus es_worker_init(const WorkerState worker_state) {
     }
   }
   if (!(*g_worker_state.init_state_ptr & EVENTLOG_SOCKET_SIG_INITIALIZED)) {
-    DEBUG_DEBUG("%s", "Initializing eventlog-socket.");
-
     if (pipe(g_wake_pipe) == -1) {
       DEBUG_ERRNO("pipe() failed");
       return STATUS_FROM_ERRNO();

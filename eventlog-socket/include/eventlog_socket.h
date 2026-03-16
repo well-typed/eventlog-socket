@@ -267,6 +267,8 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 /// To install the eventlog socket writer *after* the GHC RTS has started, use
 /// `eventlog_socket_start`.
 ///
+/// @warning `eventlog_socket_init` ignores the @c eso_wait option.
+///
 /// @return See `EventlogSocketStatus`.
 ///
 /// @par Errors
@@ -351,8 +353,10 @@ eventlog_socket_init(const EventlogSocketAddr *eventlog_socket_addr,
 /// @parblock
 /// See `eventlog_socket_init`.
 /// @endparblock
-void eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
-                                  StgClosure *main_closure);
+void eventlog_socket_wrap_hs_main(
+    int argc, char *argv[], RtsConfig rts_config, StgClosure *main_closure,
+    const EventlogSocketAddr *eventlog_socket_addr,
+    const EventlogSocketOpts *eventlog_socket_opts);
 
 /// @brief Attaches the global `EventLogWriter` object to an @c RtsConfig.
 ///

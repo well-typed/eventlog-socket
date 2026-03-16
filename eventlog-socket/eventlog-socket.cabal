@@ -61,6 +61,11 @@ flag debug
   default:     False
   manual:      True
 
+flag debug-verbosity-trace
+  description: Set the debug verbosity to TRACE.
+  default:     False
+  manual:      True
+
 flag control
   description: Enable control commands.
   default:     False
@@ -104,6 +109,12 @@ library
 
   else
     cc-options: -DNDEBUG=1
+
+  if flag(debug-verbosity-trace)
+    -- 2025-12-17:
+    -- cpp-options are not passed to C code, see:
+    -- https://github.com/haskell/cabal/issues/7635
+    cc-options: -DDEBUG_VERBOSITY=5
 
   if flag(control)
     -- 2025-12-17:

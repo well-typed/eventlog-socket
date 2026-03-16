@@ -25,7 +25,8 @@ struct WriteBufferItem {
 // push to the back.
 // Caller must serialize externally (writer_write/write_iteration hold mutex)
 // so that head/last invariants stay intact.
-HIDDEN void es_write_buffer_push(WriteBuffer *wb, uint8_t *data, size_t size);
+HIDDEN void es_write_buffer_push(WriteBuffer *wb, size_t size,
+                                 uint8_t data[size]);
 
 // pop from the front.
 // Requires the same external synchronization as write_buffer_push.

@@ -5,23 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/// @brief If the status contains an error code, print a string describing the
-/// error to stderr, and exit.
-#define EXIT_ON_ERROR(eventlog_socket_status)                                  \
-  do {                                                                         \
-    const EventlogSocketStatus status = (eventlog_socket_status);              \
-    const EventlogSocketStatusCode status_code = status.ess_status_code;       \
-    if (status_code != EVENTLOG_SOCKET_OK) {                                   \
-      char *strerr = eventlog_socket_strerror(status);                         \
-      if (strerr != NULL) {                                                    \
-        fprintf(stderr, "ERROR[%s|%d|%s]: %s\n", __FILE__, __LINE__, __func__, \
-                strerr);                                                       \
-        free(strerr);                                                          \
-      }                                                                        \
-      exit((int)status_code); /* NOLINT */                                     \
-    }                                                                          \
-  } while (0)
-
 // Get the main closure.
 extern StgClosure ZCMain_main_closure;
 
@@ -42,8 +25,10 @@ int main(int argc, char *argv[]) {
   // Handle the return status.
   switch (status.ess_status_code) {
   case EVENTLOG_SOCKET_OK:
-    EXIT_ON_ERROR(
-        eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts));
+
+    // Delegate to the helper that runs hs_main and the application closure.
+    eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure,
+                                 &eventlog_socket_addr, &eventlog_socket_opts);
     /*FALLTHROUGH*/
   case EVENTLOG_SOCKET_ERR_ENV_TOOLONG:
   case EVENTLOG_SOCKET_ERR_ENV_NOHOST:
@@ -55,6 +40,4 @@ int main(int argc, char *argv[]) {
   default:
     break;
   }
-  // Delegate to the helper that runs hs_main and the application closure.
-  eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure);
 }

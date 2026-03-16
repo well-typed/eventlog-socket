@@ -130,64 +130,93 @@ static void writer_enqueue(uint8_t *data, size_t size) {
   // if it's too big, we can start dropping blocks.
 
   // for now, we just push everythinb to the back of the buffer.
-  es_write_buffer_push(&g_write_buffer, data, size);
+  es_write_buffer_push(&g_write_buffer, size, data);
 
-  DEBUG_TRACE("wt.head = %p", (void *)g_write_buffer.head);
+  DEBUG_TRACE("g_write_buffer.head = %p", (void *)g_write_buffer.head);
   if (was_empty) {
     es_worker_wake();
   }
 }
 
 static bool writer_write(void *eventlog, size_t size) {
-  DEBUG_TRACE("size: %lu", size);
-  // Serialize against worker/control threads so that client_fd and wt are read
-  // atomically with respect to connection establishment/teardown.
+  DEBUG_TRACE("Received %lu bytes.", size);
+  // Acquire the write buffer lock.
   pthread_mutex_lock(&g_mutex);
-  int fd = g_client_fd;
-  if (fd < 0) {
+
+  // Check if the write buffer is non-empty.
+  const bool is_empty = g_write_buffer.head == NULL;
+  if (!is_empty) {
+    // If there is data is the write buffer, enqueue the new data.
+    DEBUG_TRACE("%s", "Write buffer is non-empty. Enqueueing new data.");
+    writer_enqueue(eventlog, size);
     goto exit;
   }
+  assert(is_empty);
 
-  DEBUG_TRACE("client_fd = %d; wt.head = %p", fd, (void *)g_write_buffer.head);
-
-  if (g_write_buffer.head != NULL) {
-    // if there is stuff in queue already, we enqueue the current block.
-    writer_enqueue(eventlog, size);
-  } else {
-
-    // and if there isn't, we can write immediately.
-    const ssize_t num_bytes_written_or_err = write(fd, eventlog, size);
-    DEBUG_TRACE("write return %zd", num_bytes_written_or_err);
-
-    if (num_bytes_written_or_err == -1) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        // couldn't write anything, enqueue whole block
-        writer_enqueue(eventlog, size);
-        goto exit;
-      } else if (errno == EPIPE) {
-        // connection closed, simply exit
-        goto exit;
-
-      } else {
-        DEBUG_ERRNO("write() failed");
-        goto exit;
-      }
-    } else {
-      // cast from ssize_t to size_t is safe as num_bytes_written_or_err != -1
-      const size_t num_bytes_written = num_bytes_written_or_err;
-      // we wrote something
-      if (num_bytes_written >= size) {
-        // we wrote everything, nothing to do
-        goto exit;
-      } else {
-        // we wrote only part of the buffer
-        writer_enqueue((uint8_t *)eventlog + num_bytes_written,
-                       size - num_bytes_written);
-      }
+  // Check if this is prior to the first connection.
+  const bool is_connected = g_client_fd >= 0;
+  if (!is_connected) {
+    // Prior to the first connection, enqueue the new data.
+    const bool had_first_connection =
+        g_init_state & EVENTLOG_SOCKET_SIG_HAD_FIRST_CONNECTION;
+    if (!had_first_connection) {
+      DEBUG_TRACE("%s", "Waiting for first connection. Enqueueing new data.");
+      writer_enqueue(eventlog, size);
+      goto exit;
+    }
+    // Otherwise, drop the data.
+    else {
+      goto exit;
     }
   }
+  assert(is_connected);
 
+  // Try to write the data over the socket.
+  const ssize_t num_bytes_written_or_error = write(g_client_fd, eventlog, size);
+  if (num_bytes_written_or_error != -1) {
+    // Write was successful.
+    DEBUG_TRACE("Wrote %zd bytes to eventlog socket.",
+                num_bytes_written_or_error);
+    // The call to write may not have written all of the buffer.
+    // Cast from ssize_t to size_t is safe as num_bytes_written_or_err != -1.
+    const size_t num_bytes_written = num_bytes_written_or_error;
+    // If we wrote everything...
+    if (num_bytes_written >= size) {
+      // ...simply exit.
+      goto exit;
+    } else {
+      // Otherwise, enqueue the remaining new data.
+      // we wrote only part of the buffer
+      writer_enqueue((uint8_t *)eventlog + num_bytes_written,
+                     size - num_bytes_written);
+    }
+  } else {
+    // If write failed with the advice to retry...
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // ...enqueue the new data.
+      DEBUG_TRACE("Call to write(%d, _, %zu) failed. Enqueueing new data",
+                  g_client_fd, size);
+      writer_enqueue(eventlog, size);
+      goto exit;
+    }
+    // If write failed because the connection as closed...
+    else if (errno == EPIPE) {
+      // ...drop the data and exit.
+      // TODO: Is this the correct behaviour? Is it guaranteed someone else will
+      // free the write buffer?
+      goto exit;
+    }
+    // If write failed for any other reason...
+    else {
+      // This error can be one of EBADF, EDESTADDRREQ, EDQUOT, EFAULT, EFBIG,
+      // EINTR, EINVAL, EIO, ENOSPC, EPERM.
+      // TODO: Should EINTR be handled differently?
+      DEBUG_ERRNO("write() failed");
+      goto exit;
+    }
+  }
 exit:
+  // Release the write buffer lock.
   pthread_mutex_unlock(&g_mutex);
   return true;
 }
@@ -243,6 +272,7 @@ static size_t get_unix_path_max(void) {
 EventlogSocketStatus
 eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
                      const EventlogSocketOpts *const eventlog_socket_opts) {
+  DEBUG_DEBUG("%s", "Initialising eventlog-socket.");
 
   // Check if this version of the GHC RTS supports the eventlog.
   if (eventLogStatus() == EVENTLOG_NOT_SUPPORTED) {
@@ -283,12 +313,6 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
   RETURN_ON_ERROR(es_control_start(control_state));
 #endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
 
-  // Wait for a connection.
-  if (eventlog_socket_opts->eso_wait) {
-    DEBUG_DEBUG("%s", "Waiting for a connection...");
-    RETURN_ON_ERROR(eventlog_socket_wait());
-  }
-
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
@@ -296,6 +320,7 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
 EventlogSocketStatus eventlog_socket_wait(void) {
   // Condition variable pairs with the mutex so reader threads can wait for the
   // worker to publish a connected client_fd atomically.
+  DEBUG_DEBUG("%s", "Waiting for connection.");
   {
     const int success_or_errno = pthread_mutex_lock(&g_mutex);
     if (success_or_errno != 0) {
@@ -361,22 +386,38 @@ EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-void eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
-                                  StgClosure *main_closure) {
+void eventlog_socket_wrap_hs_main(
+    int argc, char *argv[], RtsConfig rts_config, StgClosure *main_closure,
+    const EventlogSocketAddr *eventlog_socket_addr,
+    const EventlogSocketOpts *eventlog_socket_opts) {
   SchedulerStatus status;
   int exit_status;
 
+  // Initialise eventlog socket.
+  // TODO: handle error
+  eventlog_socket_init(eventlog_socket_addr, eventlog_socket_opts);
+
   // Set the eventlog socket writer.
+  DEBUG_DEBUG("%s", "Attach the SocketEventLogWriter.");
   rts_config = eventlog_socket_attach_rts_config(rts_config);
 
   // Initialize the GHC RTS.
+  DEBUG_DEBUG("%s", "Initialise the GHC RTS.");
   hs_init_ghc(&argc, &argv, rts_config);
 
-  // Tell the control thread that the GHC RTS is initialised.
-  // TODO: print error message
+  // Signal that the GHC RTS is initialised.
+  // TODO: handle error
+  DEBUG_DEBUG("%s", "Send signal that the GHC RTS is ready.");
   eventlog_socket_signal_ghc_rts_ready();
 
+  // If eso_wait is set, wait.
+  if (eventlog_socket_opts->eso_wait) {
+    // TODO: handle error
+    eventlog_socket_wait();
+  }
+
   // Evaluate the Haskell main closure.
+  DEBUG_DEBUG("%s", "Evaluate the Haskell main closure.");
   {
     Capability *cap = rts_lock();
     rts_evalLazyIO(&cap, main_closure, NULL);
@@ -385,6 +426,7 @@ void eventlog_socket_wrap_hs_main(int argc, char *argv[], RtsConfig rts_config,
   }
 
   // Handle the return status.
+  DEBUG_DEBUG("%s", "Handle the return status.");
   switch (status) {
   case Killed:
     errorBelch("main thread exited (uncaught exception)");
@@ -425,24 +467,15 @@ EventlogSocketStatus
 eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
                       const EventlogSocketOpts *eventlog_socket_opts) {
 
-  // If eventlog_socket_opts->eso_wait is set, mask it with false.
-  // This is so that we deliver on the promised init order.
-  // For this, we make a local copy of eventlog_socket_opts.
-  EventlogSocketOpts eventlog_socket_opts_copy = {0};
-  memcpy(&eventlog_socket_opts_copy, eventlog_socket_opts,
-         sizeof(EventlogSocketOpts));
-  eventlog_socket_opts_copy.eso_wait = false;
-
   // Initialize eventlog_socket with the local copy.
   RETURN_ON_ERROR(
-      eventlog_socket_init(eventlog_socket_addr, &eventlog_socket_opts_copy));
+      eventlog_socket_init(eventlog_socket_addr, eventlog_socket_opts));
 
   // Signal that the GHC RTS is ready.
   RETURN_ON_ERROR(eventlog_socket_signal_ghc_rts_ready());
 
   // If eventlog_socket_opts->eso_wait is set, wait for a connection.
   if (eventlog_socket_opts->eso_wait) {
-    DEBUG_DEBUG("%s", "Waiting for a connection...");
     RETURN_ON_ERROR(eventlog_socket_wait());
   }
 
