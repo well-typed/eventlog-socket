@@ -66,6 +66,11 @@ flag debug-verbosity-trace
   default:     False
   manual:      True
 
+flag debug-verbosity-quiet
+  description: Set the debug verbosity to QUIET.
+  default:     False
+  manual:      True
+
 flag control
   description: Enable control commands.
   default:     False
@@ -115,6 +120,12 @@ library
     -- cpp-options are not passed to C code, see:
     -- https://github.com/haskell/cabal/issues/7635
     cc-options: -DDEBUG_VERBOSITY=5
+
+  if flag(debug-verbosity-quiet)
+    -- 2025-12-17:
+    -- cpp-options are not passed to C code, see:
+    -- https://github.com/haskell/cabal/issues/7635
+    cc-options: -DDEBUG_VERBOSITY=0
 
   if flag(control)
     -- 2025-12-17:
