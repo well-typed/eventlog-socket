@@ -15,10 +15,6 @@
     fprintf(stderr, "ERROR[%s|%d|%s]: " fmt "\n", __FILE__, __LINE__,          \
             __func__, __VA_ARGS__);                                            \
   } while (0)
-#define DEBUG_ERRNO(msg)                                                       \
-  do {                                                                         \
-    perror("ERROR: " msg);                                                     \
-  } while (0)
 
 /// @brief If the status contains an error code, print a string describing the
 /// error to stderr, and exit.
@@ -117,8 +113,10 @@ int main(int argc, char *argv[]) {
   // Handle the return status.
   switch (status.ess_status_code) {
   case EVENTLOG_SOCKET_OK:
-    EXIT_ON_ERROR(
-        eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts));
+
+    // Delegate to the helper that runs hs_main and the application closure.
+    eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure,
+                                 &eventlog_socket_addr, &eventlog_socket_opts);
     /*FALLTHROUGH*/
   case EVENTLOG_SOCKET_ERR_ENV_TOOLONG:
   case EVENTLOG_SOCKET_ERR_ENV_NOHOST:
@@ -131,5 +129,4 @@ int main(int argc, char *argv[]) {
     // Delegate to the helper that runs hs_main and the application closure.
     break;
   }
-  eventlog_socket_wrap_hs_main(argc, argv, rts_config, &ZCMain_main_closure);
 }
