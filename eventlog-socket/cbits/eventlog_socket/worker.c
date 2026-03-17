@@ -564,14 +564,8 @@ es_worker_socket_init_inet(const EventlogSocketInetAddr *const inet_addr,
   hints.ai_flags = AI_PASSIVE;
 
   struct addrinfo *res = NULL;
-  const int success_or_gai_error = getaddrinfo(
-      inet_addr->esa_inet_host, inet_addr->esa_inet_port, &hints, &res);
-  if (success_or_gai_error != 0) {
-    DEBUG_ERROR("getaddrinfo(\"%s\", \"%s\") failed: %s",
-                inet_addr->esa_inet_host, inet_addr->esa_inet_port,
-                gai_strerror(success_or_gai_error));
-    return STATUS_FROM_GAI_ERROR(success_or_gai_error);
-  }
+  RETURN_ON_ERROR(STATUS_FROM_GAI_ERROR(getaddrinfo(
+      inet_addr->esa_inet_host, inet_addr->esa_inet_port, &hints, &res)));
 
   struct addrinfo *rp;
   for (rp = res; rp != NULL; rp = rp->ai_next) {
@@ -657,37 +651,32 @@ HIDDEN EventlogSocketStatus es_worker_init(const WorkerState worker_state) {
   assert(g_worker_state.init_state_ptr != NULL);
   assert(g_worker_state.new_connection_cond_ptr != NULL);
   assert(g_worker_state.ghc_rts_ready_cond_ptr != NULL);
-  {
-    const int success_or_errno = pthread_mutex_lock(g_worker_state.mutex_ptr);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(
+      STATUS_FROM_PTHREAD(pthread_mutex_lock(g_worker_state.mutex_ptr)));
   if (!(*g_worker_state.init_state_ptr & EVENTLOG_SOCKET_SIG_INITIALIZED)) {
     if (pipe(g_wake_pipe) == -1) {
       DEBUG_ERRNO("pipe() failed");
+      pthread_mutex_unlock(g_worker_state.mutex_ptr);
       return STATUS_FROM_ERRNO();
     }
     for (int i = 0; i < 2; i++) {
       const int flags = fcntl(g_wake_pipe[i], F_GETFL, 0);
       if (flags == -1) {
         DEBUG_ERRNO("fcntl() failed for F_GETFL");
+        pthread_mutex_unlock(g_worker_state.mutex_ptr);
         return STATUS_FROM_ERRNO();
       }
       if (fcntl(g_wake_pipe[i], F_SETFL, flags | O_NONBLOCK) == -1) {
         DEBUG_ERRNO("fcntl() failed for F_SETFL");
+        pthread_mutex_unlock(g_worker_state.mutex_ptr);
         return STATUS_FROM_ERRNO();
       }
     }
     atexit(es_worker_cleanup);
     *g_worker_state.init_state_ptr |= EVENTLOG_SOCKET_SIG_INITIALIZED;
   }
-  {
-    const int success_or_errno = pthread_mutex_unlock(g_worker_state.mutex_ptr);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(
+      STATUS_FROM_PTHREAD(pthread_mutex_unlock(g_worker_state.mutex_ptr)));
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
@@ -740,11 +729,7 @@ es_worker_start(const EventlogSocketAddr *const eventlog_socket_addr,
 
   // Start the worker thread.
   DEBUG_TRACE("%s", "Starting worker thread.");
-  const int success_or_errno = pthread_create(g_worker_state.worker_thread_ptr,
-                                              NULL, es_worker_loop, NULL);
-  if (success_or_errno != 0) {
-    DEBUG_ERRNO("pthread_create() failed");
-    return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(pthread_create(
+      g_worker_state.worker_thread_ptr, NULL, es_worker_loop, NULL)));
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }

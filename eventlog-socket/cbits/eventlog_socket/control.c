@@ -289,13 +289,8 @@ HIDDEN EventlogSocketStatus control_register_namespace(
   }
 
   // Acquire the lock on g_control_namespace_registry.
-  {
-    const int success_or_errno =
-        pthread_mutex_lock(&g_control_namespace_registry_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(
+      pthread_mutex_lock(&g_control_namespace_registry_mutex)));
 
   // Initialise the namespace_entry pointer.
   EventlogSocketControlNamespace *namespace_entry =
@@ -326,6 +321,11 @@ HIDDEN EventlogSocketStatus control_register_namespace(
   assert(namespace_entry != NULL);
   assert(namespace_entry->next == NULL);
   char *const next_namespace = malloc(namespace_len + 1);
+  if (next_namespace == NULL) {
+    // If so, return false.
+    pthread_mutex_unlock(&g_control_namespace_registry_mutex);
+    return STATUS_FROM_ERRNO(); // `malloc` sets errno.
+  }
   strncpy(next_namespace, namespace, namespace_len);
   next_namespace[namespace_len] = '\0';
   const EventlogSocketControlNamespace next = (EventlogSocketControlNamespace){
@@ -334,17 +334,17 @@ HIDDEN EventlogSocketStatus control_register_namespace(
       .next = NULL,
   };
   namespace_entry->next = malloc(sizeof(EventlogSocketControlNamespace));
+  if (namespace_entry->next == NULL) {
+    // If so, return false.
+    pthread_mutex_unlock(&g_control_namespace_registry_mutex);
+    return STATUS_FROM_ERRNO(); // `malloc` sets errno.
+  }
   memcpy(namespace_entry->next, &next, sizeof(EventlogSocketControlNamespace));
   DEBUG_DEBUG("Registered namespace %.*s", (int)namespace_len, namespace);
 
   // Release the lock on g_control_namespace_registry.
-  {
-    const int success_or_errno =
-        pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(
+      pthread_mutex_unlock(&g_control_namespace_registry_mutex)));
 
   // Return the namespace entry.
   *namespace_out = namespace_entry->next;
@@ -374,13 +374,8 @@ es_control_register_command(EventlogSocketControlNamespace *const namespace,
               command_id, namespace->namespace_len, namespace->namespace);
 
   // Acquire the lock on g_control_namespace_registry.
-  {
-    const int success_or_errno =
-        pthread_mutex_lock(&g_control_namespace_registry_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(
+      pthread_mutex_lock(&g_control_namespace_registry_mutex)));
 
   // Create the data for the new command_entry.
   const EventlogSocketControlCommand next = (EventlogSocketControlCommand){
@@ -397,11 +392,12 @@ es_control_register_command(EventlogSocketControlNamespace *const namespace,
   if (namespace->command_registry == NULL) {
     // Allocate memory for the new command_entry.
     namespace->command_registry = malloc(sizeof(EventlogSocketControlCommand));
-    command_entry = namespace->command_registry;
-    if (command_entry == NULL) {
+    if (namespace->command_registry == NULL) {
+      // If so, return false.
       pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-      return STATUS_FROM_ERRNO();
+      return STATUS_FROM_ERRNO(); // `malloc` sets errno.
     }
+    command_entry = namespace->command_registry;
   }
   // Otherwise, traverse the command_store to the last position...
   else {
@@ -423,11 +419,11 @@ es_control_register_command(EventlogSocketControlNamespace *const namespace,
 
     // Allocate memory for the new command_entry.
     command_entry->next = malloc(sizeof(EventlogSocketControlCommand));
-    command_entry = command_entry->next;
-    if (command_entry == NULL) {
+    if (command_entry->next == NULL) {
       pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-      return STATUS_FROM_ERRNO();
+      return STATUS_FROM_ERRNO(); // `malloc` sets errno.
     }
+    command_entry = command_entry->next;
   }
   // Write the data for the new command_entry.
   DEBUG_TRACE("Registered command 0x%02x in namespace %.*s", command_id,
@@ -435,13 +431,8 @@ es_control_register_command(EventlogSocketControlNamespace *const namespace,
   memcpy(command_entry, &next, sizeof(EventlogSocketControlCommand));
 
   // Release the lock on g_control_namespace_registry.
-  {
-    const int success_or_errno =
-        pthread_mutex_unlock(&g_control_namespace_registry_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(
+      pthread_mutex_unlock(&g_control_namespace_registry_mutex)));
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
@@ -1188,22 +1179,10 @@ HIDDEN EventlogSocketStatus es_control_start(const ControlState control_state) {
   assert(g_control_state.init_state_ptr != NULL);
   assert(g_control_state.new_connection_cond_ptr != NULL);
   assert(g_control_state.ghc_rts_ready_cond_ptr != NULL);
-  {
-    const int success_or_errno = pthread_create(
-        g_control_state.control_thread_ptr, NULL, es_control_loop, NULL);
-    if (success_or_errno != 0) {
-      DEBUG_ERRNO("pthread_create() failed");
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
-  {
-    const int success_or_errno =
-        pthread_detach(*g_control_state.control_thread_ptr);
-    if (success_or_errno != 0) {
-      DEBUG_ERRNO("pthread_detach() failed");
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(pthread_create(
+      g_control_state.control_thread_ptr, NULL, es_control_loop, NULL)));
+  RETURN_ON_ERROR(
+      STATUS_FROM_PTHREAD(pthread_detach(*g_control_state.control_thread_ptr)));
   atexit(es_control_cleanup);
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
