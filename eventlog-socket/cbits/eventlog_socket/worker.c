@@ -45,6 +45,25 @@ HIDDEN EventlogSocketStatus es_worker_status(void) {
   return status;
 }
 
+/// @brief If the @p expr returns an error status, save, cleanup, and exit.
+#define EXIT_ON_ERROR_CLEANUP(expr, cleanup)                                   \
+  do {                                                                         \
+    const EventlogSocketStatus status = (expr);                                \
+    if (STATUS_IS_ERROR(status)) {                                             \
+      char *strerr = eventlog_socket_strerror(status);                         \
+      DEBUG_ERROR("%s", strerr);                                               \
+      free(strerr);                                                            \
+      pthread_mutex_lock(&g_status_mutex);                                     \
+      memcpy(&g_status, &status, sizeof(EventlogSocketStatus));                \
+      pthread_mutex_unlock(&g_status_mutex);                                   \
+      (cleanup);                                                               \
+      pthread_exit(NULL);                                                      \
+    }                                                                          \
+  } while (0)
+
+/// @brief If the @p expr returns an error status, save and exit.
+#define EXIT_ON_ERROR(expr) EXIT_ON_ERROR_CLEANUP(expr, (void)0)
+
 // variables read and written by worker only:
 static int g_listen_fd = -1;
 static const char *g_sock_path = NULL;
