@@ -2,12 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "./debug.h"
 #include "./write_buffer.h"
 
 HIDDEN void es_write_buffer_push(WriteBuffer *wb, size_t size,
                                  uint8_t data[size]) {
-  DEBUG_TRACE("%p, %lu", (void *)data, size);
   uint8_t *copy = malloc(size);
   memcpy(copy, data, size);
 
@@ -27,8 +25,6 @@ HIDDEN void es_write_buffer_push(WriteBuffer *wb, size_t size,
     last->next = item;
     wb->last = item;
   }
-
-  DEBUG_TRACE("%p %p", (void *)wb, (void *)wb->head);
 }
 
 HIDDEN void es_write_buffer_pop(WriteBuffer *wb) {

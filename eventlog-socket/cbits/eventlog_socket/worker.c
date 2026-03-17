@@ -156,7 +156,7 @@ static void es_worker_step_listen(void) {
       .revents = 0,
   }};
 
-  DEBUG_TRACE("listen_iteration: waiting for accept on fd %d", g_listen_fd);
+  DEBUG_TRACE("Listening for connection on fd: %d", g_listen_fd);
 
   // poll until we can accept
   while (true) {
@@ -167,10 +167,10 @@ static void es_worker_step_listen(void) {
       DEBUG_ERRNO("poll() failed");
       return;
     } else if (ready_or_error == 0) {
-      DEBUG_TRACE("%s", "accept poll timed out");
+      DEBUG_TRACE("%s", "poll() timed out.");
     } else {
       // got connection
-      DEBUG_TRACE("%s", "accept poll ready");
+      DEBUG_TRACE("%s", "poll() ready.");
       break;
     }
   }
@@ -182,7 +182,7 @@ static void es_worker_step_listen(void) {
     DEBUG_ERRNO("accept() failed");
     return;
   }
-  DEBUG_TRACE("accepted new connection fd=%d", client_fd);
+  DEBUG_TRACE("Accepted new connection fd: %d", client_fd);
 
   // set socket into non-blocking mode
   const int flags = fcntl(client_fd, F_GETFL);
@@ -270,7 +270,7 @@ static void es_worker_step_listen(void) {
 
   pthread_mutex_lock(g_worker_state.mutex_ptr);
   // Publish the client ID to `g_client_id`.
-  DEBUG_TRACE("publishing client_fd=%d (previous=%d)", client_fd,
+  DEBUG_TRACE("Broadcasting new connection fd: %d -> %d", client_fd,
               *g_worker_state.client_fd_ptr);
   *g_worker_state.client_fd_ptr = client_fd;
   // Trigger the `g_new_conn_cond` condition.
@@ -298,8 +298,6 @@ static void es_worker_step_listen(void) {
 //
 // we poll only for whether the connection is closed.
 static void es_worker_step_nonwrite(int fd) {
-  DEBUG_TRACE("(%d)", fd);
-
   // Wait for socket to disconnect or for pending data.
   struct pollfd pfds[2];
   pfds[0].fd = fd;
@@ -328,8 +326,6 @@ static void es_worker_step_nonwrite(int fd) {
   }
 
   if (pfds[0].revents & POLLHUP) {
-    DEBUG_TRACE("(%d) POLLRDHUP", fd);
-
     pthread_mutex_lock(g_worker_state.mutex_ptr);
     *g_worker_state.client_fd_ptr = -1;
     es_write_buffer_free(g_worker_state.write_buffer_ptr);
@@ -342,8 +338,6 @@ static void es_worker_step_nonwrite(int fd) {
 //
 // we poll for both: can we write, and whether the connection is closed.
 static void es_worker_step_write(int fd) {
-  DEBUG_TRACE("(%d)", fd);
-
   // Wait for socket to disconnect
   struct pollfd pfds[1] = {{
       .fd = fd,
@@ -363,8 +357,6 @@ static void es_worker_step_write(int fd) {
 
   // reset client_fd on RDHUP.
   if (pfds[0].revents & POLLHUP) {
-    DEBUG_TRACE("(%d) POLLRDHUP", fd);
-
     // reset client_fd
     // Protect concurrent access to client_fd and wt during teardown.
     pthread_mutex_lock(g_worker_state.mutex_ptr);
@@ -376,8 +368,6 @@ static void es_worker_step_write(int fd) {
   }
 
   if (pfds[0].revents & POLLOUT) {
-    DEBUG_TRACE("(%d) POLLOUT", fd);
-
     // RTS writers also access wt, so consume queued buffers under the mutex.
     pthread_mutex_lock(g_worker_state.mutex_ptr);
     while (g_worker_state.write_buffer_ptr->head) {
@@ -472,7 +462,7 @@ static void *es_worker_loop(void *arg) {
 static EventlogSocketStatus
 es_worker_socket_init_unix(const EventlogSocketUnixAddr *const unix_addr,
                            const EventlogSocketOpts *const opts) {
-  DEBUG_TRACE("init Unix listener: %s", unix_addr->esa_unix_path);
+  DEBUG_TRACE("Initialising Unix socket on %s", unix_addr->esa_unix_path);
 
   // Create a socket.
   g_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);

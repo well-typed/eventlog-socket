@@ -123,7 +123,7 @@ static void writer_init(void) {
 }
 
 static void writer_enqueue(uint8_t *data, size_t size) {
-  DEBUG_TRACE("size: %p %lu", (void *)data, size);
+  DEBUG_TRACE("Enqueueing %lu bytes.", size);
   bool was_empty = g_write_buffer.head == NULL;
 
   // TODO: check the size of the queue
@@ -131,8 +131,6 @@ static void writer_enqueue(uint8_t *data, size_t size) {
 
   // for now, we just push everythinb to the back of the buffer.
   es_write_buffer_push(&g_write_buffer, size, data);
-
-  DEBUG_TRACE("g_write_buffer.head = %p", (void *)g_write_buffer.head);
   if (was_empty) {
     es_worker_wake();
   }
@@ -320,24 +318,23 @@ eventlog_socket_init(const EventlogSocketAddr *const eventlog_socket_addr,
 EventlogSocketStatus eventlog_socket_wait(void) {
   // Condition variable pairs with the mutex so reader threads can wait for the
   // worker to publish a connected client_fd atomically.
-  DEBUG_DEBUG("%s", "Waiting for connection.");
+  DEBUG_TRACE("%s", "Checking for connection.");
   {
     const int success_or_errno = pthread_mutex_lock(&g_mutex);
     if (success_or_errno != 0) {
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
     }
   }
-  DEBUG_TRACE("initial client_fd=%d", g_client_fd);
+  DEBUG_TRACE("Old connection fd: %d", g_client_fd);
   while (g_client_fd == -1) {
-    DEBUG_TRACE("%s", "blocking for connection");
+    DEBUG_DEBUG("%s", "Waiting for connection.");
     const int success_or_errno =
         pthread_cond_wait(&g_new_connection_cond, &g_mutex);
     if (success_or_errno != 0) {
       return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
     }
-    DEBUG_TRACE("woke up, client_fd=%d", g_client_fd);
+    DEBUG_TRACE("New connection fd: %d", g_client_fd);
   }
-  DEBUG_TRACE("proceeding with client_fd=%d", g_client_fd);
   {
     const int success_or_errno = pthread_mutex_unlock(&g_mutex);
     if (success_or_errno != 0) {
