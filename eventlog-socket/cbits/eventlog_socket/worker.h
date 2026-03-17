@@ -42,4 +42,7 @@ es_worker_start(const EventlogSocketAddr *eventlog_socket_addr,
 
 HIDDEN void es_worker_wake(void);
 
+/// @brief Read the current status of the worker thread.
+HIDDEN EventlogSocketStatus es_worker_status(void);
+
 #endif /* EVENTLOG_SOCKET_WORKER_H */

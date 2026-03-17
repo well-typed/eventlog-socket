@@ -20,6 +20,7 @@
 #include "./poll.h"
 #include "./string.h"
 #include "./worker.h"
+#include "eventlog_socket.h"
 
 #define LISTEN_BACKLOG 5
 
@@ -29,6 +30,20 @@
 #ifndef NI_MAXSERV
 #define NI_MAXSERV 32
 #endif
+
+/// @brief The current status of the worker thread.
+static EventlogSocketStatus g_status = STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
+
+/// @brief The mutex that protects @c g_status.
+static pthread_mutex_t g_status_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* HIDDEN - see documentation in worker.h */
+HIDDEN EventlogSocketStatus es_worker_status(void) {
+  pthread_mutex_lock(&g_status_mutex);
+  const EventlogSocketStatus status = g_status;
+  pthread_mutex_unlock(&g_status_mutex);
+  return status;
+}
 
 // variables read and written by worker only:
 static int g_listen_fd = -1;

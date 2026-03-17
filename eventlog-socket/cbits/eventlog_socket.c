@@ -630,3 +630,8 @@ EventlogSocketStatus eventlog_socket_control_register_command(
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT);
 #endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
 }
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+EventlogSocketStatus eventlog_socket_worker_status(void) {
+  return es_worker_status();
+}

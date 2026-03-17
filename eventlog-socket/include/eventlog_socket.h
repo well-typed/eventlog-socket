@@ -412,6 +412,9 @@ EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void);
 /// @endparblock
 EventlogSocketStatus eventlog_socket_wait(void);
 
+/// @brief Read the current status of the worker thread.
+EventlogSocketStatus eventlog_socket_worker_status(void);
+
 /******************************************************************************
  * Control Commands
  ******************************************************************************/
