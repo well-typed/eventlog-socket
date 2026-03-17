@@ -1137,14 +1137,13 @@ static void *es_control_loop(void *arg) {
     }
     // if num_bytes_or_error == 0, the connection was closed...
     else if (chunk_size_or_error == 0) {
-      DEBUG_TRACE("%s", "recv() failed: the connection was closed.");
       // todo: wait for a new connection...
-      DEBUG_TRACE("Connection on fd %d closed.", g_client_fd);
+      DEBUG_TRACE("Connection closed on fd: %d", g_client_fd);
       continue;
     }
     // otherwise, handle the received chunk...
     else {
-      DEBUG_TRACE("recv() read %zd bytes", chunk_size_or_error);
+      DEBUG_TRACE("Received %zd bytes.", chunk_size_or_error);
       assert(chunk_size_or_error > 0);
       es_control_command_parser_handle_chunk(chunk_size_or_error, chunk);
     }
