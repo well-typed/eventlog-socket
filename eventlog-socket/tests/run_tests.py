@@ -141,7 +141,7 @@ class TestRunner:
                 "build",
                 self.testCase.target,
                 "--constraint",
-                "eventlog-socket +control +debug",
+                "eventlog-socket +control +debug +debug-verbosity-trace",
                 "--builddir",
                 "dist-newstyle/test-python",
             ],
@@ -176,14 +176,14 @@ class TestRunner:
     def launch_target(self) -> subprocess.Popen:
         eventlog_rts = []
         if self.testCase.mode == "reconnect":
-            eventlog_rts = ["+RTS", "--eventlog-flush-interval=1", "-RTS"]
+            eventlog_rts = [] # ["+RTS", "--eventlog-flush-interval=1", "-RTS"]
 
         args = [
             "cabal",
             "run",
             self.testCase.target,
             "--constraint",
-            "eventlog-socket +control +debug",
+            "eventlog-socket +control +debug +debug-verbosity-trace",
             "--builddir",
             "dist-newstyle/test-python",
             "--",
