@@ -14,7 +14,7 @@
                           .ess_error_code = errno})
 
 /// @brief Construct a status from a `pthread.h` error code.
-#define STATUS_FROM_PTHREAD_ERROR(pthread_errno)                               \
+#define STATUS_FROM_PTHREAD(pthread_errno)                                     \
   ((EventlogSocketStatus){.ess_status_code = EVENTLOG_SOCKET_ERR_SYS,          \
                           .ess_error_code = (pthread_errno)})
 
@@ -38,15 +38,19 @@
       (expr).ess_error_code == 0)))
 
 /// @brief If the @p expr returns an error status, immediately return it.
-#define RETURN_ON_ERROR(expr)                                                  \
+#define RETURN_ON_ERROR_CLEANUP(expr, cleanup)                                 \
   do {                                                                         \
     const EventlogSocketStatus status = (expr);                                \
     if (STATUS_IS_ERROR(status)) {                                             \
       char *strerr = eventlog_socket_strerror(status);                         \
       DEBUG_ERROR("%s", strerr);                                               \
       free(strerr);                                                            \
+      (cleanup);                                                               \
       return status;                                                           \
     }                                                                          \
   } while (0)
+
+/// @brief If the @p expr returns an error status, immediately return it.
+#define RETURN_ON_ERROR(expr) RETURN_ON_ERROR_CLEANUP(expr, (void)0)
 
 #endif /* EVENTLOG_SOCKET_ERR_H */

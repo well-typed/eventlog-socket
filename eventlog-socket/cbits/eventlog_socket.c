@@ -319,28 +319,16 @@ EventlogSocketStatus eventlog_socket_wait(void) {
   // Condition variable pairs with the mutex so reader threads can wait for the
   // worker to publish a connected client_fd atomically.
   DEBUG_TRACE("%s", "Checking for connection.");
-  {
-    const int success_or_errno = pthread_mutex_lock(&g_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(pthread_mutex_lock(&g_mutex)));
   DEBUG_TRACE("Old connection fd: %d", g_client_fd);
   while (g_client_fd == -1) {
     DEBUG_DEBUG("%s", "Waiting for connection.");
-    const int success_or_errno =
-        pthread_cond_wait(&g_new_connection_cond, &g_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
+    RETURN_ON_ERROR_CLEANUP(STATUS_FROM_PTHREAD(pthread_cond_wait(
+                                &g_new_connection_cond, &g_mutex)),
+                            pthread_mutex_unlock(&g_mutex));
     DEBUG_TRACE("New connection fd: %d", g_client_fd);
   }
-  {
-    const int success_or_errno = pthread_mutex_unlock(&g_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(pthread_mutex_unlock(&g_mutex)));
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
@@ -355,30 +343,18 @@ EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
   DEBUG_DEBUG("%s", "Received signal that the GHC RTS is ready.");
 
   // Acquire a lock on the global mutex.
-  {
-    const int success_or_errno = pthread_mutex_lock(&g_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(pthread_mutex_lock(&g_mutex)));
   // If the RTS is not marked as ready...
   if (!(g_init_state & EVENTLOG_SOCKET_SIG_RTS_READY)) {
     // ...broadcast on the relevant condition and...
-    const int success_or_errno = pthread_cond_broadcast(&g_ghc_rts_ready_cond);
-    if (success_or_errno != 0) {
-      pthread_mutex_unlock(&g_mutex);
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
+    RETURN_ON_ERROR_CLEANUP(
+        STATUS_FROM_PTHREAD(pthread_cond_broadcast(&g_ghc_rts_ready_cond)),
+        pthread_mutex_unlock(&g_mutex));
     // ...mark the GHC RTS as ready.
     g_init_state |= EVENTLOG_SOCKET_SIG_RTS_READY;
   }
   // Release the log on the global mutex.
-  {
-    const int success_or_errno = pthread_mutex_unlock(&g_mutex);
-    if (success_or_errno != 0) {
-      return STATUS_FROM_PTHREAD_ERROR(success_or_errno);
-    }
-  }
+  RETURN_ON_ERROR(STATUS_FROM_PTHREAD(pthread_mutex_unlock(&g_mutex)));
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }
 
