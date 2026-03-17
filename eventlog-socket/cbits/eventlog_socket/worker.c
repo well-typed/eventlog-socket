@@ -80,7 +80,8 @@ static void es_worker_wait_rts_ready(void) {
   assert(g_worker_state.init_state_ptr != NULL);
   assert(g_worker_state.mutex_ptr != NULL);
   assert(g_worker_state.ghc_rts_ready_cond_ptr != NULL);
-  pthread_mutex_lock(g_worker_state.mutex_ptr);
+  EXIT_ON_ERROR(
+      STATUS_FROM_PTHREAD(pthread_mutex_lock(g_worker_state.mutex_ptr)));
   while (true) {
     // Check whether or not the GHC RTS is ready.
     DEBUG_DEBUG("%s", "Checking if GHC RTS is ready.");
@@ -97,11 +98,14 @@ static void es_worker_wait_rts_ready(void) {
       //
       // NOTE: This call acts as the cancellation point for this infinite loop.
       DEBUG_DEBUG("%s", "Waiting for signal that GHC RTS is ready.");
-      pthread_cond_wait(g_worker_state.ghc_rts_ready_cond_ptr,
-                        g_worker_state.mutex_ptr);
+      EXIT_ON_ERROR_CLEANUP(
+          STATUS_FROM_PTHREAD(pthread_cond_wait(
+              g_worker_state.ghc_rts_ready_cond_ptr, g_worker_state.mutex_ptr)),
+          pthread_mutex_unlock(g_worker_state.mutex_ptr));
     }
   }
-  pthread_mutex_unlock(g_worker_state.mutex_ptr);
+  EXIT_ON_ERROR(
+      STATUS_FROM_PTHREAD(pthread_mutex_unlock(g_worker_state.mutex_ptr)));
 }
 
 /// @brief Cleanup handler for the worker thread.
@@ -170,15 +174,21 @@ HIDDEN void es_worker_wake(void) {
 
   const uint8_t byte = 1;
   const ssize_t success_or_error = write(g_wake_pipe[1], &byte, sizeof(byte));
+  // NOTE: write may fail with EAGAIN, EWOULDBLOCK, EBADF, EDESTADDRREQ,
+  // EDQUOT, EFAULT, EFBIG, EINTR, EINVAL, EIO, ENOSPC, EPERM, EPIPE.
+  // Of those, EAGAIN and EWOULDBLOCK should lead to retry.
   if (success_or_error == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
-    DEBUG_ERRNO("write() failed");
+    EXIT_ON_ERROR(STATUS_FROM_ERRNO());
   }
 }
 
 static void es_worker_step_listen(void) {
   if (listen(g_listen_fd, LISTEN_BACKLOG) == -1) {
-    DEBUG_ERRNO("listen() failed");
-    abort();
+    // NOTE: This call should only fail with EADDRINUSE, EBADF, ENOTSOCK,
+    // EOPNOTSUPP. While some of these errors may be recoverable, it would
+    // require reengineering of eventlog-socket to enable changing the socket
+    // address on the fly, which means that currently it isn't recoverable.
+    EXIT_ON_ERROR(STATUS_FROM_ERRNO());
   }
 
   struct sockaddr_storage remote;
@@ -194,17 +204,17 @@ static void es_worker_step_listen(void) {
 
   // poll until we can accept
   while (true) {
-    // NOTE: The call to poll acts as the cancellation point for this infinite
-    // loop.
+    // NOTE: poll acts as the cancellation point for this infinite loop.
+    // NOTE: poll can fail with EFAULT, EINTR, EINVAL, and ENOMEM.
+    //       On all of those errors, the worker thread should shut down.
     const int ready_or_error = poll(pfds, 1, POLL_LISTEN_TIMEOUT);
     if (ready_or_error == -1) {
-      DEBUG_ERRNO("poll() failed");
-      return;
+      EXIT_ON_ERROR(STATUS_FROM_ERRNO());
     } else if (ready_or_error == 0) {
-      DEBUG_TRACE("%s", "poll() timed out.");
+      DEBUG_TRACE("%s", "poll() timed out");
     } else {
       // got connection
-      DEBUG_TRACE("%s", "poll() ready.");
+      DEBUG_TRACE("%s", "poll() ready");
       break;
     }
   }
@@ -213,8 +223,15 @@ static void es_worker_step_listen(void) {
   const int client_fd =
       accept(g_listen_fd, (struct sockaddr *)&remote, &remote_len);
   if (client_fd == -1) {
-    DEBUG_ERRNO("accept() failed");
-    return;
+    // NOTE: accept can fail with EAGAIN, EWOULDBLOCK, EBADF, ECONNABORTED,
+    // EFAULT, EINTR, EINVAL, EMFILE, ENFILE, ENOBUFS, ENOMEM, ENOTSOCK,
+    // EOPNOTSUPP, EPERM, and EPROTO. Of those, only EAGAIN, EWOULDBLOCK,
+    // ECONNABORTED should lead to retrying.
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNABORTED) {
+      return;
+    } else {
+      EXIT_ON_ERROR(STATUS_FROM_ERRNO());
+    }
   }
   DEBUG_TRACE("Accepted new connection fd: %d", client_fd);
 
@@ -304,8 +321,8 @@ static void es_worker_step_listen(void) {
 
   pthread_mutex_lock(g_worker_state.mutex_ptr);
   // Publish the client ID to `g_client_id`.
-  DEBUG_TRACE("Broadcasting new connection fd: %d -> %d", client_fd,
-              *g_worker_state.client_fd_ptr);
+  DEBUG_TRACE("Broadcasting new connection fd: %d -> %d",
+              *g_worker_state.client_fd_ptr, client_fd);
   *g_worker_state.client_fd_ptr = client_fd;
   // Trigger the `g_new_conn_cond` condition.
   pthread_cond_broadcast(g_worker_state.new_connection_cond_ptr);
@@ -445,10 +462,12 @@ static void es_worker_step_write(int fd) {
 static void es_worker_step(void) {
   // Snapshot shared state under lock so worker decisions (listen vs write)
   // align with the current connection/queue state.
-  pthread_mutex_lock(g_worker_state.mutex_ptr);
+  EXIT_ON_ERROR(
+      STATUS_FROM_PTHREAD(pthread_mutex_lock(g_worker_state.mutex_ptr)));
   const int client_fd = *g_worker_state.client_fd_ptr;
   const bool write_buffer_empty = g_worker_state.write_buffer_ptr->head == NULL;
-  pthread_mutex_unlock(g_worker_state.mutex_ptr);
+  EXIT_ON_ERROR(
+      STATUS_FROM_PTHREAD(pthread_mutex_unlock(g_worker_state.mutex_ptr)));
   if (client_fd != -1) {
     if (write_buffer_empty) {
       es_worker_step_nonwrite(client_fd);
