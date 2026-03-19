@@ -35,7 +35,6 @@ main = do
     let (mode, fibArgs) = parseArgs args
         workload = for_ fibArgs $ \arg -> do
             traceMarkerIO $ "Starting fib " <> arg
-            flushEventLog
             print $ fib (read arg)
             traceMarkerIO $ "Finished fib " <> arg
             performPreferablyBlockingMajorGC
