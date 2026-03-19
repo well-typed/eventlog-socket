@@ -1,6 +1,6 @@
 #!/bin/sh -e
 
-# Usage: ./scripts/test-haskell.sh [CABAL_ARGS] -- [TEST_ARGS]
+# Usage: ./scripts/test.sh [CABAL_ARGS] -- [TEST_ARGS]
 #
 # NOTE: If environment variable DEBUG is defined, this script logs both the
 #       output and error streams of the test suite to files and shows only

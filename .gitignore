@@ -18,10 +18,3 @@ cabal.project.local
 
 # VSCode
 /.vscode
-
-# Python
-__pycache__
-.ruff_cache
-.venv
-dist
-*.egg-info

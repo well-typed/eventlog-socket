@@ -247,10 +247,7 @@ bool register_greeters(void) {
 
 The `scripts` directory contains various scripts for contributors to this repository.
 
-The `./scripts/test-haskell.sh` script runs the Haskell test suite, which is located in [`eventlog-socket-tests`](eventlog-socket-tests/).
-
-The `./scripts/test-python.sh` scripts runs the Python test suite, which is located in [`eventlog-socket/tests`](eventlog-socket/tests/).
-This test suite is not fully portable, and is primarily intended to be run on Linux machines.
+The `./scripts/test.sh` script runs the test suite, which is located in [`eventlog-socket-tests`](eventlog-socket-tests/).
 
 The `./scripts/pre-commit.sh` script runs the pre-commit hooks, which contains various formatters and linters.
 

@@ -46,13 +46,8 @@ jobs:
           ghc-events-version: "0.20.0.0"
           ghc-version: ${{ matrix.ghc-version }}
 
-      - name: 🚀 Testing (Python test suite)
-        if: ${{ runner.os == 'Linux' }}
-        run: ./scripts/test-python.sh
-
-      - name: 🚀 Testing (Haskell test suite)
-        if: ${{ always() }}
-        run: ./scripts/test-haskell.sh
+      - name: 🚀 Testing
+        run: ./scripts/test.sh
 
       - name: 📦 Upload test logs
         if: ${{ always() }}
