@@ -1,10 +1,13 @@
 # Revision history for eventlog-socket
 
-## 0.1.1.1 -- 2026-03-12
+## 0.1.1.1 -- 2026-03-23
 
+- **BREAKING**: Change `eventlog_socket_wrap_hs_main` to accept `EventlogSocketAddr` and `EventlogSocketOpts` and call `eventlog_socket_init`. This is a breaking change in a patch version. This is justified, as `eventlog-socket-0.1.1.0` is deprecated and not in use, and the previous API was fundamentally broken.
 - Fixed issue where `eventlog_socket_start` would ignore `eso_wait`.
 - Fixed issue where `SocketEventLogWriter->writeEventLog` would drop data if there was no connection, resulting in a truncated eventlog.
 - Fixed race condition between the calls to `endEventLogging` and `startEventLogging` that happened on startup and at first connection. If these restarts were interleaved, this could lead to the startup call to `endEventLogging` immediately detaching the event logger attached by the call to `startEventLogging` in the worker thread listening for incoming connections. This would cause the socket to immediately be closed and lead to a truncated eventlog. Furthermore, the startup call to `endEventLogging` happened unconditionally, which means that an event logger attached in a C main (as in `examples/fibber-c-main`) would be detached on the first connection, which would drop prior all events from the buffer. The new version does not call `endEventLogging` or `startEventLogging` on startup. This means that an event logger installed in a C main is able to capture events from before the first connection. It also means that the default event logger – which may be the file event logger – will be active until the first connection, rather than until `eventlog_socket_start` is called.
+- Add `testWorkerStatus` and `testControlStatus` functions to Haskell API.
+- Add `eventlog_socket_worker_status` and `eventlog_socket_control_status` to C API.
 
 ## 0.1.1.0 -- 2026-02-23
 

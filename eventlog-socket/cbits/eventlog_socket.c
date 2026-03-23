@@ -633,5 +633,12 @@ EventlogSocketStatus eventlog_socket_control_register_command(
 
 /* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketStatus eventlog_socket_worker_status(void) {
+  DEBUG_DEBUG("%s", "Reading worker status.");
   return es_worker_status();
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+EventlogSocketStatus eventlog_socket_control_status(void) {
+  DEBUG_DEBUG("%s", "Reading control status.");
+  return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 }

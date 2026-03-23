@@ -54,19 +54,23 @@ module GHC.Eventlog.Socket (
     registerCommand,
     EventlogSocketControlError(..),
 
+    -- ** Low-level API #low_level_api#
+    testWorkerStatus,
+    testControlStatus,
+
     -- * Legacy API #legacy_api#
     startWait,
     start,
     wait,
 ) where
 
-import Control.Exception (Exception (..), assert, bracket, bracket_, bracketOnError, throwIO)
+import Control.Exception (AssertionFailed (..), Exception (..), assert, bracket, bracket_, bracketOnError, throwIO)
 import Control.Monad((<=<), when)
 import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe)
-import Data.Void (Void)
+import Data.Void (Void, vacuous)
 import Data.Word (Word8, Word32)
 import Foreign.C (CBool (..))
 import Foreign.C.String (CString, peekCString, withCString, withCStringLen)
@@ -101,10 +105,8 @@ startWith esa eso =
         status <- peekEventlogSocketStatus essPtr
 
         -- If the status is an error, throw a user error.
-        when (essStatusCode status /= EVENTLOG_SOCKET_OK) $ do
-            strPtr <- eventlog_socket_strerror essPtr
-            str <- peekNullableCString strPtr
-            throwIO $ userError str
+        when (essStatusCode status /= EVENTLOG_SOCKET_OK) $
+            vacuous $ throwEventlogSocketStatus essPtr
 
 --------------------------------------------------------------------------------
 -- Configuration types
@@ -239,10 +241,7 @@ fromEnv =
                     esa <- peekEventlogSocketAddr esaPtr
                     throwIO $ EventlogSocketAddrInetHostMissing (esaInetHost esa)
                 | otherwise =
-                    withEventlogSocketStatus status $ \essPtr -> do
-                        strPtr <- eventlog_socket_strerror essPtr
-                        str <- peekNullableCString strPtr
-                        throwIO $ userError str
+                    vacuous $ withEventlogSocketStatus status throwEventlogSocketStatus
 
         bracket tryGet maybeFree maybePeek
 
@@ -267,6 +266,8 @@ eventlogSocketEnvWait = #{const_str EVENTLOG_SOCKET_ENV_WAIT}
 
 {- |
 The type of exceptions thrown by `fromEnv`.
+
+@since 0.1.1.0
 -}
 data EventlogSocketAddrError
     = EventlogSocketAddrUnixPathTooLong FilePath
@@ -301,6 +302,70 @@ instance Exception EventlogSocketAddrError where
                 <> ", but the port number "
                 <> eventlogSocketEnvInetPort
                 <> " was not set."
+
+{- |
+Test the current status of the worker thread. If it has failed, throw an `IOException`.
+
+@since 0.1.1.1
+-}
+testWorkerStatus :: IO ()
+testWorkerStatus =
+    throwEventlogSocketStatusAsIOException =<< workerStatus
+
+{- |
+Test the current status of the control thread. If it has failed, throw an `IOException`.
+
+@since 0.1.1.1
+-}
+testControlStatus :: IO ()
+testControlStatus =
+    throwEventlogSocketStatusAsIOException =<< controlStatus
+
+{- |
+Internal helper.
+
+Read the current worker status.
+-}
+workerStatus :: IO EventlogSocketStatus
+workerStatus =
+    allocaBytes #{size EventlogSocketStatus} $ \essPtr -> do
+        eventlog_socket_worker_status essPtr
+        peekEventlogSocketStatus essPtr
+
+{- |
+Internal helper.
+
+Read the current control status.
+-}
+controlStatus :: IO EventlogSocketStatus
+controlStatus =
+    allocaBytes #{size EventlogSocketStatus} $ \essPtr -> do
+        eventlog_socket_control_status essPtr
+        peekEventlogSocketStatus essPtr
+
+{- |
+Internal helper.
+
+Throw an `EventlogSocketStatus` as an `IOException`.
+-}
+throwEventlogSocketStatusAsIOException :: EventlogSocketStatus -> IO ()
+throwEventlogSocketStatusAsIOException ess =
+    when (essStatusCode ess /= EVENTLOG_SOCKET_OK) $
+        vacuous $ withEventlogSocketStatus ess throwEventlogSocketStatus
+
+{- |
+Internal helper.
+
+Throw an `EventlogSocketStatus` as an `IOException`.
+
+__Warning__: This function _still_ throws an error if the status code is `EVENTLOG_SOCKET_OK`.
+-}
+throwEventlogSocketStatus :: Ptr EventlogSocketStatus -> IO Void
+throwEventlogSocketStatus essPtr = do
+    strPtr <- eventlog_socket_strerror essPtr
+    str <- peekNullableCString strPtr
+    free strPtr
+    throwIO $ userError str
 
 --------------------------------------------------------------------------------
 -- Control Commands API
@@ -408,10 +473,7 @@ registerNamespace namespace =
 
             -- The remaining errors are all system errors:
             _otherwise ->
-                withEventlogSocketStatus status $ \essPtr -> do
-                    strPtr <- eventlog_socket_strerror essPtr
-                    str <- peekNullableCString strPtr
-                    throwIO $ userError str
+                vacuous $ withEventlogSocketStatus status throwEventlogSocketStatus
 
 {- |
 Register an @eventlog-socket@ control command with the given ID and handler in the given namespace.
@@ -477,10 +539,7 @@ registerCommand (Namespace namespacePtr) commandId commandHandler = do
 
             -- The remaining errors are all system errors:
             _otherwise ->
-                withEventlogSocketStatus status $ \essPtr -> do
-                    strPtr <- eventlog_socket_strerror essPtr
-                    str <- peekNullableCString strPtr
-                    throwIO $ userError str
+                vacuous $ withEventlogSocketStatus status throwEventlogSocketStatus
 
 --------------------------------------------------------------------------------
 -- Errors
@@ -905,6 +964,42 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_strerr
   )
   {
     return eventlog_socket_strerror(*eventlog_socket_status);
+  }
+}
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_worker_status
+
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_worker_status"
+    eventlog_socket_worker_status ::
+        Ptr EventlogSocketStatus ->
+        IO ()
+
+#{def
+  void _wrap_eventlog_socket_worker_status(
+    EventlogSocketStatus *eventlog_socket_status_out
+  )
+  {
+    const EventlogSocketStatus eventlog_socket_status = eventlog_socket_worker_status();
+    memcpy(eventlog_socket_status_out, &eventlog_socket_status, sizeof(EventlogSocketStatus));
+  }
+}
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_control_status
+
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_control_status"
+    eventlog_socket_control_status ::
+        Ptr EventlogSocketStatus ->
+        IO ()
+
+#{def
+  void _wrap_eventlog_socket_control_status(
+    EventlogSocketStatus *eventlog_socket_status_out
+  )
+  {
+    const EventlogSocketStatus eventlog_socket_status = eventlog_socket_control_status();
+    memcpy(eventlog_socket_status_out, &eventlog_socket_status, sizeof(EventlogSocketStatus));
   }
 }
 
