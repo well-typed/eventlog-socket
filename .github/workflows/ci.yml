@@ -209,19 +209,3 @@ jobs:
 
       - name: 🎗️ Lint with Fourmolu
         run: ./scripts/lint-fourmolu.sh
-
-  #############################################################################
-  # Lint with pyright
-  #############################################################################
-
-  lint-pyright:
-    name: "Lint with pyright"
-    runs-on: "ubuntu-latest"
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v6
-        with:
-          submodules: true
-
-      - name: 🎗️ Lint with pyright
-        uses: jakebailey/pyright-action@v2
