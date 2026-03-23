@@ -604,7 +604,7 @@ EventlogSocketStatus eventlog_socket_control_register_namespace(
     uint8_t namespace_len, const char namespace[namespace_len],
     EventlogSocketControlNamespace **namespace_out) {
 #ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
-  return control_register_namespace(namespace_len, namespace, namespace_out);
+  return es_control_register_namespace(namespace_len, namespace, namespace_out);
 #else
   (void)namespace_len;
   (void)namespace;
@@ -640,5 +640,9 @@ EventlogSocketStatus eventlog_socket_worker_status(void) {
 /* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketStatus eventlog_socket_control_status(void) {
   DEBUG_DEBUG("%s", "Reading control status.");
+#ifdef EVENTLOG_SOCKET_FEATURE_CONTROL
+  return es_control_status();
+#else
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
+#endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
 }

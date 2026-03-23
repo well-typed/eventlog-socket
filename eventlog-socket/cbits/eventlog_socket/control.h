@@ -54,7 +54,7 @@ HIDDEN const char *
 es_control_strnamespace(EventlogSocketControlNamespace *namespace);
 
 /// @see eventlog_socket_control_register_namespace
-HIDDEN EventlogSocketStatus control_register_namespace(
+HIDDEN EventlogSocketStatus es_control_register_namespace(
     uint8_t namespace_len, const char namespace[namespace_len],
     EventlogSocketControlNamespace **namespace_out);
 
@@ -64,5 +64,8 @@ es_control_register_command(EventlogSocketControlNamespace *namespace,
                             EventlogSocketControlCommandId command_id,
                             EventlogSocketControlCommandHandler command_handler,
                             const void *command_data);
+
+/// @brief Read the current status of the control thread.
+HIDDEN EventlogSocketStatus es_control_status(void);
 
 #endif /* EVENTLOG_SOCKET_CONTROL_H */
