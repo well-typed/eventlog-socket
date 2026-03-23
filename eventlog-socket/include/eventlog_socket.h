@@ -415,6 +415,9 @@ EventlogSocketStatus eventlog_socket_wait(void);
 /// @brief Read the current status of the worker thread.
 EventlogSocketStatus eventlog_socket_worker_status(void);
 
+/// @brief Read the current status of the control thread.
+EventlogSocketStatus eventlog_socket_control_status(void);
+
 /******************************************************************************
  * Control Commands
  ******************************************************************************/
