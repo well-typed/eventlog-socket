@@ -13,7 +13,7 @@ main :: IO ()
 main = do
     startFromEnv
     _ <- forever $ threadDelay 3000000 >> doRandom
-    return ()
+    pure ()
 
 -- | Generate a random length stream of random numbers and sum them (poorly)
 doRandom :: IO ()
@@ -26,4 +26,9 @@ doRandom = do
         result = foldr (+) 00 $ take n stream
     putStrLn $ "Sum: " ++ show result
     performMajorGC
+
+    -- Poll for asynchronous errors
+    testWorkerStatus
+    testControlStatus
+
     threadDelay 30

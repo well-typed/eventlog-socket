@@ -3,7 +3,7 @@ module Main where
 import Control.Monad (forever)
 import Data.Foldable (for_, traverse_)
 import Debug.Trace (flushEventLog, traceMarkerIO)
-import GHC.Eventlog.Socket (wait)
+import GHC.Eventlog.Socket (testControlStatus, testWorkerStatus, wait)
 import System.Environment (getArgs, lookupEnv)
 
 data Mode = Finite | Infinite
@@ -24,11 +24,19 @@ main = do
             traceMarkerIO $ "Starting fib " <> arg
             print $ fib (read arg)
             traceMarkerIO $ "Finished fib " <> arg
+
+            -- Poll for asynchronous errors
+            testWorkerStatus
+            testControlStatus
     case (mode, fibArgs) of
         (_, []) -> putStrLn "Provide at least one integer argument."
         (Finite, _) -> workload
         (Infinite, _) -> forever workload
     flushEventLog
+
+    -- Poll for asynchronous errors
+    testWorkerStatus
+    testControlStatus
 
 fib :: Integer -> Integer
 fib 0 = 0

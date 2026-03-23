@@ -4,7 +4,7 @@ module Main where
 
 import Control.Concurrent (threadDelay)
 import Debug.Trace (flushEventLog, traceEventIO, traceMarkerIO)
-import GHC.Eventlog.Socket (wait)
+import GHC.Eventlog.Socket (testControlStatus, testWorkerStatus, wait)
 import System.Environment (getArgs)
 import Text.Read (readMaybe)
 
@@ -15,6 +15,10 @@ main = do
     maybeEnd <- parseArgs <$> getArgs
     putStrLn . maybe "looping forever" (\n -> "looping " <> show n <> " times") $ maybeEnd
     loopFromTo 0 maybeEnd
+
+    -- Poll for asynchronous errors
+    testWorkerStatus
+    testControlStatus
   where
     loopFromTo n maybeEnd
         | Just m <- maybeEnd, n >= m = pure ()
@@ -22,6 +26,10 @@ main = do
             traceMarkerIO $ "custom workload iteration " ++ show n
             threadDelay 500000
             flushEventLog
+
+            -- Poll for asynchronous errors
+            testWorkerStatus
+            testControlStatus
             loopFromTo (n + 1) maybeEnd
 
 parseArgs :: [String] -> Maybe Int
