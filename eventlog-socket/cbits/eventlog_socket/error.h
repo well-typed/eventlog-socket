@@ -53,4 +53,29 @@
 /// @brief If the @p expr returns an error status, immediately return it.
 #define RETURN_ON_ERROR(expr) RETURN_ON_ERROR_CLEANUP(expr, (void)0)
 
+/// @brief If the @p expr returns an error status, save, cleanup, and exit.
+///
+/// @warning This macro assumes the existence of two global variables `g_status`
+/// and `g_status_mutex`.
+#define EXIT_ON_ERROR_CLEANUP(expr, cleanup)                                   \
+  do {                                                                         \
+    const EventlogSocketStatus status = (expr);                                \
+    if (STATUS_IS_ERROR(status)) {                                             \
+      char *strerr = eventlog_socket_strerror(status);                         \
+      DEBUG_ERROR("%s", strerr);                                               \
+      free(strerr);                                                            \
+      pthread_mutex_lock(&g_status_mutex);                                     \
+      memcpy(&g_status, &status, sizeof(EventlogSocketStatus));                \
+      pthread_mutex_unlock(&g_status_mutex);                                   \
+      (cleanup);                                                               \
+      pthread_exit(NULL);                                                      \
+    }                                                                          \
+  } while (0)
+
+/// @brief If the @p expr returns an error status, save and exit.
+///
+/// @warning This macro assumes the existence of two global variables `g_status`
+/// and `g_status_mutex`.
+#define EXIT_ON_ERROR(expr) EXIT_ON_ERROR_CLEANUP(expr, (void)0)
+
 #endif /* EVENTLOG_SOCKET_ERR_H */
