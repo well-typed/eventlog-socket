@@ -51,10 +51,10 @@ jobs:
 
       - name: 📦 Upload test logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: eventlog-socket-tests-${{ runner.os }}-${{ runner.arch }}-ghc-${{ matrix.ghc-version }}.log
-          path: eventlog-socket-tests.log
+          name: eventlog-socket-tests-${{ runner.os }}-${{ runner.arch }}-ghc-${{ matrix.ghc-version }}.err.log
+          path: eventlog-socket-tests.err.log
 
     strategy:
       fail-fast: false
