@@ -6,7 +6,7 @@ import Control.Monad (forever)
 import Data.Foldable (for_, traverse_)
 import Data.Maybe (fromMaybe)
 import Debug.Trace (flushEventLog, traceMarkerIO)
-import GHC.Eventlog.Socket (startFromEnv)
+import GHC.Eventlog.Socket (startFromEnv, testControlStatus, testWorkerStatus)
 import System.Environment (getArgs, lookupEnv)
 
 #if MIN_VERSION_base(4,20,0)
@@ -38,11 +38,19 @@ main = do
             print $ fib (read arg)
             traceMarkerIO $ "Finished fib " <> arg
             performPreferablyBlockingMajorGC
+
+            -- Poll for asynchronous errors
+            testWorkerStatus
+            testControlStatus
     case (mode, fibArgs) of
         (_, []) -> putStrLn "Provide at least one integer argument."
         (Finite, _) -> workload
         (Infinite, _) -> forever workload
     flushEventLog
+
+    -- Poll for asynchronous errors
+    testWorkerStatus
+    testControlStatus
 
 fib :: Integer -> Integer
 fib 0 = 0
