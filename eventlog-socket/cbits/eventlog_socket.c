@@ -333,12 +333,6 @@ EventlogSocketStatus eventlog_socket_wait(void) {
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */
-RtsConfig eventlog_socket_attach_rts_config(RtsConfig rts_config) {
-  rts_config.eventlog_writer = &SocketEventLogWriter;
-  return rts_config;
-}
-
-/* PUBLIC - see documentation in eventlog_socket.h */
 EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
   DEBUG_DEBUG("%s", "Received signal that the GHC RTS is ready.");
 
@@ -372,7 +366,7 @@ void eventlog_socket_wrap_hs_main(
 
   // Set the eventlog socket writer.
   DEBUG_DEBUG("%s", "Attach the SocketEventLogWriter.");
-  rts_config = eventlog_socket_attach_rts_config(rts_config);
+  rts_config.eventlog_writer = &SocketEventLogWriter;
 
   // Initialize the GHC RTS.
   DEBUG_DEBUG("%s", "Initialise the GHC RTS.");
