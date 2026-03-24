@@ -22,12 +22,20 @@
 #include "./worker.h"
 #include "eventlog_socket.h"
 
+/// @brief The maximum length of the queue for pending connections.
 #define LISTEN_BACKLOG 5
 
 #ifndef NI_MAXHOST
+/// @brief The maximum length of the hostname.
+///
+/// NOTE: This symbol is conditionally exported by @c netdb.h.
 #define NI_MAXHOST 1025
 #endif
+
 #ifndef NI_MAXSERV
+/// @brief The maximum length of the service name.
+///
+/// NOTE: This symbol is conditionally exported by @c netdb.h.
 #define NI_MAXSERV 32
 #endif
 
@@ -45,9 +53,14 @@ HIDDEN EventlogSocketStatus es_worker_status(void) {
   return status;
 }
 
-// variables read and written by worker only:
+/// @brief The file descriptor for the socket on which the worker listens for
+/// new connections.
 static int g_listen_fd = -1;
+
+/// @brief The file path for the open Unix domain socket, if any.
 static const char *g_sock_path = NULL;
+
+/// @brief A pipe used internally by the worker.
 static int g_wake_pipe[2] = {-1, -1};
 
 /// @brief The state that is shared with the worker thread.
