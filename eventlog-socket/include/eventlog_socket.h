@@ -11,7 +11,7 @@
 /// Haskell API, then the RTS is started with the default file writer, which
 /// means that the first few events are written to a file instead of the
 /// eventlog socket. To avoid this, you can instrument your application using
-/// the C API. See `eventlog_socket_init` and `eventlog_socket_wrap_hs_main`.
+/// the C API. See `eventlog_socket_wrap_hs_main`.
 ///
 /// If you want to register custom commands via the C API, see
 /// `eventlog_socket_control_register_namespace` and
@@ -68,7 +68,7 @@ typedef struct EventlogSocketStatus {
   const int ess_error_code;
 } EventlogSocketStatus;
 
-/// @brief Return a string that describese the status.
+/// @brief Return a string that describes the status.
 ///
 /// @return Upon successful completion, a buffer containing a string that
 /// describes the @p status is returned. This buffer is allocated with @c malloc
@@ -212,47 +212,69 @@ eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
 ///
 /// @par Examples
 /// @parblock
-/// The following function initialises eventlog socket using a socket address
-/// and options from the environment.
+/// The following function initialises eventlog socket from a C main function.
 /// @code{.c}
-/// EventlogSocketFromEnvStatus init_from_env(void) {
+/// #include <stdio.h>
+/// #include <stdlib.h>
+/// #include <Rts.h>
+/// #include <eventlog_socket.h>
+///
+/// // Define the eventlog Unix domain socket path.
+/// #define MY_EVENTLOG_SOCKET "/tmp/my_eventlog.socket"
+///
+/// // Get the closure for the Haskell main.
+/// extern StgClosure ZCMain_main_closure;
+///
+/// int main(int argc, char* argv[]) {
+///
+///   // Create a GHC RTS configuration object.
+///   RtsConfig rts_config = {0};
+///   memcpy(&rts_config, &defaultRtsConfig, sizeof(RtsConfig));
+///   rts_config.rts_opts_enabled = RtsOptsAll; // Enable all RTS options.
+///   rts_config.rts_opts = "-l";               // Enable binary eventlog.
 ///
 ///   // Read the socket address and options from the environment.
-///   EventlogSocketAddr eventlog_socket_addr = {0};
-///   EventlogSocketOpts eventlog_socket_opts = {0};
-///   const EventlogSocketFromEnvStatus status =
-///       eventlog_socket_from_env(&eventlog_socket_addr,
-///       &eventlog_socket_opts);
+///   EventlogSocketAddr addr = {0};
+///   EventlogSocketOpts opts = {0};
+///   EventlogSocketStatus status = eventlog_socket_from_env(&addr, &opts);
 ///
 ///   // Handle the return status.
 ///   switch (status) {
 ///   case EVENTLOG_SOCKET_FROM_ENV_OK:
-///     // Initialise eventlog socket.
-///     eventlog_socket_init(&eventlog_socket_addr, &eventlog_socket_opts);
-///     break;
-///   case EVENTLOG_SOCKET_FROM_ENV_NONE:
-///     return status; // Skip free.
-///   case EVENTLOG_SOCKET_FROM_ENV_UNIX_PATH_TOO_LONG:
+///     // Evaluate the wrapped Haskell main closure.
+///     return eventlog_socket_wrap_hs_main(argc, argv, rts_config,
+///                                         &ZCMain_main_closure, &addr, &opts);
+///   case EVENTLOG_SOCKET_ERR_ENV_NOADDR:
+///     // Return with an exit failure, skip free.
+///     exit(EXIT_FAILURE);
+///   case EVENTLOG_SOCKET_ERR_ENV_TOOLONG:
 ///     fprintf(stderr, "Error: value of %s (%s) is too long\n",
 ///             EVENTLOG_SOCKET_ENV_UNIX_PATH,
 ///             eventlog_socket_addr.esa_unix_addr.esa_unix_path);
 ///     break;
-///   case EVENTLOG_SOCKET_FROM_ENV_INET_HOST_MISSING:
+///   case EVENTLOG_SOCKET_ERR_ENV_NOHOST:
 ///     fprintf(stderr, "Error: no value given for %s\n",
 ///             EVENTLOG_SOCKET_ENV_INET_HOST);
 ///     break;
-///   case EVENTLOG_SOCKET_FROM_ENV_INET_PORT_MISSING:
+///   case EVENTLOG_SOCKET_ERR_ENV_NOPORT:
 ///     fprintf(stderr, "Error: no value given for %s\n",
 ///             EVENTLOG_SOCKET_ENV_INET_PORT);
 ///     break;
-///   case EVENTLOG_SOCKET_FROM_ENV_SYSTEM:
+///   default:
+///     char *errmsg = eventlog_socket_strerror(status);
+///     if (errmsg != NULL) {
+///       fprintf(stderr, "Error: %s\n", errmsg);
+///       free(errmsg);
+///     }
+///     break;
 ///   }
 ///
 ///   // Free the memory held by socket address and options.
 ///   eventlog_socket_addr_free(&eventlog_socket_addr);
 ///   eventlog_socket_opts_free(&eventlog_socket_opts);
 ///
-///   return status;
+///   // Return with an exit failure.
+///   exit(EXIT_FAILURE);
 /// }
 /// @endcode
 /// @endparblock
@@ -266,6 +288,10 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 /// has started. This is primarily intended to be called from a C main function.
 /// To install the eventlog socket writer *after* the GHC RTS has started, use
 /// `eventlog_socket_start`.
+///
+/// @note You do not need to call this function if you're starting eventlog
+/// socket using the Haskell API, via `eventlog_socket_start`, or via
+/// `eventlog_socket_wrap_hs_main`.
 ///
 /// @warning `eventlog_socket_init` ignores the @c eso_wait option.
 ///
@@ -285,49 +311,6 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 /// `EAI_MEMORY`, `EAI_NODATA`, `EAI_NONAME`, `EAI_SERVICE`, `EAI_SOCKTYPE`, or
 /// `EAI_SYSTEM`.
 /// @endparblock
-///
-/// @par Examples
-/// @parblock
-/// The following function initialises eventlog socket from a C main function.
-/// @code{.c}
-/// #include <Rts.h>
-/// #include <eventlog_socket.h>
-/// #include <netdb.h>
-/// #include <stdlib.h>
-///
-/// // Define the eventlog Unix domain socket path.
-/// #define MY_EVENTLOG_SOCKET "/tmp/my_eventlog.socket"
-///
-/// // Get the closure for the Haskell main.
-/// extern StgClosure ZCMain_main_closure;
-///
-/// int main(int argc, char* argv[]) {
-///
-///  // Create a GHC RTS configuration object.
-///  RtsConfig rts_config = {0};
-///  memcpy(&rts_config, &defaultRtsConfig, sizeof(RtsConfig));
-///  rts_config.rts_opts_enabled = RtsOptsAll; // Enable all RTS options.
-///  rts_config.rts_opts = "-l";               // Enable binary eventlog.
-///
-///   // Initialise eventlog socket using the default options.
-///   EventlogSocketAddr eventlog_socket_addr = {
-///     .esa_tag = EVENTLOG_SOCKET_UNIX,
-///     .esa_unix_addr = {
-///       .esa_unix_path = MY_EVENTLOG_SOCKET,
-///     }};
-///   const int success_or_eaino =
-///     eventlog_socket_init(&eventlog_socket_addr, NULL);
-///   if (success_or_eaino != 0) {
-///     fprintf(stderr, "eventlog_socket_init() failed: %s",
-///             gai_strerror(success_or_eaino));
-///   }
-///
-///   // Evaluate the close for the Haskell main.
-///   return eventlog_socket_wrap_hs_main(argc, argv, rts_config,
-///                                       &ZCMain_main_closure);
-/// }
-/// @endcode
-/// @endparblock
 EventlogSocketStatus
 eventlog_socket_init(const EventlogSocketAddr *eventlog_socket_addr,
                      const EventlogSocketOpts *eventlog_socket_opts);
@@ -339,19 +322,52 @@ eventlog_socket_init(const EventlogSocketAddr *eventlog_socket_addr,
 /// To install the eventlog socket writer *after* the GHC RTS has started, use
 /// `eventlog_socket_start`.
 ///
-/// This function attaches the `SocketEventLogWriter` to the @p rts_config,
-/// initializes the GHC RTS and calls `eventlog_socket_signal_ghc_rts_ready`,
-/// and finally evaluates the Haskell main closure.
+/// This function attaches the eventlog-socket writer to the @p rts_config,
+/// initializes eventlog-socket and the GHC RTS, and evaluates the Haskell
+/// main closure.
 ///
-/// If your needs are more fine-grained, you can use `SocketEventLogWriter`,
-/// `eventlog_socket_signal_ghc_rts_ready`, and the GHC RTS API directly.
-///
-/// @pre The eventlog socket was successfully initialised using
-/// `eventlog_socket_init`.
+/// If your needs are more fine-grained, you can use `eventlog_socket_init`,
+/// `eventlog_socket_attach_rts_config`, `eventlog_socket_signal_ghc_rts_ready`,
+/// and the GHC RTS API directly. For details, see the code for this function.
 ///
 /// @par Examples
 /// @parblock
-/// See `eventlog_socket_init`.
+/// The following function initialises eventlog socket from a C main function.
+/// @code{.c}
+/// #include <Rts.h>
+/// #include <eventlog_socket.h>
+///
+/// // Define the eventlog Unix domain socket path.
+/// #define MY_EVENTLOG_SOCKET "/tmp/my_eventlog.socket"
+///
+/// // Get the closure for the Haskell main.
+/// extern StgClosure ZCMain_main_closure;
+///
+/// int main(int argc, char* argv[]) {
+///
+///   // Create a GHC RTS configuration object.
+///   RtsConfig rts_config = {0};
+///   memcpy(&rts_config, &defaultRtsConfig, sizeof(RtsConfig));
+///   rts_config.rts_opts_enabled = RtsOptsAll; // Enable all RTS options.
+///   rts_config.rts_opts = "-l";               // Enable binary eventlog.
+///
+///   // Create the eventlog-socket address
+///   const EventlogSocketAddr addr = {
+///     .esa_tag = EVENTLOG_SOCKET_UNIX,
+///     .esa_unix_addr = {
+///       .esa_unix_path = MY_EVENTLOG_SOCKET,
+///   }};
+///
+///   // Create the eventlog-socket options
+///   EventlogSocketOpts opts = {0};
+///   eventlog_socket_opts_init(&opts);
+///   opts->eso_wait = true; // Ask eventlog-socket to wait for a connection.
+///
+///   // Evaluate the wrapped Haskell main closure.
+///   return eventlog_socket_wrap_hs_main(argc, argv, rts_config,
+///                                       &ZCMain_main_closure, &addr, &opts);
+/// }
+/// @endcode
 /// @endparblock
 void eventlog_socket_wrap_hs_main(
     int argc, char *argv[], RtsConfig rts_config, StgClosure *main_closure,
