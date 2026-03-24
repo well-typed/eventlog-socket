@@ -209,3 +209,30 @@ jobs:
 
       - name: 🎗️ Lint with Fourmolu
         run: ./scripts/lint-fourmolu.sh
+
+  #############################################################################
+  # Lint with nm
+  #############################################################################
+
+  lint-nm:
+    name: "Lint with nm"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: 🗄️ Read dev-dependencies
+        run: cat "./scripts/dev-dependencies.txt" >> "$GITHUB_OUTPUT"
+        id: dev-dependencies
+
+      - name: 🛠️ Install Haskell
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{ steps.dev-dependencies.outputs.ghc }}
+          cabal-version: ${{ steps.dev-dependencies.outputs.cabal }}
+        id: setup-haskell
+
+      - name: 🎗️ Lint with nm
+        run: ./scripts/lint-nm.sh
