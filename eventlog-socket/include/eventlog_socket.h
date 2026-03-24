@@ -365,7 +365,7 @@ eventlog_socket_init(const EventlogSocketAddr *eventlog_socket_addr,
 /// main closure.
 ///
 /// If your needs are more fine-grained, you can use `eventlog_socket_init`,
-/// `SocketEventLogWriter`, `eventlog_socket_signal_ghc_rts_ready`, and the
+/// `EventlogSocketWriter`, `eventlog_socket_signal_ghc_rts_ready`, and the
 /// GHC RTS API directly. For details, see the code for this function.
 ///
 /// @par Examples
@@ -417,7 +417,7 @@ void eventlog_socket_wrap_hs_main(
 /// @note You do not need to use this object if you're starting eventlog
 /// socket using the Haskell API, via `eventlog_socket_start`, or via
 /// `eventlog_socket_wrap_hs_main`.
-extern const EventLogWriter SocketEventLogWriter;
+extern const EventLogWriter EventLogSocketWriter;
 
 /// @brief Signal that the GHC RTS is ready.
 ///

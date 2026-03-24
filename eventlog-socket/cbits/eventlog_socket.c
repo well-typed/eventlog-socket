@@ -82,12 +82,12 @@ static WriteBuffer g_write_buffer = {
 ///    allocates resources that are used throughout the lifetime of the
 ///    process and it should not be called twice.
 ///
-/// 2. Whether or not `SocketEventLogWriter` was attached in a C main.
+/// 2. Whether or not `EventlogSocketWriter` was attached in a C main.
 ///    If it was, then we don't want to restart event logging when the first
 ///    client connects, because that would drop all buffered events.
 ///
 ///    **NOTE**: While our advertised purpose for a C main is the ability to
-///    attach an `SocketEventLogWriter`, it's possible to write a C main that
+///    attach an `EventlogSocketWriter`, it's possible to write a C main that
 ///    only calls `eventlog_socket_init` and
 ///    `eventlog_socket_signal_ghc_rts_ready`, which behaves exactly like
 ///    `eventlog_socket_start`.
@@ -96,14 +96,14 @@ static WriteBuffer g_write_buffer = {
 ///
 /// 1. `EVENTLOG_SOCKET_SIG_INITIALIZED` is set when `eventlog_socket_init` is
 /// called.
-/// 2. `EVENTLOG_SOCKET_SIG_ATTACHED` is set when `SocketEventLogWriter` member
+/// 2. `EVENTLOG_SOCKET_SIG_ATTACHED` is set when `EventlogSocketWriter` member
 /// @c initEventLogWriter is called.
 /// 3. `EVENTLOG_SOCKET_SIG_RTS_READY` is set when
 /// `eventlog_socket_signal_ghc_rts_ready` is called.
 /// 4. `EVENTLOG_SOCKET_SIG_HAD_FIRST_CONNECTION` is set when the first client
 /// connects to the eventlog socket.
 ///
-/// If `SocketEventLogWriter` was attached in a C main, then these signals are
+/// If `EventlogSocketWriter` was attached in a C main, then these signals are
 /// received in order (1, 2, 3, 4).
 ///
 /// If `eventlog_socket_start` is used, then these signals are received in
@@ -227,7 +227,7 @@ static void writer_stop(void) {
   // RTS shutdown path must hold mutex so updates to client_fd/wt stay ordered
   // with the worker thread noticing the disconnect.
   pthread_mutex_lock(&g_mutex);
-  // Mark SocketEventLogWriter as detached.
+  // Mark EventlogSocketWriter as detached.
   g_init_state &= ~EVENTLOG_SOCKET_SIG_ATTACHED;
 
   // Close the connection.
@@ -243,7 +243,7 @@ static void writer_stop(void) {
 ///
 /// @warning It is only safe to pass this value to the GHC RTS *after*
 /// `eventlog_socket_init` or `eventlog_socket_start` is called.
-const EventLogWriter SocketEventLogWriter = {.initEventLogWriter = writer_init,
+const EventLogWriter EventLogSocketWriter = {.initEventLogWriter = writer_init,
                                              .writeEventLog = writer_write,
                                              .flushEventLog = writer_flush,
                                              .stopEventLogWriter = writer_stop};
@@ -365,8 +365,8 @@ void eventlog_socket_wrap_hs_main(
   eventlog_socket_init(eventlog_socket_addr, eventlog_socket_opts);
 
   // Set the eventlog socket writer.
-  DEBUG_DEBUG("%s", "Attach the SocketEventLogWriter.");
-  rts_config.eventlog_writer = &SocketEventLogWriter;
+  DEBUG_DEBUG("%s", "Attach the EventlogSocketWriter.");
+  rts_config.eventlog_writer = &EventLogSocketWriter;
 
   // Initialize the GHC RTS.
   DEBUG_DEBUG("%s", "Initialise the GHC RTS.");
@@ -415,18 +415,6 @@ void eventlog_socket_wrap_hs_main(
 
   // Shut down the GHC RTS and exit.
   shutdownHaskellAndExit(exit_status, 0 /* !fastExit */);
-}
-
-/// @brief Show an `EventLogStatus`.
-const char *showEventLogStatus(enum EventLogStatus status) {
-  switch (status) {
-  case EVENTLOG_NOT_SUPPORTED:
-    return "EVENTLOG_NOT_SUPPORTED";
-  case EVENTLOG_NOT_CONFIGURED:
-    return "EVENTLOG_NOT_CONFIGURED";
-  case EVENTLOG_RUNNING:
-    return "EVENTLOG_RUNNING";
-  }
 }
 
 /* PUBLIC - see documentation in eventlog_socket.h */

@@ -261,7 +261,7 @@ static void es_worker_step_listen(void) {
   const bool is_rts_ready = init_state & EVENTLOG_SOCKET_SIG_RTS_READY;
   DEBUG_TRACE("is_rts_ready: %s", is_rts_ready ? "true" : "false");
 
-  // Whether SocketEventLogWriter is currently attached.
+  // Whether EventlogSocketWriter is currently attached.
   const bool is_attached = init_state & EVENTLOG_SOCKET_SIG_ATTACHED;
   DEBUG_TRACE("is_attached: %s", is_attached ? "true" : "false");
 
@@ -278,7 +278,7 @@ static void es_worker_step_listen(void) {
   const bool should_stop =
       // ...some eventlog writer is currently running and either:
       is_running && (
-                        // ...(1) it's not SocketEventLogWriter, or...
+                        // ...(1) it's not EventlogSocketWriter, or...
                         !is_attached ||
                         // ...(2) we've already had our first connection.
                         //
@@ -309,11 +309,11 @@ static void es_worker_step_listen(void) {
   pthread_cond_broadcast(g_worker_state.new_connection_cond_ptr);
   pthread_mutex_unlock(g_worker_state.mutex_ptr);
 
-  // We start event logging with SocketEventLogWriter.
+  // We start event logging with EventlogSocketWriter.
   if (should_start) {
     DEBUG_DEBUG("%s", "Starting new event logger.");
     // TODO: Add retry loop.
-    const bool is_started = startEventLogging(&SocketEventLogWriter);
+    const bool is_started = startEventLogging(&EventLogSocketWriter);
     DEBUG_TRACE("is_started: %s", is_started ? "true" : "false");
   }
 

@@ -187,7 +187,7 @@ struct EventlogSocketControlNamespace {
 /// See `eventlog_socket_control_namespace`.
 ///
 /// This is initialised with the builtin namespace and the builtin commands.
-EventlogSocketControlNamespace g_control_namespace_registry = {
+static EventlogSocketControlNamespace g_control_namespace_registry = {
     .namespace = BUILTIN_NAMESPACE,
     .namespace_len = strlen(BUILTIN_NAMESPACE),
     .next = NULL,
@@ -216,7 +216,8 @@ EventlogSocketControlNamespace g_control_namespace_registry = {
 /// @brief The mutex that guards the global namespace registry.
 ///
 /// See `g_control_namespace_registry`.
-pthread_mutex_t g_control_namespace_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_control_namespace_registry_mutex =
+    PTHREAD_MUTEX_INITIALIZER;
 
 /******************************************************************************
  * Control Thread Variables and Entry-Point
@@ -290,7 +291,7 @@ HIDDEN EventlogSocketStatus es_control_start(const ControlState control_state) {
 /// name.
 ///
 /// @pre namespace_entry != NULL
-bool es_control_namespace_store_match(
+static bool es_control_namespace_store_match(
     const EventlogSocketControlNamespace *const namespace_entry,
     const size_t namespace_len, const char namespace[namespace_len]) {
   // if namespace_entry == NULL, then...
@@ -506,7 +507,7 @@ HIDDEN EventlogSocketStatus es_control_status(void) {
 /// `EVENTLOG_SOCKET_OK`. If the namespace was found, then @p namespace_out
 /// contains a stable pointer to the namespace that should not be freed. If the
 /// namespace was not found and @p namespace_out contains @c NULL.
-EventlogSocketStatus es_control_namespace_store_resolve(
+static EventlogSocketStatus es_control_namespace_store_resolve(
     const size_t namespace_len, const char namespace[namespace_len],
     EventlogSocketControlNamespace **namespace_out) {
 
@@ -618,7 +619,7 @@ typedef enum ControlCommandParserStateTag {
 
 /// @brief Show a value of type `ControlCommandParserStateTag` as a
 /// string.
-const char *
+static const char *
 es_show_ControlCommandParserStateTag(ControlCommandParserStateTag tag) {
   switch (tag) {
   case CONTROL_COMMAND_PARSER_STATE_MAGIC:
@@ -686,7 +687,7 @@ typedef struct {
 } ControlCommandParserState;
 
 /// @brief The global command parser state.
-ControlCommandParserState g_control_command_parser_state = {
+static ControlCommandParserState g_control_command_parser_state = {
     .tag = CONTROL_COMMAND_PARSER_STATE_MAGIC,
     .header_pos = 0,
 };

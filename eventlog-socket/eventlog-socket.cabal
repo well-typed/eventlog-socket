@@ -103,7 +103,7 @@ library
     cbits/eventlog_socket/write_buffer.c
     cbits/eventlog_socket.c
 
-  include-dirs:       include
+  include-dirs:       cbits include
   install-includes:   eventlog_socket.h
 
   if flag(debug)

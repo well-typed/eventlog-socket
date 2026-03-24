@@ -8,7 +8,7 @@
 #define EVENTLOG_SOCKET_SIG_INITIALIZED 1
 
 /// @brief Bit flag for `g_init_state` that tracks whether or not the function
-/// @c SocketEventLogWriter->initEventLogWriter has been called.
+/// @c EventlogSocketWriter->initEventLogWriter has been called.
 #define EVENTLOG_SOCKET_SIG_ATTACHED 2
 
 /// @brief Bit flag for `g_init_state` that tracks whether or not the function
