@@ -81,6 +81,7 @@ import Foreign.Marshal.Utils (fromBool, toBool, with)
 import GHC.Enum (toEnumError)
 import System.IO.Unsafe (unsafePerformIO)
 
+#include <eventlog_socket/macros.h>
 #include <eventlog_socket.h>
 #include <string.h>
 
@@ -897,7 +898,7 @@ foreign import capi safe "eventlog_socket.h eventlog_socket_opts_free"
 --------------------------------------------------------------------------------
 -- eventlog_socket_start
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_start"
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_start"
     eventlog_socket_start ::
         Ptr EventlogSocketStatus ->
         Ptr EventlogSocketAddr ->
@@ -905,7 +906,7 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_start"
         IO ()
 
 #{def
-  void _wrap_eventlog_socket_start(
+  HIDDEN void eventlog_socket_wrap_start(
     EventlogSocketStatus *eventlog_socket_status,
     EventlogSocketAddr *eventlog_socket_addr,
     EventlogSocketOpts *eventlog_socket_opts
@@ -922,7 +923,7 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_start"
 --------------------------------------------------------------------------------
 -- eventlog_socket_from_env
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_from_env"
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_from_env"
     eventlog_socket_from_env ::
         Ptr EventlogSocketStatus ->
         Ptr EventlogSocketAddr ->
@@ -930,7 +931,7 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_from_e
         IO ()
 
 #{def
-  void _wrap_eventlog_socket_from_env(
+  HIDDEN void eventlog_socket_wrap_from_env(
     EventlogSocketStatus *eventlog_socket_status,
     EventlogSocketAddr *eventlog_socket_addr,
     EventlogSocketOpts *eventlog_socket_opts
@@ -953,13 +954,13 @@ foreign import capi safe "eventlog_socket.h eventlog_socket_wait"
 --------------------------------------------------------------------------------
 -- eventlog_socket_strerror
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_strerror"
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_strerror"
     eventlog_socket_strerror ::
         Ptr EventlogSocketStatus ->
         IO CString
 
 #{def
-  char *_wrap_eventlog_socket_strerror(
+  HIDDEN char *eventlog_socket_wrap_strerror(
     EventlogSocketStatus *eventlog_socket_status
   )
   {
@@ -970,13 +971,13 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_strerr
 --------------------------------------------------------------------------------
 -- eventlog_socket_worker_status
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_worker_status"
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_worker_status"
     eventlog_socket_worker_status ::
         Ptr EventlogSocketStatus ->
         IO ()
 
 #{def
-  void _wrap_eventlog_socket_worker_status(
+  HIDDEN void eventlog_socket_wrap_worker_status(
     EventlogSocketStatus *eventlog_socket_status_out
   )
   {
@@ -988,13 +989,13 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_worker
 --------------------------------------------------------------------------------
 -- eventlog_socket_control_status
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_control_status"
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_control_status"
     eventlog_socket_control_status ::
         Ptr EventlogSocketStatus ->
         IO ()
 
 #{def
-  void _wrap_eventlog_socket_control_status(
+  HIDDEN void eventlog_socket_wrap_control_status(
     EventlogSocketStatus *eventlog_socket_status_out
   )
   {
@@ -1017,7 +1018,7 @@ foreign import ccall safe "eventlog_socket.h eventlog_socket_control_strnamespac
 --------------------------------------------------------------------------------
 -- eventlog_socket_control_register_namespace
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_control_register_namespace"
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_control_register_namespace"
     eventlog_socket_control_register_namespace ::
         Ptr EventlogSocketStatus ->
         ( #{type uint8_t} ) ->
@@ -1026,7 +1027,7 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_contro
         IO ()
 
 #{def
-  void _wrap_eventlog_socket_control_register_namespace(
+  HIDDEN void eventlog_socket_wrap_control_register_namespace(
     EventlogSocketStatus *eventlog_socket_status,
     uint8_t eventlog_socket_namespace_len,
     char eventlog_socket_namespace[eventlog_socket_namespace_len],
@@ -1044,7 +1045,7 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_contro
 --------------------------------------------------------------------------------
 -- eventlog_socket_control_register_command
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h _wrap_eventlog_socket_control_register_command"
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_control_register_command"
     eventlog_socket_control_register_command ::
         Ptr EventlogSocketStatus ->
         Ptr Namespace ->
@@ -1059,7 +1060,7 @@ foreign import ccall "wrapper"
         IO (FunPtr (Ptr Namespace -> CommandId -> Ptr a -> IO ()))
 
 #{def
-  void _wrap_eventlog_socket_control_register_command(
+  HIDDEN void eventlog_socket_wrap_control_register_command(
     EventlogSocketStatus *eventlog_socket_status,
     EventlogSocketControlNamespace *eventlog_socket_namespace,
     EventlogSocketControlCommandId eventlog_socket_command_id,
