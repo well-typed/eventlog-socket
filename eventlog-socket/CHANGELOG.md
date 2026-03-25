@@ -1,8 +1,8 @@
 # Revision history for eventlog-socket
 
-## 0.1.1.1 -- 2026-03-23
+## 0.1.2.0 -- 2026-03-25
 
-**Warning**: The C API exposed from this version contains breaking changes over the C API exposed from version 0.1.1.0. This is justified by the fact that `eventlog-socket-0.1.1.0` is deprecated and not known to be in use.
+**Warning**: The C API exposed from this version contains breaking changes over the C API exposed from version 0.1.1.0. This is justified by the fact that the C API exposed from version 0.1.1.0 is broken and that version is deprecated and not known to be in use.
 
 - **BREAKING**: Change `eventlog_socket_wrap_hs_main` to accept `EventlogSocketAddr` and `EventlogSocketOpts` and call `eventlog_socket_init`.
 - **BREAKING**: Remove `eventlog_socket_attach_rts_config`.
