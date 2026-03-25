@@ -305,7 +305,7 @@ instance Exception EventlogSocketAddrError where
                 <> " was not set."
 
 {- |
-Test the current status of the worker thread. If it has failed, throw an `IOException`.
+Test the current status of the worker thread. If it has failed, throw an `Control.Exception.IOException`.
 
 @since 0.1.2.0
 -}
@@ -314,7 +314,7 @@ testWorkerStatus =
     throwEventlogSocketStatusAsIOException =<< workerStatus
 
 {- |
-Test the current status of the control thread. If it has failed, throw an `IOException`.
+Test the current status of the control thread. If it has failed, throw an `Control.Exception.IOException`.
 
 @since 0.1.2.0
 -}
@@ -347,7 +347,7 @@ controlStatus =
 {- |
 Internal helper.
 
-Throw an `EventlogSocketStatus` as an `IOException`.
+Throw an t`EventlogSocketStatus` as an `Control.Exception.IOException`.
 -}
 throwEventlogSocketStatusAsIOException :: EventlogSocketStatus -> IO ()
 throwEventlogSocketStatusAsIOException ess =
@@ -357,7 +357,7 @@ throwEventlogSocketStatusAsIOException ess =
 {- |
 Internal helper.
 
-Throw an `EventlogSocketStatus` as an `IOException`.
+Throw an t`EventlogSocketStatus` as an `Control.Exception.IOException`.
 
 __Warning__: This function _still_ throws an error if the status code is `EVENTLOG_SOCKET_OK`.
 -}
