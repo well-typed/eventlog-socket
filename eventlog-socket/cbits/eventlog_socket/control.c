@@ -7,7 +7,7 @@
 ///            and `eventlog_socket_control_register_command`.
 /// @author    Wen Kokke
 /// @author    Matthew Pickering
-/// @version   0.1.1.1
+/// @version   0.1.2.0
 /// @date      2025-2026
 /// @copyright BSD-3-Clause License.
 ///

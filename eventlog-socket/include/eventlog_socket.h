@@ -33,7 +33,7 @@
 
 /// @brief The status codes for `EventlogSocketStatus`.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef enum EventlogSocketStatusCode {
   /// @brief The operation completed successfully.
   EVENTLOG_SOCKET_OK = 0,
@@ -66,7 +66,7 @@ typedef enum EventlogSocketStatusCode {
 
 /// @brief The return status for the functions in the @c eventlog-socket C API.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef struct EventlogSocketStatus {
   /// @brief The eventlog socket error code.
   const EventlogSocketStatusCode ess_status_code;
@@ -83,7 +83,7 @@ typedef struct EventlogSocketStatus {
 /// @return On error, @c NULL is returned and @c errno is set to indicate the
 /// error.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 char *eventlog_socket_strerror(EventlogSocketStatus status);
 
 /******************************************************************************
@@ -94,7 +94,7 @@ char *eventlog_socket_strerror(EventlogSocketStatus status);
 ///
 /// Used as the tag for the tagged union `EventlogSocketAddr`.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef enum EventlogSocketTag {
   /// @brief A Unix domain socket address.
   EVENTLOG_SOCKET_UNIX,
@@ -104,7 +104,7 @@ typedef enum EventlogSocketTag {
 
 /// @brief The address for a Unix domain socket.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef struct EventlogSocketUnixAddr {
   /// The path to the Unix domain socket.
   char *esa_unix_path;
@@ -112,7 +112,7 @@ typedef struct EventlogSocketUnixAddr {
 
 /// @brief The address for a TCP/IPv4 socket.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef struct EventlogSocketInetAddr {
   /// The host name.
   char *esa_inet_host;
@@ -122,7 +122,7 @@ typedef struct EventlogSocketInetAddr {
 
 /// @brief The options for an eventlog socket.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef struct EventlogSocketOpts {
   /// @brief Whether or not to wait for a client to connect.
   bool eso_wait;
@@ -136,7 +136,7 @@ typedef struct EventlogSocketOpts {
 
 /// @brief The address for an eventlog socket.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef struct EventlogSocketAddr {
   /// @brief The address family.
   ///
@@ -156,46 +156,46 @@ typedef struct EventlogSocketAddr {
 /// @brief Free any memory allocated by the members of the `EventlogSocketAddr`
 /// value.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 void eventlog_socket_addr_free(EventlogSocketAddr *eventlog_socket);
 
 /// @brief Initialise the `EventlogSocketOpts` object with the default options.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 void eventlog_socket_opts_init(EventlogSocketOpts *eventlog_socket_opts);
 
 /// @brief Free any memory allocated by the members of the `EventlogSocketOpts`
 /// value.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 void eventlog_socket_opts_free(EventlogSocketOpts *opts);
 
 /// @brief
 /// The name of the environment variable used by `eventlog_socket_from_env`
 /// to determine the path to the Unix domain socket.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 #define EVENTLOG_SOCKET_ENV_UNIX_PATH "GHC_EVENTLOG_UNIX_PATH"
 
 /// @brief
 /// The name of the environment variable used by `eventlog_socket_from_env`
 /// to determine the host name for a TCP/IPv4 socket.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 #define EVENTLOG_SOCKET_ENV_INET_HOST "GHC_EVENTLOG_INET_HOST"
 
 /// @brief
 /// The name of the environment variable used by `eventlog_socket_from_env`
 /// to determine the port number for a TCP/IPv4 socket.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 #define EVENTLOG_SOCKET_ENV_INET_PORT "GHC_EVENTLOG_INET_PORT"
 
 /// @brief
 /// The name of the environment variable used by `eventlog_socket_from_env`
 /// to determine whether or not to wait.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 #define EVENTLOG_SOCKET_ENV_WAIT "GHC_EVENTLOG_WAIT"
 
 /// @brief Start the eventlog socket writer.
@@ -211,7 +211,7 @@ void eventlog_socket_opts_free(EventlogSocketOpts *opts);
 ///
 /// @pre The argument `eventlog_socket_addr` is nonnull.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 EventlogSocketStatus
 eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
                       const EventlogSocketOpts *eventlog_socket_opts);
@@ -244,7 +244,7 @@ eventlog_socket_start(const EventlogSocketAddr *eventlog_socket_addr,
 /// @return If any other status is returned, the contents of
 /// @p eventlog_socket_addr_out and @p eventlog_socket_opts_out are unchanged.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 ///
 /// @par Examples
 /// @parblock
@@ -333,7 +333,7 @@ eventlog_socket_from_env(EventlogSocketAddr *eventlog_socket_addr_out,
 ///
 /// @return See `EventlogSocketStatus`.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 ///
 /// @par Errors
 /// @parblock
@@ -441,7 +441,7 @@ extern const EventLogWriter EventLogSocketWriter;
 /// `EPERM`.
 /// @endparblock
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void);
 
 /// @brief Wait for a client to connect to the eventlog socket.
@@ -464,17 +464,17 @@ EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void);
 /// `EPERM`.
 /// @endparblock
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 EventlogSocketStatus eventlog_socket_wait(void);
 
 /// @brief Read the current status of the worker thread.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 EventlogSocketStatus eventlog_socket_worker_status(void);
 
 /// @brief Read the current status of the control thread.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 EventlogSocketStatus eventlog_socket_control_status(void);
 
 /******************************************************************************
@@ -484,21 +484,21 @@ EventlogSocketStatus eventlog_socket_control_status(void);
 /// @brief The version of the eventlog-socket control command protocol
 /// implemented by this version of the library.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 #define EVENTLOG_SOCKET_CONTROL_PROTOCOL_VERSION 0
 
 /// @brief A control command namespace.
 ///
 /// See `eventlog_socket_control_register_namespace`.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef struct EventlogSocketControlNamespace EventlogSocketControlNamespace;
 
 /// @brief A control command ID.
 ///
 /// Individual commands are identified by numbers (0-255).
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef uint8_t EventlogSocketControlCommandId;
 
 /// @brief A control command handler.
@@ -507,7 +507,7 @@ typedef uint8_t EventlogSocketControlCommandId;
 /// received on the eventlog socket. The `command_data` parameter will contain
 /// the pointer provided to `eventlog_socket_control_register_command`.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 typedef void EventlogSocketControlCommandHandler(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *command_data);
@@ -522,7 +522,7 @@ typedef void EventlogSocketControlCommandHandler(
 /// @return If the binary was compiled without control support, this function
 /// returns @c NULL.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 const char *
 eventlog_socket_control_strnamespace(EventlogSocketControlNamespace *namespace);
 
@@ -542,7 +542,7 @@ eventlog_socket_control_strnamespace(EventlogSocketControlNamespace *namespace);
 /// @return If the binary was compiled without control support, this function
 /// returns a status with code @c EVENTLOG_SOCKET_ERR_CTL_NOSUPPORT.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 EventlogSocketStatus eventlog_socket_control_register_namespace(
     uint8_t namespace_len, const char namespace[namespace_len + 1],
     EventlogSocketControlNamespace **namespace_out);
@@ -569,7 +569,7 @@ EventlogSocketStatus eventlog_socket_control_register_namespace(
 ///
 /// @note The @p command_handler should not use the functions from this header.
 ///
-/// @since 0.1.1.1
+/// @since 0.1.2.0
 EventlogSocketStatus eventlog_socket_control_register_command(
     EventlogSocketControlNamespace *namespace,
     EventlogSocketControlCommandId command_id,

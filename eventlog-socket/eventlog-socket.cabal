@@ -1,6 +1,6 @@
 cabal-version:      2.2
 name:               eventlog-socket
-version:            0.1.1.1
+version:            0.1.2.0
 synopsis:           Stream GHC eventlog events to external processes.
 description:
   The @eventlog-socket@ package lets you stream the GHC eventlog over a socket in realtime.
@@ -53,7 +53,7 @@ source-repository head
 source-repository this
   type:     git
   location: https://github.com/well-typed/eventlog-socket.git
-  tag:      eventlog-socket-0.1.1.1
+  tag:      eventlog-socket-0.1.2.0
   subdir:   eventlog-socket
 
 flag debug

@@ -92,7 +92,7 @@ import System.IO.Unsafe (unsafePerformIO)
 {- |
 Start an @eventlog-socket@ writer using the given socket address and options.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 startWith ::
     EventlogSocketAddr ->
@@ -115,7 +115,7 @@ startWith esa eso =
 {- |
 A type representing the supported eventlog socket modes.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 data
     {-# CTYPE "eventlog_socket.h" "EventlogSocketAddr" #-}
@@ -161,7 +161,7 @@ Whether or not to wait for a client to connect.
 
     See the documentation for @SO_LINGER@ in @socket.h@.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 data
     {-# CTYPE "eventlog_socket.h" "EventlogSocketOpts" #-}
@@ -177,7 +177,7 @@ The default socket options for @eventlog-socket@.
 
 See t`EventlogSocketOpts`.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 defaultEventlogSocketOpts :: EventlogSocketOpts
 defaultEventlogSocketOpts =
@@ -195,7 +195,7 @@ defaultEventlogSocketOpts =
 Read the eventlog socket configuration from the environment.
 If this succeeds, start an @eventlog-socket@ writer with that configuration.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 startFromEnv :: IO ()
 startFromEnv = fromEnv >>= traverse_ (uncurry startWith)
@@ -203,7 +203,7 @@ startFromEnv = fromEnv >>= traverse_ (uncurry startWith)
 {- |
 Read the eventlog socket configuration from the environment.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 fromEnv ::
     IO (Maybe (EventlogSocketAddr, EventlogSocketOpts))
@@ -268,7 +268,7 @@ eventlogSocketEnvWait = #{const_str EVENTLOG_SOCKET_ENV_WAIT}
 {- |
 The type of exceptions thrown by `fromEnv`.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 data EventlogSocketAddrError
     = EventlogSocketAddrUnixPathTooLong FilePath
@@ -307,7 +307,7 @@ instance Exception EventlogSocketAddrError where
 {- |
 Test the current status of the worker thread. If it has failed, throw an `IOException`.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 testWorkerStatus :: IO ()
 testWorkerStatus =
@@ -316,7 +316,7 @@ testWorkerStatus =
 {- |
 Test the current status of the control thread. If it has failed, throw an `IOException`.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 testControlStatus :: IO ()
 testControlStatus =
@@ -377,7 +377,7 @@ The type of namespaces.
 
 Namespaces are opaque and can only be obtained using `registerNamespace`.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 newtype
     {-# CTYPE "eventlog_socket.h" "EventlogSocketControlNamespace" #-}
@@ -386,7 +386,7 @@ newtype
 {- |
 Get the `String` name for the given t`Namespace`.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 namespaceName :: Namespace -> IO String
 namespaceName (Namespace namespacePtr) = do
@@ -397,7 +397,7 @@ The type of command IDs.
 
 Command IDs must be non-zero integers between 1 and 255.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 newtype
     {-# CTYPE "eventlog_socket.h" "EventlogSocketControlCommandId" #-}
@@ -411,7 +411,7 @@ The command handler is evaluated once each time the control socket receives a re
 
 __Warning__: The command handler /must not/ call back into the @eventlog-socket@ API.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 type CommandHandler = IO ()
 
@@ -428,7 +428,7 @@ If the binary was built without support for control commands, this function thro
 
 __Warning__: Namespaces cannot be unregistered and will be kept in memory until program exit.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 registerNamespace ::
     -- | The name for the namespace.
@@ -485,7 +485,7 @@ If the binary was built without support for control commands, this function thro
 
 __Warning__: Commands cannot be unregistered and will be kept in memory until program exit.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 registerCommand ::
     -- | The namespace.
@@ -548,7 +548,7 @@ registerCommand (Namespace namespacePtr) commandId commandHandler = do
 {- |
 The type of exceptions thrown by `registerNamespace` and `registerCommand`.
 
-@since 0.1.1.1
+@since 0.1.2.0
 -}
 data EventlogSocketControlError
   = EventlogSocketControlNamespaceTooLong
