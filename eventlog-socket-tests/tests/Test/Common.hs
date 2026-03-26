@@ -6,7 +6,7 @@ module Test.Common (
     HasProgramInfo,
     ProgramInfo,
     ProgramHandle (..),
-    withProgram,
+    programResource,
 
     -- * Eventlog Validation
     EventlogSocketAddr (..),
@@ -66,8 +66,9 @@ module Test.Common (
     -- * Debug
     HasTestInfo,
     TestInfo,
-    testCaseFor,
-    testCaseForUnix,
+    ProgramTest,
+    programTestFor,
+    runProgramTests,
     HasLogger,
     Logger,
     withLogger,
@@ -78,7 +79,7 @@ module Test.Common (
 
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar)
-import Control.Exception (Exception (..), bracket, bracketOnError, catch, mask_, throwIO)
+import Control.Exception (Exception (..), assert, bracket, bracketOnError, catch, mask_, throwIO)
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.Binary as B
@@ -86,9 +87,12 @@ import Data.Bool (bool)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import Data.Foldable (traverse_)
+import Data.Function (on, (&))
 import qualified Data.List as L
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Machine
+import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Word (Word16, Word64)
@@ -110,7 +114,7 @@ import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (CreateProcess (..), Pid, ProcessHandle, StdStream (..), createProcess_, getPid, getProcessExitCode, proc, readProcessWithExitCode, showCommandForUser, terminateProcess, waitForProcess)
 import System.Process.Internals (ignoreSigPipe)
-import Test.Tasty (TestName, TestTree)
+import Test.Tasty (TestName, TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (Assertion, HasCallStack, assertFailure, testCase)
 import Text.Printf (printf)
 
@@ -129,7 +133,6 @@ data Program = Program
     , args :: [String]
     , rtsopts :: [String]
     , eventlogSocketBuildFlags :: [String]
-    , eventlogSocketAddr :: EventlogSocketAddr
     }
 
 type HasProgramInfo = (?programInfo :: ProgramInfo)
@@ -146,10 +149,13 @@ data ProgramHandle = ProgramHandle
     , info :: ProgramInfo
     }
 
-withProgram :: (HasLogger, HasTestInfo) => Program -> ((HasProgramInfo) => IO ()) -> IO ()
-withProgram program action =
-    bracket (start program) kill $ \ProgramHandle{..} ->
-        let ?programInfo = info in action
+type ProgramDesc = String
+
+data ProgramResource = ProgramResource
+    { programDesc :: ProgramDesc
+    , makeProgram :: IO FilePath
+    , withProgram :: (HasCallStack, HasLogger, HasTestInfo) => FilePath -> EventlogSocketAddr -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
+    }
 
 buildFlagDebug :: [String]
 #if defined(DEBUG)
@@ -168,85 +174,105 @@ buildFlagDebugVerbosity = []
 defaultBuildFlags :: [String]
 defaultBuildFlags = ["+optimise-heavily"] <> buildFlagDebug <> buildFlagDebugVerbosity
 
-start :: (HasLogger, HasTestInfo) => Program -> IO ProgramHandle
-start program = do
-    debugInfo $ "Starting program " <> program.name
-    let runner = do
-            ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
-            cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
+programResource :: (HasLogger, HasTestInfo) => Program -> ProgramResource
+programResource program = ProgramResource{..}
+  where
+    -- Shared information
+    eventlogSocketBuildFlags = program.eventlogSocketBuildFlags <> defaultBuildFlags
+    constraintArgs
+        | null eventlogSocketBuildFlags = []
+        | otherwise = ["--constraint", "eventlog-socket " <> unwords eventlogSocketBuildFlags]
+    buildDir = "dist-newstyle/" <> L.intercalate "-" ("test" : program.name : eventlogSocketBuildFlags)
 
-            -- Build program
-            debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
-            let eventlogSocketBuildFlags = program.eventlogSocketBuildFlags <> defaultBuildFlags
-            let constraintArgs
-                    | null eventlogSocketBuildFlags = []
-                    | otherwise = ["--constraint", "eventlog-socket " <> unwords eventlogSocketBuildFlags]
-            let buildDir = "dist-newstyle/" <> L.intercalate "-" ("test-haskell" : eventlogSocketBuildFlags)
-            let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", buildDir] <> constraintArgs
-            debugInfo (showCommandForUser cabal buildArgs)
-            (buildExit, buildOut, buildErr) <- readProcessWithExitCode cabal buildArgs ""
-            when (buildExit /= ExitSuccess) $ do
-                debugFail . unlines $ ["Failed to build program", buildOut, buildErr]
-                throwIO buildExit
+    -- The program description
+    programDesc :: TestName
+    programDesc = program.name <> flagDesc
+      where
+        flagDesc
+            | null program.eventlogSocketBuildFlags = ""
+            | otherwise = "[" <> unwords program.eventlogSocketBuildFlags <> "]"
 
-            -- Find binary for program
-            debugInfo $ "Find binary for program " <> program.name
-            let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", buildDir]
-            debugInfo (showCommandForUser cabal findArgs)
-            (findExit, findOut, findErr) <- readProcessWithExitCode cabal findArgs ""
-            when (findExit /= ExitSuccess) $ do
-                debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
-                throwIO findExit
-            let maybeProgramBin = fmap fst . L.uncons . lines $ findOut
-            programBin <- flip (`maybe` pure) maybeProgramBin $ do
-                debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
-                throwIO findExit
+    -- Make the program binary
+    makeProgram :: IO FilePath
+    makeProgram = do
+        ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
+        cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
 
-            -- Start program
-            debugInfo $ "Launching program " <> program.name
-            inheritedEnv <- filter shouldInherit <$> getEnvironment
-            let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
-            let extraEnv = eventlogSocketEnv program.eventlogSocketAddr
-            debugInfo . unlines . concat $
-                [ [showCommandForUser programBin programArgs]
-                , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
-                  | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
-                  ]
-                ]
-            -- Create the process:
-            let createProcess =
-                    (proc programBin programArgs)
-                        { env = Just (inheritedEnv <> extraEnv)
-                        , std_in = CreatePipe
-                        , std_out = CreatePipe
-                        , std_err = CreatePipe
-                        }
-            (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
-            -- Create the ProgramInfo:
-            let programPidIO = getPid processHandle
-            programPid <- programPidIO
-            let info = ProgramInfo{..}
-            let ?programInfo = info
-            debugInfo $ "Launched"
-            -- Start loggers for stderr and stdout:
-            maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
-            maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
-            let kill = mask_ $ do
-                    debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
-                    sequence_ maybeKillDebugOut
-                    debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
-                    sequence_ maybeKillDebugErr
-                    debugInfo $ "Cleaning up process for " <> program.name <> "."
-                    exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
-                    debugInfo $ "Process was killed with exit code " <> show exitCode
-                    pure ()
-            let wait = do
-                    debugInfo $ "Waiting for " <> program.name <> " to finish."
-                    bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
-                        when (exitCode /= ExitSuccess) . assertFailure $
-                            "Program " <> program.name <> " failed with exit code " <> show exitCode
-            pure ProgramHandle{..}
-    bracketOnError runner kill $ pure
+        -- Build program
+        debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
+        let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", buildDir] <> constraintArgs
+        debugInfo (showCommandForUser cabal buildArgs)
+        (buildExit, buildOut, buildErr) <- readProcessWithExitCode cabal buildArgs ""
+        when (buildExit /= ExitSuccess) $ do
+            debugFail . unlines $ ["Failed to build program", buildOut, buildErr]
+            throwIO buildExit
+
+        -- Find binary for program
+        debugInfo $ "Find binary for program " <> program.name
+        let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", buildDir]
+        debugInfo (showCommandForUser cabal findArgs)
+        (findExit, findOut, findErr) <- readProcessWithExitCode cabal findArgs ""
+        when (findExit /= ExitSuccess) $ do
+            debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
+            throwIO findExit
+        let maybeProgramBin = fmap fst . L.uncons . lines $ findOut
+        flip (`maybe` pure) maybeProgramBin $ do
+            debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
+            throwIO findExit
+
+    -- Fork the program binary
+    forkProgram :: FilePath -> EventlogSocketAddr -> IO ProgramHandle
+    forkProgram programBin eventlogSocketAddr = do
+        -- Start program
+        debugInfo $ "Launching program " <> program.name
+        inheritedEnv <- filter shouldInherit <$> getEnvironment
+        let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
+        let extraEnv = eventlogSocketEnv eventlogSocketAddr
+        debugInfo . unlines . concat $
+            [ [showCommandForUser programBin programArgs]
+            , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
+              | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
+              ]
+            ]
+        -- Create the process:
+        let createProcess =
+                (proc programBin programArgs)
+                    { env = Just (inheritedEnv <> extraEnv)
+                    , std_in = CreatePipe
+                    , std_out = CreatePipe
+                    , std_err = CreatePipe
+                    }
+        (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
+        -- Create the ProgramInfo:
+        let programPidIO = getPid processHandle
+        programPid <- programPidIO
+        let info = ProgramInfo{..}
+        let ?programInfo = info
+        debugInfo $ "Launched"
+        -- Start loggers for stderr and stdout:
+        maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
+        maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
+        let kill = mask_ $ do
+                debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
+                sequence_ maybeKillDebugOut
+                debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+                sequence_ maybeKillDebugErr
+                debugInfo $ "Cleaning up process for " <> program.name <> "."
+                exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
+                debugInfo $ "Process was killed with exit code " <> show exitCode
+                pure ()
+        let wait = do
+                debugInfo $ "Waiting for " <> program.name <> " to finish."
+                bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
+                    when (exitCode /= ExitSuccess) . assertFailure $
+                        "Program " <> program.name <> " failed with exit code " <> show exitCode
+        pure ProgramHandle{..}
+
+    -- Run a test with a program
+    withProgram :: FilePath -> EventlogSocketAddr -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
+    withProgram programBin eventlogSocketAddr action =
+        bracket (forkProgram programBin eventlogSocketAddr) kill $ \ProgramHandle{..} ->
+            let ?programInfo = info in action
 
 {- |
 Kill the process harder than `terminateProcess`.
@@ -905,47 +931,94 @@ data TestInfo = TestInfo
     { testName :: TestName
     }
 
+data ProgramTest = ProgramTest
+    { programDesc :: ProgramDesc
+    , makeProgram :: IO FilePath
+    , testProgram :: IO FilePath -> TestTree
+    }
+
+runProgramTests :: [ProgramTest] -> [TestTree]
+runProgramTests = fmap toTestGroup . groupByDesc
+  where
+    groupByDesc :: [ProgramTest] -> [NonEmpty ProgramTest]
+    groupByDesc pts =
+        pts
+            & fmap (\pt -> M.singleton pt.programDesc (NE.singleton pt))
+            & foldr (M.unionWith (<>)) M.empty
+            & M.elems
+
+    toTestGroup :: NonEmpty ProgramTest -> TestTree
+    toTestGroup (pt :| pts) =
+        -- Assert that all tests have the same program description.
+        assert (all (((==) `on` (.programDesc)) pt) pts) $
+            withResource pt.makeProgram freeProgram $ \findProgram ->
+                testGroup ("With program " <> pt.programDesc <> ":") $
+                    [pt'.testProgram findProgram | pt' <- (pt : pts)]
+      where
+        freeProgram :: ProgramDesc -> IO ()
+        freeProgram _programDesc = pure ()
+
 inetPortCounter :: MVar Word16
 inetPortCounter = unsafePerformIO (newMVar 0)
 
-testCaseForUnix ::
+programTestFor ::
     (HasLogger) =>
     TestName ->
-    ((HasTestInfo) => EventlogSocketAddr -> Assertion) ->
+    Program ->
+    ((HasTestInfo, HasProgramInfo) => EventlogSocketAddr -> Assertion) ->
     EventlogSocketAddr ->
-    Maybe TestTree
-testCaseForUnix testName test eventlogSocket
-    | isEventlogSocketUnixAddr eventlogSocket = testCaseFor testName test eventlogSocket
-    | otherwise = Nothing
+    ProgramTest
+programTestFor testBaseName program eventlogAssertion = \case
+    EventlogSocketUnixAddr{..} -> do
+        -- Create test info
+        let testName = testBaseName <> "_Unix"
+        let ?testInfo = TestInfo{..}
 
-testCaseFor ::
-    (HasLogger) =>
-    TestName ->
-    ((HasTestInfo) => EventlogSocketAddr -> Assertion) ->
-    EventlogSocketAddr ->
-    Maybe TestTree
-testCaseFor testName test = \case
-    EventlogSocketUnixAddr{..} ->
-        let testName' = testName <> "_Unix"
-         in let ?testInfo = TestInfo{testName = testName'}
-             in Just $ testCase testName' $ do
-                    debug Header
+        -- Create program resource
+        let ProgramResource{..} = programResource program
+
+        -- Create program test
+        let testProgram findProgram = do
+                testCase testName $ do
+                    -- Update the eventlog socket to avoid conflicts
                     let (directory, fileName) = splitFileName esaUnixPath
                     let unixPath' = directory </> testName <> "_" <> fileName
-                    debugInfo $ "Using Unix socket: " <> unixPath'
-                    test $ EventlogSocketUnixAddr unixPath'
-                    debug Footer
-    EventlogSocketInetAddr{..} ->
-        let testName' = testName <> "_Tcp"
-         in let ?testInfo = TestInfo{testName = testName'}
-             in Just $ testCase testName' $ do
-                    debug Header
-                    esaInetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
+                    let eventlogSocketAddr = EventlogSocketUnixAddr unixPath'
+                    -- Find and start the program
+                    programBin <- findProgram
+                    withProgram programBin eventlogSocketAddr $ do
+                        -- The the eventlog assertion
+                        debug Header
+                        debugInfo $ "Using Unix socket: " <> unixPath'
+                        eventlogAssertion eventlogSocketAddr
+                        debug Footer
+        ProgramTest{..}
+    EventlogSocketInetAddr{..} -> do
+        -- Create test info
+        let testName = testBaseName <> "_Inet"
+        let ?testInfo = TestInfo{..}
+
+        -- Create program resource
+        let ProgramResource{..} = programResource program
+
+        -- Create program test
+        let testProgram findProgram = do
+                testCase testName $ do
+                    -- Update the eventlog socket to avoid conflicts
+                    esainetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
                         let nextTcpPortOffset = currentTcpPortOffset + 1
                         pure (nextTcpPortOffset, currentTcpPortOffset)
-                    let inetPort' = show (read esaInetPort + esaInetPortOffset)
-                    test $ EventlogSocketInetAddr esaInetHost inetPort'
-                    debug Footer
+                    let esaInetPortWithOffset = show (read esaInetPort + esainetPortOffset)
+                    let eventlogSocketAddr = EventlogSocketInetAddr esaInetHost esaInetPortWithOffset
+                    -- Find and start the program
+                    programBin <- findProgram
+                    withProgram programBin eventlogSocketAddr $ do
+                        -- The the eventlog assertion
+                        debug Header
+                        debugInfo $ "Using Inet socket: " <> esaInetHost <> ":" <> esaInetPortWithOffset
+                        eventlogAssertion eventlogSocketAddr
+                        debug Footer
+        ProgramTest{..}
 
 type HasLogger = (?logger :: Logger, HasCallStack)
 
