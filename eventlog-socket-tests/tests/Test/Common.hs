@@ -154,6 +154,7 @@ type ProgramDesc = String
 data ProgramResource = ProgramResource
     { programDesc :: ProgramDesc
     , makeProgram :: IO FilePath
+    , freeProgram :: FilePath -> IO ()
     , withProgram :: (HasCallStack, HasLogger, HasTestInfo) => FilePath -> EventlogSocketAddr -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
     }
 
@@ -217,6 +218,20 @@ programResource program = ProgramResource{..}
             throwIO findExit
         let maybeProgramBin = fmap fst . L.uncons . lines $ findOut
         flip (`maybe` pure) maybeProgramBin $ do
+            debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
+            throwIO findExit
+
+    -- Free the program binary
+    freeProgram :: FilePath -> IO ()
+    freeProgram _programBin = do
+        cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
+
+        -- Clean up the build directory
+        debugInfo $ "Clean build directory " <> buildDir
+        let cleanArgs = ["clean", "--builddir", buildDir]
+        debugInfo (showCommandForUser cabal cleanArgs)
+        (findExit, findOut, findErr) <- readProcessWithExitCode cabal cleanArgs ""
+        when (findExit /= ExitSuccess) $ do
             debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
             throwIO findExit
 
@@ -934,6 +949,7 @@ data TestInfo = TestInfo
 data ProgramTest = ProgramTest
     { programDesc :: ProgramDesc
     , makeProgram :: IO FilePath
+    , freeProgram :: FilePath -> IO ()
     , testProgram :: IO FilePath -> TestTree
     }
 
@@ -951,12 +967,9 @@ runProgramTests = fmap toTestGroup . groupByDesc
     toTestGroup (pt :| pts) =
         -- Assert that all tests have the same program description.
         assert (all (((==) `on` (.programDesc)) pt) pts) $
-            withResource pt.makeProgram freeProgram $ \findProgram ->
+            withResource pt.makeProgram pt.freeProgram $ \findProgram ->
                 testGroup ("With program " <> pt.programDesc <> ":") $
                     [pt'.testProgram findProgram | pt' <- (pt : pts)]
-      where
-        freeProgram :: ProgramDesc -> IO ()
-        freeProgram _programDesc = pure ()
 
 inetPortCounter :: MVar Word16
 inetPortCounter = unsafePerformIO (newMVar 0)
