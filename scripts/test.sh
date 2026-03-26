@@ -25,7 +25,7 @@ if [ -n "${DEBUG+x}" ]; then
 	tee "${ERR_FILE}" <"${ERR_FIFO}" >&2 &
 
 	# Run test suite and log debug information.
-	cabal run eventlog-socket-tests -f+debug "$@" >"${OUT_FILE}" 2>"${ERR_FIFO}"
+	cabal run eventlog-socket-tests --enable-tests -f+debug "$@" >"${OUT_FILE}" 2>"${ERR_FIFO}"
 else
-	cabal run eventlog-socket-tests -f+debug "$@" 2>"${ERR_FILE}"
+	cabal run eventlog-socket-tests --enable-tests -f+debug "$@" 2>"${ERR_FILE}"
 fi
