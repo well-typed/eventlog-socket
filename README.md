@@ -242,13 +242,3 @@ bool register_greeters(void) {
   return true;
 }
 ```
-
-## Contributing
-
-The `scripts` directory contains various scripts for contributors to this repository.
-
-The `./scripts/test.sh` script runs the test suite, which is located in [`eventlog-socket-tests`](eventlog-socket-tests/).
-
-The `./scripts/pre-commit.sh` script runs the pre-commit hooks, which contains various formatters and linters.
-
-The `./scripts/build-doxygen.sh` and `./scripts/build-haddock.sh` scripts build the documentation for the C and Haskell APIs.
