@@ -74,6 +74,7 @@ test-suite eventlog-socket-tests
     , base                     >=4.14  && <5
     , binary                   >=0.8   && <0.9
     , bytestring               >=0.11  && <0.13
+    , containers               >=0.7   && <0.8
     , eventlog-socket
     , eventlog-socket-control
     , filepath                 >=1.5   && <1.6
