@@ -16,11 +16,16 @@
 
 #include "./debug.h"
 #include "./error.h"
+#include "./hooks.h"
 #include "./init_state.h"
 #include "./poll.h"
 #include "./string.h"
 #include "./worker.h"
 #include "eventlog_socket.h"
+
+/******************************************************************************
+ * Worker Thread
+ ******************************************************************************/
 
 /// @brief The maximum length of the queue for pending connections.
 #define LISTEN_BACKLOG 5
@@ -291,7 +296,7 @@ static void es_worker_step_listen(void) {
   const bool should_stop =
       // ...some eventlog writer is currently running and either:
       is_running && (
-                        // ...(1) it's not EventlogSocketWriter, or...
+                        // ...(1) it's not EventLogSocketWriter, or...
                         !is_attached ||
                         // ...(2) we've already had our first connection.
                         //
@@ -309,6 +314,13 @@ static void es_worker_step_listen(void) {
 
   // We stop event logging.
   if (should_stop) {
+    // If the current eventlog writer *is* EventLogSocketWriter...
+    if (is_attached) {
+      // ...trigger the pre-endEventLogging hooks.
+      DEBUG_DEBUG("%s", "Trigger pre-endEventLogging hooks.");
+      EXIT_ON_ERROR(
+          es_hooks_handle_hook(EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING));
+    }
     DEBUG_DEBUG("%s", "Stopping current event logger.");
     endEventLogging();
   }
@@ -325,9 +337,18 @@ static void es_worker_step_listen(void) {
   // We start event logging with EventlogSocketWriter.
   if (should_start) {
     DEBUG_DEBUG("%s", "Starting new event logger.");
-    // TODO: Add retry loop.
-    const bool is_started = startEventLogging(&EventLogSocketWriter);
+    bool is_started = false;
+    while (!is_started) {
+      // TODO: Limit number of retries. Since this loop should not be blocking,
+      //       this requires exiting this listen step and remembering that
+      //       connection was left in an unfinished state, and retrying
+      //       startEventLogging the next time a listen step is entered.
+      is_started = startEventLogging(&EventLogSocketWriter);
+    }
     DEBUG_TRACE("is_started: %s", is_started ? "true" : "false");
+    DEBUG_DEBUG("%s", "Trigger post-startEventLogging hooks.");
+    EXIT_ON_ERROR(
+        es_hooks_handle_hook(EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING));
   }
 
   // Update *g_worker_state.init_state_ptr to record that we've seen our first
