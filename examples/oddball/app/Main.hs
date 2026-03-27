@@ -6,12 +6,20 @@ import Data.Maybe
 import Debug.Trace
 import GHC.Eventlog.Socket
 import System.Environment
+import System.IO (hPutStrLn, stderr)
 import System.Mem (performMajorGC)
 import System.Random
 
 main :: IO ()
 main = do
+    -- Register hooks:
+    registerHook HookPostStartEventLogging $
+        traceMarkerIO "HookPostStartEventLogging fired."
+    registerHook HookPreEndEventLogging $
+        hPutStrLn stderr "HookPreEndEventLogging fired."
+    -- Start eventlog-socket:
     startFromEnv
+    -- Start oddball:
     _ <- forever $ threadDelay 3000000 >> doRandom
     pure ()
 
