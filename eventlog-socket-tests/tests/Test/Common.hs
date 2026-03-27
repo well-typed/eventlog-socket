@@ -196,6 +196,9 @@ programResource program = ProgramResource{..}
     -- Make the program binary
     makeProgram :: IO FilePath
     makeProgram = do
+        let ?testInfo = TestInfo{testName = "make_" <> programDesc}
+        debug Header
+
         ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
         cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
 
@@ -217,13 +220,19 @@ programResource program = ProgramResource{..}
             debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
             throwIO findExit
         let maybeProgramBin = fmap fst . L.uncons . lines $ findOut
-        flip (`maybe` pure) maybeProgramBin $ do
+        programBin <- flip (`maybe` pure) maybeProgramBin $ do
             debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
             throwIO findExit
+
+        debug Footer
+        pure programBin
 
     -- Free the program binary
     freeProgram :: FilePath -> IO ()
     freeProgram _programBin = do
+        let ?testInfo = TestInfo{testName = "free_" <> programDesc}
+        debug Header
+
         cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
 
         -- Clean up the build directory
@@ -235,11 +244,13 @@ programResource program = ProgramResource{..}
             debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
             throwIO findExit
 
+        debug Footer
+
     -- Fork the program binary
     forkProgram :: FilePath -> EventlogSocketAddr -> IO ProgramHandle
     forkProgram programBin eventlogSocketAddr = do
         -- Start program
-        debugInfo $ "Launching program " <> program.name
+        debugInfo $ "Launching program " <> programDesc
         inheritedEnv <- filter shouldInherit <$> getEnvironment
         let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
         let extraEnv = eventlogSocketEnv eventlogSocketAddr
@@ -263,7 +274,7 @@ programResource program = ProgramResource{..}
         programPid <- programPidIO
         let info = ProgramInfo{..}
         let ?programInfo = info
-        debugInfo $ "Launched"
+        debugInfo $ "Launched " <> programDesc
         -- Start loggers for stderr and stdout:
         maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
         maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
@@ -993,6 +1004,7 @@ programTestFor testBaseName program eventlogAssertion = \case
         -- Create program test
         let testProgram findProgram = do
                 testCase testName $ do
+                    debug Header
                     -- Update the eventlog socket to avoid conflicts
                     let (directory, fileName) = splitFileName esaUnixPath
                     let unixPath' = directory </> testName <> "_" <> fileName
@@ -1001,10 +1013,9 @@ programTestFor testBaseName program eventlogAssertion = \case
                     programBin <- findProgram
                     withProgram programBin eventlogSocketAddr $ do
                         -- The the eventlog assertion
-                        debug Header
                         debugInfo $ "Using Unix socket: " <> unixPath'
                         eventlogAssertion eventlogSocketAddr
-                        debug Footer
+                    debug Footer
         ProgramTest{..}
     EventlogSocketInetAddr{..} -> do
         -- Create test info
@@ -1095,7 +1106,7 @@ withLogger action = do
         Header ->
             "-- HEADER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-'
         Footer ->
-            "-- FOOTER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-'
+            "-- FOOTER: " <> testName <> " " <> replicate (80 - (length testName + 12)) '-' <> "\n"
         ProgramOut info message ->
             "[" <> testName <> ", " <> prettyProgramInfo info <> "] stdout: " <> message
         ProgramErr info message ->
