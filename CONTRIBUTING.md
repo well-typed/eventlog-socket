@@ -97,11 +97,9 @@ The most important scripts are as follows:
     ./scripts/ttyd.sh './scripts/test.sh -- -p /test_oddball_Reconnect_Unix/'
     ```
 
-    > [!IMPORTANT]
-    > The command must be passed in quotes.
+    The command must be passed in quotes.
 
-    > [!NOTE]
-    > The name stands for "try 'til you die".
+    > ℹ️ The name stands for "try 'til you die".
 
 ## Naming Convention for C Functions
 
@@ -139,8 +137,7 @@ The process for making a well-documented release of `eventlog-socket` is a bit t
     git tag eventlog-socket-${VERSION}
     ```
 
-    > [!CAUTION]
-    > Replace `${VERSION}` with the new version.
+    > ⚠️ Replace `${VERSION}` with the new version.
 
 3.  Publish the Git tag:
     ```sh
@@ -163,11 +160,9 @@ The process for making a well-documented release of `eventlog-socket` is a bit t
       + [`eventlog-socket-tests`](https://github.com/well-typed/eventlog-socket/tree/eventlog-socket-${VERSION}/eventlog-socket-tests/)
       ```
 
-      > [!CAUTION]
-      > Replace `${VERSION}` with the new version.
+      > ⚠️ Replace `${VERSION}` with the new version.
 
-    > [!CAUTION]
-    > Do not commit these changes.
+    > ⚠️ Do not commit these changes.
 
 5.  Build the source distribution.
 
@@ -175,8 +170,7 @@ The process for making a well-documented release of `eventlog-socket` is a bit t
     cabal sdist eventlog-socket
     ```
 
-    > [!TIP]
-    > This writes the source distribution to `dist-newstyle/sdist/eventlog-socket-${VERSION}.tar.gz`.
+    > ℹ️ This writes the source distribution to `dist-newstyle/sdist/eventlog-socket-${VERSION}.tar.gz`.
 
 6.  Upload the source distribution to Hackage *as a package candidate*
 
@@ -193,23 +187,20 @@ The process for making a well-documented release of `eventlog-socket` is a bit t
     ./scripts/build-haddock.sh
     ```
 
-    > [!TIP]
-    > This writes the documentation to `dist-newstyle/eventlog-socket-${VERSION}-docs.tar.gz`.
+    > ℹ️ This writes the documentation to `dist-newstyle/eventlog-socket-${VERSION}-docs.tar.gz`.
 
 10. Upload the Haddock documentation *to the package candidate page*.
 
     - On the package candidate package, click on *"edit package information"*.
     - Under *"Manage Documentation"*, click on the candidate version *"eventlog-socket-${VERSION}"*.
 
-      > [!CAUTION]
-      > Replace `${VERSION}` with the new version.
+      > ⚠️ Replace `${VERSION}` with the new version.
 
     - Upload the documentation built in the previous step.
 
 11. Ensure that the documentation for the Haskell modules has no errors.
 
-    > [!WARNING]
-    > Since package candidates are published at different URLs, the link to the Doxygen documentation is broken for package candidates.
+    > ⚠️ Since package candidates are published at different URLs, the link to the Doxygen documentation is broken for package candidates.
 
 12. Publish the candidate package.
 
@@ -232,8 +223,7 @@ The process for making a well-documented release of `eventlog-socket` is a bit t
     git tag eventlog-socket-control-${VERSION}
     ```
 
-    > [!CAUTION]
-    > Replace `${VERSION}` with the new version.
+    > ⚠️ Replace `${VERSION}` with the new version.
 
 3.  Publish the Git tag:
     ```sh
@@ -246,8 +236,7 @@ The process for making a well-documented release of `eventlog-socket` is a bit t
     cabal sdist eventlog-socket-control
     ```
 
-    > [!TIP]
-    > This writes the source distribution to `dist-newstyle/sdist/eventlog-socket-control-${VERSION}.tar.gz`.
+    > ℹ️ This writes the source distribution to `dist-newstyle/sdist/eventlog-socket-control-${VERSION}.tar.gz`.
 
 6.  Upload the source distribution to Hackage *as a package candidate*
 
