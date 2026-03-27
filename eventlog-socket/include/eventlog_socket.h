@@ -478,6 +478,47 @@ EventlogSocketStatus eventlog_socket_worker_status(void);
 EventlogSocketStatus eventlog_socket_control_status(void);
 
 /******************************************************************************
+ * Start/End Hooks
+ ******************************************************************************/
+
+/// @brief An @c eventlog-socket hook.
+typedef enum {
+  /// @brief The post-startEventLogging hook is guaranteed to be called *after*
+  /// each time that the `EventLogSocketWriter` is attached and event logging is
+  /// started.
+  ///
+  /// If the `EventLogSocketWriter` is attached in a C main, prior to GHC RTS
+  /// initialisation, then @c eventlog-socket waits to call this hook for the
+  /// first time until the GHC RTS is initialised.
+  EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING,
+  /// @brief The pre-endEventLogging hook is guaranteed to be called *before*
+  /// each time that the `EventLogSocketWriter` is detached and event logging is
+  /// ended.
+  EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING,
+} EventlogSocketHook;
+
+/// @brief An @c eventlog-socket hook handler.
+///
+/// @since 0.1.3.0
+typedef void EventlogSocketHookHandler(const void *hook_data);
+
+/// @brief Register a new hook handler.
+///
+/// @return Upon successful completion, this function registers the command and
+/// returns a status with code @c EVENTLOG_SOCKET_OK.
+///
+/// @return If a system error occurs, this function returns a status with code
+/// @c EVENTLOG_SOCKET_ERR_SYS and the error code set to indicate the error.
+///
+/// @note The @p hook_handler should not use the functions from this header.
+///
+/// @since 0.1.3.0
+EventlogSocketStatus
+eventlog_socket_register_hook(EventlogSocketHook hook,
+                              EventlogSocketHookHandler *hook_handler,
+                              const void *hook_data);
+
+/******************************************************************************
  * Control Commands
  ******************************************************************************/
 

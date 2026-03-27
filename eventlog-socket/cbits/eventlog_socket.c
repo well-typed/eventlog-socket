@@ -22,6 +22,7 @@
 
 #include "./eventlog_socket/debug.h"
 #include "./eventlog_socket/error.h"
+#include "./eventlog_socket/hooks.h"
 #include "./eventlog_socket/init_state.h"
 #include "./eventlog_socket/string.h"
 #include "./eventlog_socket/worker.h"
@@ -340,6 +341,14 @@ EventlogSocketStatus eventlog_socket_signal_ghc_rts_ready(void) {
   RETURN_ON_ERROR(STATUS_FROM_PTHREAD(pthread_mutex_lock(&g_mutex)));
   // If the RTS is not marked as ready...
   if (!(g_init_state & EVENTLOG_SOCKET_SIG_RTS_READY)) {
+    // If EventLogSocketWriter is already attached...
+    if (g_init_state & EVENTLOG_SOCKET_SIG_ATTACHED) {
+      // ...trigger the post-startEventLogging hooks.
+      DEBUG_DEBUG("%s", "Trigger post-startEventLogging hooks.");
+      RETURN_ON_ERROR_CLEANUP(
+          es_hooks_handle_hook(EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING),
+          pthread_mutex_unlock(&g_mutex));
+    }
     // ...broadcast on the relevant condition and...
     RETURN_ON_ERROR_CLEANUP(
         STATUS_FROM_PTHREAD(pthread_cond_broadcast(&g_ghc_rts_ready_cond)),
@@ -627,4 +636,12 @@ EventlogSocketStatus eventlog_socket_control_status(void) {
 #else
   return STATUS_FROM_CODE(EVENTLOG_SOCKET_OK);
 #endif /* EVENTLOG_SOCKET_FEATURE_CONTROL */
+}
+
+/* PUBLIC - see documentation in eventlog_socket.h */
+EventlogSocketStatus
+eventlog_socket_register_hook(EventlogSocketHook hook,
+                              EventlogSocketHookHandler *hook_handler,
+                              const void *hook_data) {
+  return es_hooks_register_hook(hook, hook_handler, hook_data);
 }

@@ -369,6 +369,47 @@ throwEventlogSocketStatus essPtr = do
     throwIO $ userError str
 
 --------------------------------------------------------------------------------
+-- Hooks API
+--------------------------------------------------------------------------------
+
+{- |
+The type of @eventlog-socket@ hooks.
+-}
+newtype
+    {-# CTYPE "eventlog_socket.h" "EventlogSocketHook" #-}
+    EventlogSocketHook = EventlogSocketHook
+        { unEventlogSocketHook :: #{type EventlogSocketHook}
+        }
+        deriving (Eq, Show, Storable)
+
+{- |
+The hook for new connections.
+-}
+pattern EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING :: EventlogSocketTag
+pattern EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING = EventlogSocketTag #{const EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING}
+
+{- |
+The tag for a TCP/IP socket address.
+-}
+pattern EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING :: EventlogSocketTag
+pattern EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING = EventlogSocketTag #{const EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING}
+
+{-# COMPLETE
+    EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING,
+    EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING #-}
+
+{- |
+The type of hook handlers.
+
+The hook handler is evaluated once each time the control socket receives a request for the associated hook.
+
+__Warning__: The hook handler /must not/ call back into the @eventlog-socket@ API.
+
+@since 0.1.2.0
+-}
+type HookHandler = IO ()
+
+--------------------------------------------------------------------------------
 -- Control Commands API
 --------------------------------------------------------------------------------
 
