@@ -81,6 +81,55 @@ To enable the eventlog, you must pass the `-l` RTS option. This can be done eith
   ./my-app +RTS -l -RTS
   ```
 
+## Lifecycle Hooks
+
+Every time a new client connects, the GHC RTS resends the eventlog header and initialisation events.
+If you develop a package that communicates over the eventlog, you may find that your package *also* needs to resent certain initialisation events.
+The `eventlog-socket` package provides lifecycle hooks for this purpose.
+There are two supported hooks:
+
+1. The *post-startEventLogging* hook triggers *after* each time event logging is started.
+2. The *pre-endEventLogging* hook triggers *before* each time event logging is ended.
+
+To register a handler for lifecycle hook, use the `registerHook` function.
+For instance, the following snippet registers a hook that sends a user message event every time event logging is started.
+
+```haskell
+module Main where
+
+import Data.Foldable (for_)
+import Debug.Trace (traceEventIO)
+import GHC.Eventlog.Socket (Hook (..), registerHook, start)
+import System.Environment (lookupEnv)
+
+main :: IO ()
+main = do
+  -- Register the greeting hook:
+  registerHook HookPostStartEventLogging $
+    traceEventIO "Hello, new user!"
+
+  -- Start eventlog-socket on GHC_EVENTLOG_UNIX_PATH, if set:
+  maybeUnixPath <- lookupEnv "GHC_EVENTLOG_UNIX_PATH"
+  for_ maybeUnixPath $ \unixPath -> do
+    putStrLn "Start eventlog-socket on " <> unixPath
+    start unixPath
+
+  -- The rest of your application:
+  ...
+```
+
+> [!CAUTION]
+> To avoid races, it is important that lifecycle hooks are registered *before* `eventlog-socket` is started.
+
+> [!NOTE]
+> The post-startEventLogging and pre-endEventLogging lifecycle hooks usually correspond to clients connecting and disconnecting, respectively.
+> The only exception is if your application is instrumented from a C main, in which case the *first* post-startEventLogging hook triggers immediately after the GHC RTS is initialised.
+> In this scenario, the first client *does not* trigger the post-startEventLogging hook, but subsequent clients *do*.
+
+For an example of an application that registers lifecycle hooks using the Haskell API, see [`examples/fibber`](examples/fibber/).
+
+For an example of an application that registers lifecycle hooks using the C API, see [`examples/fibber-c-main`](examples/fibber-c-main/).
+
 ## Control Commands
 
 When compiled with the `+control` feature flag, the eventlog socket supports *control commands*. These are messages that can be *written to* the eventlog socket by the client to control the RTS or execute custom control commands.
