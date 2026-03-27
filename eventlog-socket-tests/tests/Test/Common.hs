@@ -958,7 +958,8 @@ data TestInfo = TestInfo
     }
 
 data ProgramTest = ProgramTest
-    { programDesc :: ProgramDesc
+    { testInfo :: TestInfo
+    , programDesc :: ProgramDesc
     , makeProgram :: IO FilePath
     , freeProgram :: FilePath -> IO ()
     , testProgram :: IO FilePath -> TestTree
@@ -973,6 +974,7 @@ runProgramTests = fmap toTestGroup . groupByDesc
             & fmap (\pt -> M.singleton pt.programDesc (NE.singleton pt))
             & foldr (M.unionWith (<>)) M.empty
             & M.elems
+            & fmap (NE.sortBy (compare `on` (.testInfo.testName)))
 
     toTestGroup :: NonEmpty ProgramTest -> TestTree
     toTestGroup (pt :| pts) =
@@ -996,7 +998,8 @@ programTestFor testBaseName program eventlogAssertion = \case
     EventlogSocketUnixAddr{..} -> do
         -- Create test info
         let testName = testBaseName <> "_Unix"
-        let ?testInfo = TestInfo{..}
+        let testInfo = TestInfo{..}
+        let ?testInfo = testInfo
 
         -- Create program resource
         let ProgramResource{..} = programResource program
@@ -1020,7 +1023,8 @@ programTestFor testBaseName program eventlogAssertion = \case
     EventlogSocketInetAddr{..} -> do
         -- Create test info
         let testName = testBaseName <> "_Inet"
-        let ?testInfo = TestInfo{..}
+        let testInfo = TestInfo{..}
+        let ?testInfo = testInfo
 
         -- Create program resource
         let ProgramResource{..} = programResource program

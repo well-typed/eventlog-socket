@@ -35,7 +35,7 @@ main = do
     tests =
         [ test_fibber
         , test_fibberCMain
-        , test_oddball
+        , test_oddball_HasHeapProfSample
         , test_oddball_NoAutomaticHeapSamples
         , test_oddball_Reconnect
         , test_oddball_ResetOnReconnect
@@ -88,8 +88,8 @@ test_fibberCMain =
 {- |
 Test that @oddball@ produces heap profile samples.
 -}
-test_oddball :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_oddball =
+test_oddball_HasHeapProfSample :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_oddball_HasHeapProfSample =
     let oddball =
             Program
                 { name = "oddball"
@@ -97,7 +97,7 @@ test_oddball =
                 , rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = []
                 }
-     in programTestFor "test_oddball" oddball $ \eventlogSocket -> do
+     in programTestFor "test_oddball_HasHeapProfSample" oddball $ \eventlogSocket -> do
             assertEventlogWith eventlogSocket $
                 -- Validate that the Summing marker is seen, and that the event
                 -- stream contains at least one heap profile sample.
