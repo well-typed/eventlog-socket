@@ -6,7 +6,7 @@ import Control.Monad (forever)
 import Data.Foldable (for_, traverse_)
 import Data.Maybe (fromMaybe)
 import Debug.Trace (flushEventLog, traceMarkerIO)
-import GHC.Eventlog.Socket (startFromEnv, testControlStatus, testWorkerStatus)
+import GHC.Eventlog.Socket (Hook (..), registerHook, startFromEnv, testControlStatus, testWorkerStatus)
 import System.Environment (getArgs, lookupEnv)
 
 #if MIN_VERSION_base(4,20,0)
@@ -30,7 +30,14 @@ performPreferablyBlockingMajorGC = performMajorGC
 
 main :: IO ()
 main = do
+    -- Register hooks:
+    registerHook HookPostStartEventLogging $
+        traceMarkerIO "HookPostStartEventLogging fired."
+    registerHook HookPreEndEventLogging $
+        traceMarkerIO "HookPreEndEventLogging fired."
+    -- Start eventlog-socket:
     startFromEnv
+    -- Start fibber:
     args <- getArgs
     let (mode, fibArgs) = parseArgs args
         workload = for_ fibArgs $ \arg -> do
