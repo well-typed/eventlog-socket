@@ -184,110 +184,42 @@ Registration is a two-step process:
 1.  Register a namespace. This must be a string of between 1 and 255 bytes. By convention, this should be your Haskell package name.
 2.  Register each command. This must be a number between 1 and 255. By convention, this should be the first non-zero number that's still available for this namespace.
 
-Commands can be passed some user data at registration time. This is intended to let you defines multiple different commands using the same handler.
-
-For an example of an application instrumented with custom control commands using the Haskell API, see [`examples/custom-command`](examples/custom-command/).
-
-For an example of an application instrumented with custom control commands using the C API, see [`examples/custom-command-c-main`](examples/custom-command-c-main/).
-
-The following snippet defines the `registerGreeters` function, which registers two commands via the Haskell API:
+To register a namespace, use the `registerNamespace` function.
+To register a custom command handler, use the `registerCommand` function.
+For instance, the following snippet registers two custom commands under the `"greeters"` namespace which greet C and Haskell, respectively.
 
 ```haskell
-import GHC.Eventlog.Socket
+module Main where
+
+import Data.Foldable (for_)
+import Debug.Trace (traceEventIO)
+import GHC.Eventlog.Socket (Hook (..), registerHook, start)
+import System.Environment (lookupEnv)
 
 greeter :: String -> IO ()
 greeter name =
   putStrLn $ "Hello, " <> name <> "!"
 
-registerGreeters :: IO ()
-registerGreeters = do
+main :: IO ()
+main = do
+  -- Register the custom command handlers:
   myNamespace <- registerNamespace "greeters"
   registerCommand myNamespace (CommandId 1) (greeter "C")
   registerCommand myNamespace (CommandId 2) (greeter "Haskell")
+
+  -- Start eventlog-socket on GHC_EVENTLOG_UNIX_PATH, if set:
+  maybeUnixPath <- lookupEnv "GHC_EVENTLOG_UNIX_PATH"
+  for_ maybeUnixPath $ \unixPath -> do
+    putStrLn "Start eventlog-socket on " <> unixPath
+    start unixPath
+
+  -- The rest of your application:
+  ...
 ```
 
-The following snippet defines the `register_greeters` function, which registers two equivalent commands via the C API:
+> [!CAUTION]
+> To avoid races, it is important that custom commands are registered *before* `eventlog-socket` is started.
 
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <eventlog_socket.h>
+For an example of an application instrumented with custom control commands using the Haskell API, see [`examples/custom-command`](examples/custom-command/).
 
-static void greeter(const EventlogSocketControlNamespace *const namespace,
-                       const EventlogSocketControlCommandId command_id,
-                       const void *user_data) {
-  (void) namespace;
-  (void) command_id;
-  printf("Hello, %s!", (const char*)user_data);
-}
-
-bool register_greeters(void) {
-  // Use the name of my Haskell package:
-  const char* const my_namespace = "my-app";
-
-  // Allocate space for the namespace object:
-  EventlogSocketControlNamespace *namespace = NULL;
-
-  // Try to register the namespace:
-  const EventlogSocketStatus namespace_status =
-    eventlog_socket_control_register_namespace(
-      strlen(my_namespace), my_namespace, &namespace);
-
-  // Handle any errors:
-  if (namespace_status.ess_status_code != EVENTLOG_SOCKET_OK) {
-    char *errmsg = eventlog_socket_strerror(namespace_status);
-    if (errmsg != NULL) {
-      fprintf(stderr, "ERROR: %s", errmsg);
-      free(errmsg);
-    }
-    return false;
-  }
-  // Otherwise, namespace contains a valid object.
-
-  // Use the first available non-zero command ID for greet_c:
-  const uint8_t greet_c_id = 1;
-
-  // Allocate data for the greet_c command, if needed:
-  static const char * const greet_c_data = "C";
-
-  // Try to register the greet_c command:
-  const EventlogSocketStatus greet_c_status =
-    eventlog_socket_control_register_command(
-      namespace, greet_c_id, greeter, greet_c_data);
-
-  // Handle any errors:
-  if (greet_c_status.ess_status_code != EVENTLOG_SOCKET_OK) {
-    char *errmsg = eventlog_socket_strerror(greet_c_status);
-    if (errmsg != NULL) {
-      fprintf(stderr, "ERROR: %s", errmsg);
-      free(errmsg);
-    }
-    return false;
-  }
-  // Otherwise, the command is registered.
-
-  // Use the next available command ID for greet_haskell:
-  const uint8_t greet_haskell_id = 2;
-
-  // Allocate data for the greet_haskell command, if needed:
-  static const char * const greet_haskell_data = "Haskell";
-
-  // Try to register the greet_haskell command:
-  const EventlogSocketStatus greet_haskell_status =
-    eventlog_socket_control_register_command(
-      namespace, greet_haskell_id, greeter, greet_haskell_data);
-
-  // Handle any errors:
-  if (greet_haskell_status.ess_status_code != EVENTLOG_SOCKET_OK) {
-    char *errmsg = eventlog_socket_strerror(greet_haskell_status);
-    if (errmsg != NULL) {
-      fprintf(stderr, "ERROR: %s", errmsg);
-      free(errmsg);
-    }
-    return false;
-  }
-  // Otherwise, the command is registered.
-
-  return true;
-}
-```
+For an example of an application instrumented with custom control commands using the C API, see [`examples/custom-command-c-main`](examples/custom-command-c-main/).
