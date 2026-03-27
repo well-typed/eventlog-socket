@@ -5,10 +5,48 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define DEBUG_ERROR(fmt, ...)                                                  \
+  do {                                                                         \
+    fprintf(stderr, "ERROR[%s|%d|%s]: " fmt "\n", __FILE__, __LINE__,          \
+            __func__, __VA_ARGS__);                                            \
+  } while (0)
+
 // Get the main closure.
 extern StgClosure ZCMain_main_closure;
 
+/// Internal GHC function that writes a user marker to the eventlog.
+extern void traceUserMarker(Capability *cap, char *msg);
+
+/// Write a user marker to the eventlog.
+static void write_user_marker(char *const marker) {
+  Capability *cap = rts_lock();
+  if (cap == NULL) {
+    DEBUG_ERROR("%s", "could not acquire GHC RTS capability lock");
+    return;
+  }
+  traceUserMarker(cap, marker);
+  rts_unlock(cap);
+}
+
+// Hook for startEventLogging.
+void handler_HookPostStartEventLogging(const void *arg) {
+  (void)arg;
+  write_user_marker("HookPostStartEventLogging fired.");
+}
+
+// Hook for endEventLogging.
+void handler_HookPreEndEventLogging(const void *arg) {
+  (void)arg;
+  write_user_marker("HookPreEndEventLogging fired.");
+}
+
 int main(int argc, char *argv[]) {
+
+  // Register start/end hooks.
+  eventlog_socket_register_hook(EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING,
+                                &handler_HookPostStartEventLogging, NULL);
+  eventlog_socket_register_hook(EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING,
+                                &handler_HookPreEndEventLogging, NULL);
 
   // Create a GHC RTS configuration object.
   RtsConfig rts_config = {0};
