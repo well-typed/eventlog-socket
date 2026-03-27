@@ -20,6 +20,32 @@ The most important scripts are as follows:
 
     This script runs all tests for `eventlog-socket` and `eventlog-socket-control`.
 
+    The script runs the test suite and passes any parameters before `--` on to Cabal and after `--` to the Tasty test runner.
+    For instance, to run only `test_fibber_Unix`, run:
+
+    ```sh
+    ./scripts/test.sh -- -p /test_fibber_Unix/
+    ```
+
+    By default, the tests are linked against a version of `eventlog-socket` compiled with `-f+debug`.
+    You can control the debug verbosity by passing one of the `-f+debug-verbosity-X` flags.
+    You can control whether or not all received events are logged using the `-f+debug-events` flag.
+    For instance, to run the test suite with `TRACE` verbosity and events, run:
+
+    ```sh
+    ./scripts/test.sh -f+debug-verbosity-trace -f+debug-events --
+    ```
+
+    By default, the script prints the test suite overview to stdout and writes a detailed test log to `eventlog-socket-tests.err.log`.
+    If the `DEBUG` environment variable is defined, the script prints the detailed test log, and writes the test suite overview *and* the detailed test log to `eventlog-socket-tests.out.log` and `eventlog-socket-tests.err.log`, respectively.
+
+    The Tasty suite runs tests concurrently, which means the detailed test log contains the interleaved output of multiple tests.
+    It can be helpful to run the test suite with `-j1` to ensure that all tests are run sequentially:
+
+    ```sh
+    ./scripts/test.sh -- -j1
+    ```
+
 -   <a name="scripts-lint-nm"></a>`./scripts/lint-nm.sh`
 
     This script builds the `eventlog-socket` library and checks that all exposed symbols follow [the naming convention](#naming-convention-for-c-functions).
