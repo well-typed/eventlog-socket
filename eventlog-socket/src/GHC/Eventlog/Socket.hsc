@@ -45,6 +45,14 @@ module GHC.Eventlog.Socket (
     fromEnv,
     EventlogSocketAddrError(..),
 
+    -- ** Hooks #hooks#
+    Hook (
+        HookPostStartEventLogging,
+        HookPreEndEventLogging
+    ),
+    HookHandler,
+    registerHook,
+
     -- ** Control commands #control_commands#
     Namespace,
     CommandId(..),
@@ -374,29 +382,35 @@ throwEventlogSocketStatus essPtr = do
 
 {- |
 The type of @eventlog-socket@ hooks.
+
+@since 0.1.3.0
 -}
 newtype
     {-# CTYPE "eventlog_socket.h" "EventlogSocketHook" #-}
-    EventlogSocketHook = EventlogSocketHook
-        { unEventlogSocketHook :: #{type EventlogSocketHook}
+    Hook = Hook
+        { unHook :: #{type EventlogSocketHook}
         }
         deriving (Eq, Show, Storable)
 
 {- |
-The hook for new connections.
+The hook that runs /after/ @startEventLogging@ is called.
+
+@since 0.1.3.0
 -}
-pattern EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING :: EventlogSocketTag
-pattern EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING = EventlogSocketTag #{const EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING}
+pattern HookPostStartEventLogging :: Hook
+pattern HookPostStartEventLogging = Hook #{const EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING}
 
 {- |
-The tag for a TCP/IP socket address.
+The hook that runs /before/ @endEventLogging@ is called.
+
+@since 0.1.3.0
 -}
-pattern EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING :: EventlogSocketTag
-pattern EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING = EventlogSocketTag #{const EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING}
+pattern HookPreEndEventLogging :: Hook
+pattern HookPreEndEventLogging = Hook #{const EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING}
 
 {-# COMPLETE
-    EVENTLOG_SOCKET_HOOK_POST_START_EVENT_LOGGING,
-    EVENTLOG_SOCKET_HOOK_PRE_END_EVENT_LOGGING #-}
+    HookPostStartEventLogging,
+    HookPreEndEventLogging #-}
 
 {- |
 The type of hook handlers.
@@ -405,9 +419,54 @@ The hook handler is evaluated once each time the control socket receives a reque
 
 __Warning__: The hook handler /must not/ call back into the @eventlog-socket@ API.
 
-@since 0.1.2.0
+@since 0.1.3.0
 -}
 type HookHandler = IO ()
+
+{- |
+Register an @eventlog-socket@ hook.
+
+__Warning__: Hooks cannot be unregistered and will be kept in memory until program exit.
+
+@since 0.1.3.0
+-}
+registerHook ::
+    -- | The hook.
+    Hook ->
+    -- | The hook handler.
+    HookHandler ->
+    IO ()
+registerHook hook hookHandler = do
+    -- Wrap the Haskell hook handler for the C API
+    let c_hookHandler hookDataPtr =
+            assert (hookDataPtr == nullPtr) $
+            hookHandler
+
+    bracketOnError (makeHookHandlerFunPtr c_hookHandler) freeHaskellFunPtr $ \c_hookHandlerPtr -> do
+
+        -- Try to register the command:
+        status <-
+            -- Allocate space for the return status:
+            allocaBytes #{size EventlogSocketStatus} $ \essPtr -> do
+
+                -- Try to register the command:
+                eventlog_socket_register_hook
+                    essPtr
+                    hook
+                    c_hookHandlerPtr
+                    nullPtr
+
+                -- Marshal the return status:
+                peekEventlogSocketStatus essPtr
+
+        -- Handle the return status:
+        case essStatusCode status of
+            -- The return status is OK.
+            EVENTLOG_SOCKET_OK -> pure ()
+
+            -- The remaining errors are all system errors:
+            _otherwise ->
+                vacuous $ withEventlogSocketStatus status throwEventlogSocketStatus
 
 --------------------------------------------------------------------------------
 -- Control Commands API
@@ -1006,6 +1065,38 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_strerro
   )
   {
     return eventlog_socket_strerror(*eventlog_socket_status);
+  }
+}
+
+--------------------------------------------------------------------------------
+-- eventlog_socket_register_hook
+
+foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_register_hook"
+    eventlog_socket_register_hook ::
+        Ptr EventlogSocketStatus ->
+        Hook ->
+        FunPtr (Ptr a -> IO ()) ->
+        Ptr a ->
+        IO ()
+
+foreign import ccall "wrapper"
+    makeHookHandlerFunPtr ::
+        (Ptr a -> IO ()) ->
+        IO (FunPtr (Ptr a -> IO ()))
+
+#{def
+  HIDDEN void eventlog_socket_wrap_register_hook(
+    EventlogSocketStatus *eventlog_socket_status,
+    EventlogSocketHook eventlog_socket_hook,
+    EventlogSocketHookHandler eventlog_socket_hook_handler,
+    const void *eventlog_socket_hook_data
+  ) {
+    const EventlogSocketStatus status = eventlog_socket_register_hook(
+      eventlog_socket_hook,
+      eventlog_socket_hook_handler,
+      eventlog_socket_hook_data
+    );
+    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
   }
 }
 
