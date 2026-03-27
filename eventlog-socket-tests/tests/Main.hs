@@ -60,8 +60,10 @@ test_fibber =
                 }
      in programTestFor "test_fibber" fibber $ \eventlogSocket -> do
             assertEventlogWith eventlogSocket $
-                -- Validate that the Finished marker is seen.
-                hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
+                -- Validate that the startEventLogging hook fires.
+                hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
+                    -- Validate that the Finished marker is seen.
+                    &> hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
 
 {- |
 Test that @fibber-c-main 35@ produces a parseable eventlog.
@@ -78,8 +80,10 @@ test_fibberCMain =
      in programTestFor "test_fibberCMain" fibberCMain $ \eventlogSocket -> do
             threadDelay 3_000_000
             assertEventlogWith eventlogSocket $
-                -- Validate that the Initialising marker is seen.
-                hasMatchingUserMarker ("Initialising" `T.isPrefixOf`)
+                -- Validate that the startEventLogging hook fires.
+                hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
+                    -- Validate that the Initialising marker is seen.
+                    &> hasMatchingUserMarker ("Initialising" `T.isPrefixOf`)
                     -- Validate that the Starting marker is seen.
                     &> hasMatchingUserMarker ("Starting" `T.isPrefixOf`)
                     -- Validate that the Finished marker is seen.
