@@ -38,6 +38,7 @@ main = do
         , test_oddball_HasHeapProfSample
         , test_oddball_NoAutomaticHeapSamples
         , test_oddball_Reconnect
+        , test_oddball_HookOnReconnect
         , test_oddball_ResetOnReconnect
         , test_oddball_StartAndStopHeapProfiling
         , test_oddball_RequestHeapCensus
@@ -145,6 +146,28 @@ test_oddball_Reconnect =
             -- event (as proxy for the init events) and at least one heap profile sample.
             assertEventlogWith eventlogSocket $ hasWallClockTime &> hasHeapProfSampleString
             assertEventlogWith eventlogSocket $ hasWallClockTime &> hasHeapProfSampleString
+
+{- |
+Test that @oddball@ triggers the post-startEventLogging hook on reconnect.
+-}
+test_oddball_HookOnReconnect :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_oddball_HookOnReconnect =
+    let oddball =
+            Program
+                { name = "oddball"
+                , args = []
+                , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
+                , eventlogSocketBuildFlags = []
+                }
+     in programTestFor "test_oddball_HookOnReconnect" oddball $ \eventlogSocket -> do
+            -- Validate that reconnecting works and that each stream has a WallClockTime
+            -- event (as proxy for the init events) and triggers the post-startEventLogging hook.
+            assertEventlogWith eventlogSocket $
+                hasWallClockTime
+                    &> hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
+            assertEventlogWith eventlogSocket $
+                hasWallClockTime
+                    &> hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
 
 {- |
 Test that the command parsing state is reset on reconnect.
