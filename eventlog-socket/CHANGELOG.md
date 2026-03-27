@@ -1,5 +1,22 @@
 # Revision history for eventlog-socket
 
+## 0.1.3.0 -- 2026-03-27
+
+- Add support for hooks that fire at certain points in the `eventlog-socket` lifecycle.
+
+  This adds `registerHook` and `eventlog_socket_register_hook` to the Haskell and C APIs, respectively, as well as two kinds of hooks:
+  - A _post-startEventLogging_ hook, which is triggered whenever event logging is started.
+  - A _pre-endEventLogging_ hook, which is triggered whenever event logging is ended.
+
+  These hooks are intended to give package writers the ability to add their own init events, which are resent event time that a new client connects. For instance, the following code registers a post-startEventLogging hook that greets every new client with a user message event:
+
+  ```haskell
+  registerHook HookPostStartEventLogging $
+    traceEventIO "Hello, new user!"
+  ```
+
+  To avoid races, it is important that these hooks are registered *before* `eventlog-socket` is started.
+
 ## 0.1.2.0 -- 2026-03-25
 
 **Warning**: The C API exposed from this version contains breaking changes over the C API exposed from version 0.1.1.0. This is justified by the fact that the C API exposed from version 0.1.1.0 is broken and that version is deprecated and not known to be in use.
