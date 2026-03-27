@@ -27,12 +27,9 @@ main = do
         -- Create temporary directory:
         withTempDirectory "/tmp" "eventlog-socket" $ \tmpDir -> do
             -- Base socket addresses
-            let baseUnixSocket = EventlogSocketUnixAddr $ tmpDir </> "ghc_eventlog.sock"
-            let baseInetSocket = EventlogSocketInetAddr "127.0.0.1" tcpPort
-            defaultMain . testGroup "Tests" $
-                [ testGroup "With Unix socket:" . runProgramTests $ fmap ($ baseUnixSocket) tests
-                , testGroup "With Inet socket:" . runProgramTests $ fmap ($ baseInetSocket) tests
-                ]
+            let unixTests = tests <*> pure (EventlogSocketUnixAddr $ tmpDir </> "ghc_eventlog.sock")
+            let inetTests = tests <*> pure (EventlogSocketInetAddr "127.0.0.1" tcpPort)
+            defaultMain . testGroup "Tests" . runProgramTests $ unixTests <> inetTests
   where
     tests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
     tests =
