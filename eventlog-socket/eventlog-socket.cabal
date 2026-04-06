@@ -31,6 +31,8 @@ extra-source-files:
   cbits/eventlog_socket/error.h
   cbits/eventlog_socket/hooks.c
   cbits/eventlog_socket/hooks.h
+  cbits/eventlog_socket/hsapi.c
+  cbits/eventlog_socket/hsapi.h
   cbits/eventlog_socket/init_state.h
   cbits/eventlog_socket/macros.h
   cbits/eventlog_socket/poll.h
@@ -101,6 +103,7 @@ library
   c-sources:
     cbits/eventlog_socket/error.c
     cbits/eventlog_socket/hooks.c
+    cbits/eventlog_socket/hsapi.c
     cbits/eventlog_socket/string.c
     cbits/eventlog_socket/worker.c
     cbits/eventlog_socket/write_buffer.c

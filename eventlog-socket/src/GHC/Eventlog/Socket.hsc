@@ -89,9 +89,8 @@ import Foreign.Marshal.Utils (fromBool, toBool, with)
 import GHC.Enum (toEnumError)
 import System.IO.Unsafe (unsafePerformIO)
 
-#include <eventlog_socket/macros.h>
 #include <eventlog_socket.h>
-#include <string.h>
+#include <eventlog_socket/hsapi.h>
 
 --------------------------------------------------------------------------------
 -- High-level API
@@ -998,52 +997,22 @@ foreign import capi safe "eventlog_socket.h eventlog_socket_opts_free"
 --------------------------------------------------------------------------------
 -- eventlog_socket_start
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_start"
+foreign import capi safe "eventlog_socket/hsapi.h es_hsapi_start"
     eventlog_socket_start ::
         Ptr EventlogSocketStatus ->
         Ptr EventlogSocketAddr ->
         Ptr EventlogSocketOpts ->
         IO ()
 
-#{def
-  HIDDEN void eventlog_socket_wrap_start(
-    EventlogSocketStatus *eventlog_socket_status,
-    EventlogSocketAddr *eventlog_socket_addr,
-    EventlogSocketOpts *eventlog_socket_opts
-  )
-  {
-    const EventlogSocketStatus status = eventlog_socket_start(
-      eventlog_socket_addr,
-      eventlog_socket_opts
-    );
-    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
-  }
-}
-
 --------------------------------------------------------------------------------
 -- eventlog_socket_from_env
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_from_env"
+foreign import capi safe "eventlog_socket/hsapi.h es_hsapi_from_env"
     eventlog_socket_from_env ::
         Ptr EventlogSocketStatus ->
         Ptr EventlogSocketAddr ->
         Ptr EventlogSocketOpts ->
         IO ()
-
-#{def
-  HIDDEN void eventlog_socket_wrap_from_env(
-    EventlogSocketStatus *eventlog_socket_status,
-    EventlogSocketAddr *eventlog_socket_addr,
-    EventlogSocketOpts *eventlog_socket_opts
-  )
-  {
-    const EventlogSocketStatus status = eventlog_socket_from_env(
-      eventlog_socket_addr,
-      eventlog_socket_opts
-    );
-    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
-  }
-}
 
 --------------------------------------------------------------------------------
 -- eventlog_socket_wait
@@ -1054,24 +1023,15 @@ foreign import capi safe "eventlog_socket.h eventlog_socket_wait"
 --------------------------------------------------------------------------------
 -- eventlog_socket_strerror
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_strerror"
+foreign import capi safe "eventlog_socket/hsapi.h es_hsapi_strerror"
     eventlog_socket_strerror ::
         Ptr EventlogSocketStatus ->
         IO CString
 
-#{def
-  HIDDEN char *eventlog_socket_wrap_strerror(
-    EventlogSocketStatus *eventlog_socket_status
-  )
-  {
-    return eventlog_socket_strerror(*eventlog_socket_status);
-  }
-}
-
 --------------------------------------------------------------------------------
 -- eventlog_socket_register_hook
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_register_hook"
+foreign import capi safe "eventlog_socket/hsapi.h es_hsapi_register_hook"
     eventlog_socket_register_hook ::
         Ptr EventlogSocketStatus ->
         Hook ->
@@ -1084,57 +1044,20 @@ foreign import ccall "wrapper"
         (Ptr a -> IO ()) ->
         IO (FunPtr (Ptr a -> IO ()))
 
-#{def
-  HIDDEN void eventlog_socket_wrap_register_hook(
-    EventlogSocketStatus *eventlog_socket_status,
-    EventlogSocketHook eventlog_socket_hook,
-    EventlogSocketHookHandler eventlog_socket_hook_handler,
-    const void *eventlog_socket_hook_data
-  ) {
-    const EventlogSocketStatus status = eventlog_socket_register_hook(
-      eventlog_socket_hook,
-      eventlog_socket_hook_handler,
-      eventlog_socket_hook_data
-    );
-    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
-  }
-}
-
 --------------------------------------------------------------------------------
 -- eventlog_socket_worker_status
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_worker_status"
+foreign import capi safe "eventlog_socket/hsapi.h es_hsapi_worker_status"
     eventlog_socket_worker_status ::
         Ptr EventlogSocketStatus ->
         IO ()
-
-#{def
-  HIDDEN void eventlog_socket_wrap_worker_status(
-    EventlogSocketStatus *eventlog_socket_status_out
-  )
-  {
-    const EventlogSocketStatus eventlog_socket_status = eventlog_socket_worker_status();
-    memcpy(eventlog_socket_status_out, &eventlog_socket_status, sizeof(EventlogSocketStatus));
-  }
-}
-
 --------------------------------------------------------------------------------
 -- eventlog_socket_control_status
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_control_status"
+foreign import capi safe "eventlog_socket/hsapi.h es_hsapi_control_status"
     eventlog_socket_control_status ::
         Ptr EventlogSocketStatus ->
         IO ()
-
-#{def
-  HIDDEN void eventlog_socket_wrap_control_status(
-    EventlogSocketStatus *eventlog_socket_status_out
-  )
-  {
-    const EventlogSocketStatus eventlog_socket_status = eventlog_socket_control_status();
-    memcpy(eventlog_socket_status_out, &eventlog_socket_status, sizeof(EventlogSocketStatus));
-  }
-}
 
 --------------------------------------------------------------------------------
 -- eventlog_socket_control_strnamespace
@@ -1150,7 +1073,7 @@ foreign import ccall safe "eventlog_socket.h eventlog_socket_control_strnamespac
 --------------------------------------------------------------------------------
 -- eventlog_socket_control_register_namespace
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_control_register_namespace"
+foreign import capi safe "eventlog_socket/hsapi.h es_hsapi_control_register_namespace"
     eventlog_socket_control_register_namespace ::
         Ptr EventlogSocketStatus ->
         ( #{type uint8_t} ) ->
@@ -1158,26 +1081,10 @@ foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_control
         Ptr (Ptr Namespace) ->
         IO ()
 
-#{def
-  HIDDEN void eventlog_socket_wrap_control_register_namespace(
-    EventlogSocketStatus *eventlog_socket_status,
-    uint8_t eventlog_socket_namespace_len,
-    char eventlog_socket_namespace[eventlog_socket_namespace_len],
-    EventlogSocketControlNamespace **eventlog_socket_namespace_out
-  ) {
-    const EventlogSocketStatus status = eventlog_socket_control_register_namespace(
-      eventlog_socket_namespace_len,
-      eventlog_socket_namespace,
-      eventlog_socket_namespace_out
-    );
-    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
-  }
-}
-
 --------------------------------------------------------------------------------
 -- eventlog_socket_control_register_command
 
-foreign import capi safe "GHC/Eventlog/Socket_hsc.h eventlog_socket_wrap_control_register_command"
+foreign import capi safe "eventlog_socket/hsapi.h es_hsapi_control_register_command"
     eventlog_socket_control_register_command ::
         Ptr EventlogSocketStatus ->
         Ptr Namespace ->
@@ -1190,21 +1097,3 @@ foreign import ccall "wrapper"
     makeCommandHandlerFunPtr ::
         (Ptr Namespace -> CommandId -> Ptr a -> IO ()) ->
         IO (FunPtr (Ptr Namespace -> CommandId -> Ptr a -> IO ()))
-
-#{def
-  HIDDEN void eventlog_socket_wrap_control_register_command(
-    EventlogSocketStatus *eventlog_socket_status,
-    EventlogSocketControlNamespace *eventlog_socket_namespace,
-    EventlogSocketControlCommandId eventlog_socket_command_id,
-    EventlogSocketControlCommandHandler eventlog_socket_command_handler,
-    const void *eventlog_socket_command_data
-  ) {
-    const EventlogSocketStatus status = eventlog_socket_control_register_command(
-      eventlog_socket_namespace,
-      eventlog_socket_command_id,
-      eventlog_socket_command_handler,
-      eventlog_socket_command_data
-    );
-    memcpy(eventlog_socket_status, &status, sizeof(EventlogSocketStatus));
-  }
-}
