@@ -48,6 +48,9 @@ find "${BUILDDIR}" -type d -mindepth 1 -maxdepth 1 -not -name 'sdist' | while IF
 	echo "packages: ${pkg}" >> "${CABAL_PROJECT}"
 done
 
+# Append cabal.project.config file:
+echo >> "${CABAL_PROJECT}"
+cat "${REPO_ROOT_DIR}/cabal.project.config" >> "${CABAL_PROJECT}"
 
 # Build all packages:
 ${CABAL} build all --builddir="${BUILDDIR}" --project-dir="${BUILDDIR}"

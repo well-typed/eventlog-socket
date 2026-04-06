@@ -6,3 +6,5 @@ packages: examples/custom-command-c-main/custom-command-c-main.cabal
 packages: examples/fibber/fibber.cabal
 packages: examples/fibber-c-main/fibber-c-main.cabal
 packages: examples/oddball/oddball.cabal
+
+import: cabal.project.config
