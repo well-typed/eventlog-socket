@@ -257,11 +257,26 @@ fromEnv =
 --------------------------------------------------------------------------------
 -- Environment variables
 
-eventlogSocketEnvInetHost :: String
-eventlogSocketEnvInetHost = #{const_str EVENTLOG_SOCKET_ENV_INET_HOST}
+{- |
+The name of the environment variable used by `eventlog_socket_from_env`
+to determine the host name for a TCP/IPv4 socket.
 
+@since 0.1.2.0
+-}
+eventlogSocketEnvInetHost :: String
+-- NOTE: Keep in sync with EVENTLOG_SOCKET_ENV_INET_HOST in eventlog_socketh.h.
+eventlogSocketEnvInetHost = "GHC_EVENTLOG_INET_HOST"
+
+
+{- |
+The name of the environment variable used by `eventlog_socket_from_env`
+to determine the port number for a TCP/IPv4 socket.
+
+@since 0.1.2.0
+-}
 eventlogSocketEnvInetPort :: String
-eventlogSocketEnvInetPort = #{const_str EVENTLOG_SOCKET_ENV_INET_PORT}
+-- NOTE: Keep in sync with EVENTLOG_SOCKET_ENV_INET_PORT in eventlog_socketh.h.
+eventlogSocketEnvInetPort = "GHC_EVENTLOG_INET_PORT"
 
 --------------------------------------------------------------------------------
 -- Errors
