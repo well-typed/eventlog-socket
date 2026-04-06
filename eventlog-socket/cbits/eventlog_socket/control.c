@@ -37,6 +37,7 @@
 #include "./poll.h"
 #include "eventlog_socket.h"
 #include "init_state.h"
+#include "rts/prof/CCS.h"
 
 // CONTROL_MAGIC should be the UTF-8 encoding of some code point between
 // U+010000 and U+10FFFF. Let's pick code point U+01E5CC, for Eventlog
@@ -77,11 +78,11 @@ static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
 /// @brief The name of the builtin namespace.
 #define BUILTIN_NAMESPACE "eventlog-socket"
 
-/// @brief The ID reserved for the builtin `StartEventLogging` command.
-#define BUILTIN_COMMAND_ID_START_EVENT_LOGGING 1
+/// @brief The ID of the builtin `StartProfiling` command.
+#define BUILTIN_COMMAND_ID_START_PROFILING 1
 
-/// @brief The ID reserved for the builtin `EndEventLogging` command.
-#define BUILTIN_COMMAND_ID_END_EVENT_LOGGING 2
+/// @brief The ID of the builtin `StopProfiling` command.
+#define BUILTIN_COMMAND_ID_STOP_PROFILING 2
 
 /// @brief The ID of the builtin `StartHeapProfiling` command.
 #define BUILTIN_COMMAND_ID_START_HEAP_PROFILING 3
@@ -96,7 +97,30 @@ static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
  * Handlers for Builtin Commands
  ******************************************************************************/
 
-/// @brief Handler for "StartHeapProfiling" command (eventlog-socket::0).
+/// @brief Handler for "StartProfiling" command (eventlog-socket::1).
+static void es_control_start_profiling(
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *user_data) {
+  (void)namespace;
+  (void)command_id;
+  (void)user_data;
+  startProfTimer();
+  DEBUG_DEBUG("%s", "Started profiling.");
+}
+
+/// @brief Handler for "StopProfiling" command (eventlog-socket::2).
+static void
+es_control_stop_profiling(const EventlogSocketControlNamespace *const namespace,
+                          const EventlogSocketControlCommandId command_id,
+                          const void *user_data) {
+  (void)namespace;
+  (void)command_id;
+  (void)user_data;
+  stopProfTimer();
+  DEBUG_DEBUG("%s", "Stopped profiling.");
+}
+
+/// @brief Handler for "StartHeapProfiling" command (eventlog-socket::3).
 static void es_control_start_heap_profiling(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
@@ -107,7 +131,7 @@ static void es_control_start_heap_profiling(
   DEBUG_DEBUG("%s", "Started heap profiling.");
 }
 
-/// @brief Handler for "StopHeapProfiling" command (eventlog-socket::1).
+/// @brief Handler for "StopHeapProfiling" command (eventlog-socket::4).
 static void es_control_stop_heap_profiling(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
@@ -118,7 +142,7 @@ static void es_control_stop_heap_profiling(
   DEBUG_DEBUG("%s", "Stopped heap profiling.");
 }
 
-/// @brief Handler for "RequestHeapCensus" command (eventlog-socket::2).
+/// @brief Handler for "RequestHeapCensus" command (eventlog-socket::5).
 static void es_control_request_heap_census(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
@@ -193,21 +217,37 @@ static EventlogSocketControlNamespace g_control_namespace_registry = {
     .next = NULL,
     .command_registry =
         &(EventlogSocketControlCommand){
-            .command_id = BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
-            .command_handler = es_control_start_heap_profiling,
+            .command_id = BUILTIN_COMMAND_ID_START_PROFILING,
+            .command_handler = es_control_start_profiling,
             .command_data = NULL,
             .next =
                 &(EventlogSocketControlCommand){
-                    .command_id = BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
-                    .command_handler = es_control_stop_heap_profiling,
+                    .command_id = BUILTIN_COMMAND_ID_STOP_PROFILING,
+                    .command_handler = es_control_stop_profiling,
                     .command_data = NULL,
                     .next =
                         &(EventlogSocketControlCommand){
                             .command_id =
-                                BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS,
-                            .command_handler = es_control_request_heap_census,
+                                BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
+                            .command_handler = es_control_start_heap_profiling,
                             .command_data = NULL,
-                            .next = NULL,
+                            .next =
+                                &(EventlogSocketControlCommand){
+                                    .command_id =
+                                        BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
+                                    .command_handler =
+                                        es_control_stop_heap_profiling,
+                                    .command_data = NULL,
+                                    .next =
+                                        &(EventlogSocketControlCommand){
+                                            .command_id =
+                                                BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS,
+                                            .command_handler =
+                                                es_control_request_heap_census,
+                                            .command_data = NULL,
+                                            .next = NULL,
+                                        },
+                                },
                         },
                 },
         },
