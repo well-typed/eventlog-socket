@@ -31,6 +31,8 @@ module GHC.Eventlog.Socket.Control (
     Command,
     CommandId (..),
     Namespace,
+    startProfiling,
+    stopProfiling,
     startHeapProfiling,
     stopHeapProfiling,
     requestHeapCensus,
@@ -374,6 +376,26 @@ instance Binary Command where
 --------------------------------------------------------------------------------
 -- Builtin Commands
 --------------------------------------------------------------------------------
+
+{- |
+The builtin control command message that starts profiling.
+
+See `GHC.Profiling.startProfTimer`.
+
+@since 0.1.1.0
+-}
+startProfiling :: Command
+startProfiling = Command eventlogSocketNamespace (CommandId 1)
+
+{- |
+The builtin control command message that stops profiling.
+
+See `GHC.Profiling.stopProfTimer`.
+
+@since 0.1.1.0
+-}
+stopProfiling :: Command
+stopProfiling = Command eventlogSocketNamespace (CommandId 2)
 
 {- |
 The builtin control command message that starts heap profiling.
