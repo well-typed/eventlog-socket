@@ -134,11 +134,13 @@ For an example of an application that registers lifecycle hooks using the C API,
 
 When compiled with the `+control` feature flag, the eventlog socket supports *control commands*. These are messages that can be *written to* the eventlog socket by the client to control the RTS or execute custom control commands.
 
-The `eventlog-socket` package provides three built-in commands:
+The `eventlog-socket` package provides five built-in commands:
 
-1. The `startHeapProfiling` control command starts heap profiling.
-2. The `stopHeapProfiling` control command stops heap profiling.
-3. The `requestHeapCensus` control command requests a single heap profile.
+1. The `startProfiling` control command starts cost-centre profiling.
+2. The `stopProfiling` control command stops cost-centre profiling.
+3. The `startHeapProfiling` control command starts heap profiling.
+4. The `stopHeapProfiling` control command stops heap profiling.
+5. The `requestHeapCensus` control command requests a single heap profile.
 
 The heap profiling commands require that the RTS is initialised with one of the `-h` options. See [RTS options for heap profiling](https://downloads.haskell.org/ghc/latest/docs/users_guide/profiling.html#rts-options-heap-prof). If any heap profiling option is passed, heap profiling is started by default. To avoid this, pass the `--no-automatic-heap-samples` to the RTS *in addition to* the selected `-h` option, e.g., `./my-app +RTS -hT --no-automatic-heap-samples -RTS`.
 
@@ -160,11 +162,13 @@ namespace        = {byte}; (* must be exactly namespace-len bytes *)
 command-id       = byte;   (* commands are assigned numeric IDs *)
 ```
 
-The built-in commands live in the `"eventlog-socket"` namespace and are numbered in order starting at 3.
+The built-in commands live in the `"eventlog-socket"` namespace and are numbered in order starting at 1.
 
-1. The message for `startHeapProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x03`.
-2. The message for `stopHeapProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x04`.
-3. The message for `requestHeapCensus` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x05`.
+1. The message for `startProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x01`.
+2. The message for `stopProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x02`.
+3. The message for `startHeapProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x03`.
+4. The message for `stopHeapProfiling` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x04`.
+5. The message for `requestHeapCensus` is `\xF0\x9E\x97\x8C\x00\x15eventlog-socket\x05`.
 
 For example, a simple Python client using the [`socket`](https://docs.python.org/3/library/socket.html) library could request a heap census as follows:
 
