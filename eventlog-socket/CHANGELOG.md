@@ -17,6 +17,8 @@
 
   To avoid races, it is important that these hooks are registered *before* `eventlog-socket` is started.
 
+- Add support for builtin `startProfiling` and `stopProfiling` control commands.
+
 ## 0.1.2.0 -- 2026-03-25
 
 **Warning**: The C API exposed from this version contains breaking changes over the C API exposed from version 0.1.1.0. This is justified by the fact that the C API exposed from version 0.1.1.0 is broken and that version is deprecated and not known to be in use.
