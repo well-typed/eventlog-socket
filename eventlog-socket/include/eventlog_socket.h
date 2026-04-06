@@ -182,6 +182,7 @@ void eventlog_socket_opts_free(EventlogSocketOpts *opts);
 /// to determine the host name for a TCP/IPv4 socket.
 ///
 /// @since 0.1.2.0
+// NOTE: Keep in sync with eventlogSocketEnvInetHost in Socket.hsc.
 #define EVENTLOG_SOCKET_ENV_INET_HOST "GHC_EVENTLOG_INET_HOST"
 
 /// @brief
@@ -189,6 +190,7 @@ void eventlog_socket_opts_free(EventlogSocketOpts *opts);
 /// to determine the port number for a TCP/IPv4 socket.
 ///
 /// @since 0.1.2.0
+// NOTE: Keep in sync with eventlogSocketEnvInetPort in Socket.hsc.
 #define EVENTLOG_SOCKET_ENV_INET_PORT "GHC_EVENTLOG_INET_PORT"
 
 /// @brief
