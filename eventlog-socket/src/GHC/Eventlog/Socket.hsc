@@ -257,17 +257,11 @@ fromEnv =
 --------------------------------------------------------------------------------
 -- Environment variables
 
-eventlogSocketEnvUnixPath :: String
-eventlogSocketEnvUnixPath = #{const_str EVENTLOG_SOCKET_ENV_UNIX_PATH}
-
 eventlogSocketEnvInetHost :: String
 eventlogSocketEnvInetHost = #{const_str EVENTLOG_SOCKET_ENV_INET_HOST}
 
 eventlogSocketEnvInetPort :: String
 eventlogSocketEnvInetPort = #{const_str EVENTLOG_SOCKET_ENV_INET_PORT}
-
-eventlogSocketEnvWait :: String
-eventlogSocketEnvWait = #{const_str EVENTLOG_SOCKET_ENV_WAIT}
 
 --------------------------------------------------------------------------------
 -- Errors
