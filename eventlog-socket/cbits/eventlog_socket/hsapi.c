@@ -4,7 +4,7 @@
 ///            exported by @c eventlog_socket.h for use in the Haskell
 ///            module @c GHC.Eventlog.Socket.
 /// @author    Wen Kokke
-/// @version   0.1.2.1
+/// @version   0.1.3.0
 /// @date      2025-2026
 /// @copyright BSD-3-Clause License.
 ///
