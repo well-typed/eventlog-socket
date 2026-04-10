@@ -132,7 +132,7 @@ The process for making a well-documented release of `eventlog-socket` is a bit t
     - The Doxygen documentation builds without warnings and renders without errors.
     - The tests pass on CI.
 
-2.  Create a Git tag of the form `eventlog-socket-${VERSION}`, e.g., `eventlog-socket-0.1.2.0`:
+2.  Create a Git tag of the form `eventlog-socket-${VERSION}`, e.g., `eventlog-socket-0.1.3.0`:
     ```sh
     git tag eventlog-socket-${VERSION}
     ```
