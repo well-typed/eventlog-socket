@@ -1,6 +1,6 @@
 cabal-version:   3.0
 name:            eventlog-socket-control
-version:         0.1.0.0
+version:         0.1.1.0
 synopsis:        Control command protocol for eventlog-socket.
 description:
   The @eventlog-socket-control@ package contains utilities for creating messages for @eventlog-socket@'s control command protocol.
@@ -24,6 +24,12 @@ tested-with:
 source-repository head
   type:     git
   location: https://github.com/well-typed/eventlog-socket.git
+  subdir:   eventlog-socket-control
+
+source-repository this
+  type:     git
+  location: https://github.com/well-typed/eventlog-socket.git
+  tag:      eventlog-socket-control-0.1.1.0
   subdir:   eventlog-socket-control
 
 common language
