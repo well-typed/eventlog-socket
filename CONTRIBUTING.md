@@ -146,7 +146,7 @@ The process for making a well-documented release of `eventlog-socket` is a bit t
 
 4.  Edit the `README.md` file to make the following changes:
 
-    - Replace the unsupported `[!NOTE]` element with the ⚠️ emoji. For example:
+    - Replace the unsupported `[!CAUTION]` and `[!NOTE]` elements with the ⚠️ emoji. For example:
 
       ```diff
       - [!NOTE]
