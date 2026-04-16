@@ -1,6 +1,6 @@
 {-# LANGUAGE CPP #-}
 
-module Test.Common (
+module GHC.Eventlog.Socket.Test (
     -- * Example Programs
     Program (..),
     HasProgramInfo,

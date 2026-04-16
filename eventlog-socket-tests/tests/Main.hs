@@ -10,10 +10,10 @@ import Data.Machine ((~>))
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import GHC.Eventlog.Socket.Control (CommandId (..), requestHeapCensus, startHeapProfiling, stopHeapProfiling, userCommand, userNamespace)
+import GHC.Eventlog.Socket.Test
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withTempDirectory)
-import Test.Common
 import Test.Tasty (defaultMain, testGroup)
 import Text.Read (readMaybe)
 
