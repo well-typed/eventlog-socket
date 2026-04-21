@@ -51,6 +51,7 @@ main = do
         , test_parfib_StartAndStopSparkSampledTracing
         , test_parfib_StartAndStopSparkFullTracing
         , test_oddball_StartAndStopUserTracing
+        , test_capnDance_StartAndStopCapabilityTracing
         , test_oddball_Junk ("\0\0", "TOASTY")
         , test_oddball_Junk ("\x01DEAD", "DORK")
         , test_customCommand
@@ -429,29 +430,26 @@ respected, i.e., that once the `StartCapabilityTracing` command is sent,
 capability events are received, and once the `StopCapabilityTracing` command is
 sent, after some iterations, no more capability events are received.
 -}
-
--- TODO: This requires an example program that actually changes its capabilities at runtime.
-_test_oddball_StartAndStopCapabilityTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-_test_oddball_StartAndStopCapabilityTracing =
-    let oddball =
+test_capnDance_StartAndStopCapabilityTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_capnDance_StartAndStopCapabilityTracing =
+    let capnDance =
             Program
-                { name = "oddball"
+                { name = "capn-dance"
                 , args = []
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_oddball_StartAndStopCapabilityTracing" oddball $ \eventlogSocket -> do
+     in programTestFor "test_capnDance_StartAndStopCapabilityTracing" capnDance $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
-                -- Validate that the Summing marker is seen...
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                -- Validate that the Dancing marker is seen...
+                hasMatchingUserMarker ("Dancing" `T.isPrefixOf`)
+                    &> hasCapabilityEvent
+                    &> sendCommand socket C.stopCapabilityTracing
+                    !> (2 `times` hasMatchingUserMarker ("Dancing" `T.isPrefixOf`))
                     &> hasNoCapabilityEvent
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    ~> (2 `times` hasMatchingUserMarker ("Dancing" `T.isPrefixOf`))
                     &> sendCommand socket C.startCapabilityTracing
                     !> hasCapabilityEvent
-                    &> sendCommand socket C.stopCapabilityTracing
-                    !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
-                    &> hasNoCapabilityEvent
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 
 {- |
 Test that the `RequestHeapCensus` command is still respected after junk has
