@@ -1,0 +1,32 @@
+cabal-version: 2.4
+name:          capn-dance
+version:       0.1.0.0
+synopsis:      Example program that changes the number of capabilities
+description:   Example program that changes the number of capabilities.
+license:       BSD-3-Clause
+license-file:  LICENSE
+author:        Eventlog Socket Contributors
+maintainer:    wen@well-typed.com
+copyright:     (c) 2025 Well-Typed
+category:      Test
+tested-with:
+  GHC ==9.2.8
+   || ==9.4.8
+   || ==9.6.7
+   || ==9.8.4
+   || ==9.10.2
+   || ==9.12.2
+
+executable capn-dance
+  main-is:            Main.hs
+  hs-source-dirs:     app
+  default-language:   Haskell2010
+  default-extensions: TypeApplications
+  ghc-options:        -threaded -rtsopts
+  build-depends:
+    , base             >=4.14 && <5
+    , eventlog-socket  >=0.1  && <0.2
+    , random           >=1.2  && <1.4
+
+  if impl(ghc <9.4)
+    ghc-options: -eventlog
