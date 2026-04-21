@@ -80,6 +80,13 @@ flag control
   default:     False
   manual:      True
 
+flag force-dynamic-trace-flags
+  description:
+    Force @eventlog-socket@ to compile with support for dynamic trace flags.
+
+  default:     False
+  manual:      True
+
 flag optimise-heavily
   description: Pass @-O2@ to the C compiler.
   default:     False
@@ -139,6 +146,12 @@ library
     -- https://github.com/haskell/cabal/issues/7635
     cc-options: -DEVENTLOG_SOCKET_FEATURE_CONTROL=1
     c-sources:  cbits/eventlog_socket/control.c
+
+  if flag(force-dynamic-trace-flags)
+    -- 2025-12-17:
+    -- cpp-options are not passed to C code, see:
+    -- https://github.com/haskell/cabal/issues/7635
+    cc-options: -DFORCE_DYNAMIC_TRACE_FLAGS=1
 
   if flag(optimise-heavily)
     cc-options: -O2

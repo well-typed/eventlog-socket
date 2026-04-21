@@ -1,13 +1,14 @@
 {-# LANGUAGE NumericUnderscores #-}
+
 module Main where
 
 import Control.Concurrent (setNumCapabilities, threadDelay)
 import Data.Foldable (for_)
+import Debug.Trace (traceMarkerIO)
 import GHC.Conc (getNumProcessors)
 import GHC.Eventlog.Socket (startFromEnv)
 import System.IO (hPutStrLn, stderr)
 import System.Mem (performMajorGC)
-import Debug.Trace (traceMarkerIO)
 
 main :: IO ()
 main = do

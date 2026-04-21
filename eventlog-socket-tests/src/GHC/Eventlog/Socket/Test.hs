@@ -99,11 +99,14 @@ module GHC.Eventlog.Socket.Test (
     Message (..),
     debug,
     debugEvents,
+    readGhc,
+    readGhcVersion,
+    shouldEnableDynamicTraceFlagTests,
 ) where
 
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar)
-import Control.Exception (Exception (..), assert, bracket, bracketOnError, catch, mask_, throwIO)
+import Control.Exception (ErrorCall (..), Exception (..), assert, bracket, bracketOnError, catch, mask_, throwIO)
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.Binary as B
@@ -119,6 +122,9 @@ import Data.Machine
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Version (Version)
+import qualified Data.Version as V
 import Data.Word (Word16, Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Eventlog.Socket (EventlogSocketAddr (..))
@@ -182,6 +188,34 @@ data ProgramResource = ProgramResource
     , withProgram :: (HasCallStack, HasLogger, HasTestInfo) => FilePath -> EventlogSocketAddr -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
     }
 
+{- |
+Read the GHC path from the environment.
+-}
+readGhc :: IO FilePath
+readGhc = fromMaybe "ghc" <$> lookupEnv "GHC"
+
+{- |
+Read the version of the given GHC executable.
+-}
+readGhcVersion :: FilePath -> IO Version
+readGhcVersion ghc = do
+    (versionExit, versionOut, versionErr) <- readProcessWithExitCode ghc ["--numeric-version"] ""
+    when (versionExit /= ExitSuccess) $ throwIO $ ErrorCall $ "Cannot get version: " <> versionErr
+    pure $ V.makeVersion $ fmap (read . T.unpack) $ T.splitOn (T.pack ".") $ T.pack versionOut
+
+{- |
+Determine whether or not to enable dynamic trace flag tests.
+-}
+shouldEnableDynamicTraceFlagTests :: IO Bool
+#ifdef FORCE_DYNAMIC_TRACE_FLAGS
+shouldEnableDynamicTraceFlagTests = pure True
+#else
+shouldEnableDynamicTraceFlagTests = do
+    ghc <- readGhc
+    ghcVersion <- readGhcVersion ghc
+    pure $ ghcVersion >= V.makeVersion [10]
+#endif
+
 buildFlagDebug :: [String]
 #if defined(DEBUG)
 buildFlagDebug = ["+debug"]
@@ -196,8 +230,15 @@ buildFlagDebugVerbosity = ["+debug-verbosity-trace"]
 buildFlagDebugVerbosity = []
 #endif
 
+buildFlagForceDynamicTraceFlags :: [String]
+#if defined(FORCE_DYNAMIC_TRACE_FLAGS)
+buildFlagForceDynamicTraceFlags = ["+force-dynamic-trace-flags"]
+#else
+buildFlagForceDynamicTraceFlags = []
+#endif
+
 defaultBuildFlags :: [String]
-defaultBuildFlags = ["+optimise-heavily"] <> buildFlagDebug <> buildFlagDebugVerbosity
+defaultBuildFlags = ["+optimise-heavily"] <> buildFlagDebug <> buildFlagDebugVerbosity <> buildFlagForceDynamicTraceFlags
 
 programResource :: (HasLogger, HasTestInfo) => Program -> ProgramResource
 programResource program = ProgramResource{..}
@@ -223,7 +264,7 @@ programResource program = ProgramResource{..}
         let ?testInfo = TestInfo{testName = "make_" <> programDesc}
         debug Header
 
-        ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
+        ghc <- readGhc
         cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
 
         -- Build program

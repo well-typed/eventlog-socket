@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -22,37 +23,47 @@ main = do
     -- Allow the user to overwrite the TCP port:
     tcpPort <- (fromMaybe "4242" . (readMaybe =<<)) <$> lookupEnv "GHC_EVENTLOG_INET_PORT"
 
+    let basicTests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
+        basicTests =
+            [ test_fibber
+            , test_fibberCMain
+            , test_oddball_HasHeapProfSample
+            , test_oddball_NoAutomaticHeapSamples
+            , test_oddball_Reconnect
+            , test_oddball_HookOnReconnect
+            , test_oddball_ResetOnReconnect
+            , test_oddball_StartAndStopHeapProfiling
+            , test_oddball_RequestHeapCensus
+            , test_oddball_Junk ("\0\0", "TOASTY")
+            , test_oddball_Junk ("\x01DEAD", "DORK")
+            , test_customCommand
+            ]
+
+    -- Check whether or not to enable dynamic trace flag tests:
+    enableDynamicTraceFlagTests <- shouldEnableDynamicTraceFlagTests
+
+    let dynamicTraceFlagTests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
+        dynamicTraceFlagTests
+            | enableDynamicTraceFlagTests =
+                [ test_oddball_StartAndStopSchedulerTracing
+                , test_oddball_StartAndStopGcTracing
+                , test_oddball_StartAndStopNonmovingGcTracing
+                , test_parfib_StartAndStopSparkSampledTracing
+                , test_parfib_StartAndStopSparkFullTracing
+                , test_oddball_StartAndStopUserTracing
+                , test_capnDance_StartAndStopCapabilityTracing
+                ]
+            | otherwise = []
+
     -- Create logger:
     withLogger $ do
         -- Create temporary directory:
         withTempDirectory "/tmp" "eventlog-socket" $ \tmpDir -> do
             -- Base socket addresses
+            let tests = basicTests <> dynamicTraceFlagTests
             let unixTests = tests <*> pure (EventlogSocketUnixAddr $ tmpDir </> "ghc_eventlog.sock")
             let inetTests = tests <*> pure (EventlogSocketInetAddr "127.0.0.1" tcpPort)
             defaultMain . testGroup "Tests" . runProgramTests $ unixTests <> inetTests
-  where
-    tests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
-    tests =
-        [ test_fibber
-        , test_fibberCMain
-        , test_oddball_HasHeapProfSample
-        , test_oddball_NoAutomaticHeapSamples
-        , test_oddball_Reconnect
-        , test_oddball_HookOnReconnect
-        , test_oddball_ResetOnReconnect
-        , test_oddball_StartAndStopHeapProfiling
-        , test_oddball_RequestHeapCensus
-        , test_oddball_StartAndStopSchedulerTracing
-        , test_oddball_StartAndStopGcTracing
-        , test_oddball_StartAndStopNonmovingGcTracing
-        , test_parfib_StartAndStopSparkSampledTracing
-        , test_parfib_StartAndStopSparkFullTracing
-        , test_oddball_StartAndStopUserTracing
-        , test_capnDance_StartAndStopCapabilityTracing
-        , test_oddball_Junk ("\0\0", "TOASTY")
-        , test_oddball_Junk ("\x01DEAD", "DORK")
-        , test_customCommand
-        ]
 
 {- |
 Test that @fibber 35@ produces a parseable eventlog.
