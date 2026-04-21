@@ -45,6 +45,8 @@ main = do
         , test_oddball_StartAndStopSchedulerTracing
         , test_oddball_StartAndStopGcTracing
         , test_oddball_StartAndStopNonmovingGcTracing
+        , test_parfib_StartAndStopSparkSampledTracing
+        , test_parfib_StartAndStopSparkFullTracing
         , test_oddball_StartAndStopUserTracing
         , test_oddball_Junk ("\0\0", "TOASTY")
         , test_oddball_Junk ("\x01DEAD", "DORK")
@@ -277,7 +279,7 @@ test_oddball_StartAndStopSchedulerTracing =
                     &> sendCommand socket C.startSchedulerTracing
                     !> hasSchedulerEvent
                     &> sendCommand socket C.stopSchedulerTracing
-                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
                     &> hasNoSchedulerEvent
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 
@@ -305,7 +307,7 @@ test_oddball_StartAndStopGcTracing =
                     &> sendCommand socket C.startGcTracing
                     !> hasGcEvent
                     &> sendCommand socket C.stopGcTracing
-                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
                     &> hasNoGcEvent
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 
@@ -333,7 +335,7 @@ test_oddball_StartAndStopNonmovingGcTracing =
                     &> sendCommand socket C.startNonmovingGcTracing
                     !> hasNonmovingGcEvent
                     &> sendCommand socket C.stopNonmovingGcTracing
-                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
                     &> hasNoNonmovingGcEvent
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 
@@ -343,29 +345,27 @@ respected, i.e., that once the `StartSparkSampledTracing` command is sent,
 sampled spark events are received, and once the `StopSparkSampledTracing` command is
 sent, after some iterations, no more sampled spark events are received.
 -}
-
--- TODO: This requires an example program that actually uses sparks.
-_test_oddball_StartAndStopSparkSampledTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-_test_oddball_StartAndStopSparkSampledTracing =
-    let oddball =
+test_parfib_StartAndStopSparkSampledTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_parfib_StartAndStopSparkSampledTracing =
+    let parfib =
             Program
-                { name = "oddball"
-                , args = []
+                { name = "parfib"
+                , args = ["10", "45"]
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_oddball_StartAndStopSparkSampledTracing" oddball $ \eventlogSocket -> do
+     in programTestFor "test_parfib_StartAndStopSparkSampledTracing" parfib $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
-                -- Validate that the Summing marker is seen...
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                -- Validate that the Fibbing marker is seen...
+                hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`)
                     &> hasNoSparkSampledEvent
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    ~> hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`)
                     &> sendCommand socket C.startSparkSampledTracing
                     !> hasSparkSampledEvent
                     &> sendCommand socket C.stopSparkSampledTracing
-                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    !> (2 `times` hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`))
                     &> hasNoSparkSampledEvent
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    ~> (2 `times` hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`))
 
 {- |
 Test that the `StartGcTracing` and `StopSparkFullTracing` commands are
@@ -373,29 +373,27 @@ respected, i.e., that once the `StartSparkFullTracing` command is sent,
 full spark events are received, and once the `StopSparkFullTracing` command is
 sent, after some iterations, no more full spark events are received.
 -}
-
--- TODO: This requires an example program that actually uses sparks.
-_test_oddball_StartAndStopSparkFullTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-_test_oddball_StartAndStopSparkFullTracing =
-    let oddball =
+test_parfib_StartAndStopSparkFullTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_parfib_StartAndStopSparkFullTracing =
+    let parfib =
             Program
-                { name = "oddball"
-                , args = []
+                { name = "parfib"
+                , args = ["10", "45"]
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_oddball_StartAndStopSparkFullTracing" oddball $ \eventlogSocket -> do
+     in programTestFor "test_parfib_StartAndStopSparkFullTracing" parfib $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
-                -- Validate that the Summing marker is seen...
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                -- Validate that the Fibbing marker is seen...
+                hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`)
                     &> hasNoSparkFullEvent
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    ~> hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`)
                     &> sendCommand socket C.startSparkFullTracing
                     !> hasSparkFullEvent
                     &> sendCommand socket C.stopSparkFullTracing
-                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    !> (2 `times` hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`))
                     &> hasNoSparkFullEvent
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    ~> (2 `times` hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`))
 
 {- |
 Test that the `StartUserTracing` and `StopUserTracing` commands are
@@ -448,7 +446,7 @@ _test_oddball_StartAndStopCapabilityTracing =
                     &> sendCommand socket C.startCapabilityTracing
                     !> hasCapabilityEvent
                     &> sendCommand socket C.stopCapabilityTracing
-                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+                    !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
                     &> hasNoCapabilityEvent
                     ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 

@@ -22,7 +22,9 @@ module GHC.Eventlog.Socket.Test (
     (&>),
     times,
     anyOf,
+    anyOf',
     allOf,
+    allOf',
     droppingFor,
     isWallClockTime,
     hasWallClockTimeWithinSec,
@@ -598,11 +600,17 @@ Consume inputs until the predicate holds, then stop.
 Throw an exception if the input stream stops.
 -}
 anyOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a a
-anyOf p onSuccess onFailure = go (0 :: Int)
+anyOf p onSuccess onFailure = anyOf' p (const onSuccess) onFailure
+
+{- |
+Variant of `anyOf` that passes the value to the success continuation.
+-}
+anyOf' :: (HasLogger, HasTestInfo) => (a -> Bool) -> (a -> Int -> String) -> (Int -> String) -> ProcessT IO a a
+anyOf' p onSuccess onFailure = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where
-        onNext a = if p a then debugging (onSuccess count) else MachineT $ pure $ Yield a (go (count + 1))
+        onNext a = if p a then debugging (onSuccess a count) else MachineT $ pure $ Yield a (go (count + 1))
         onStop = failing (onFailure count)
 
 {- |
@@ -617,11 +625,17 @@ Consume inputs forever.
 Throw an exception if the predicate fails to hold for any input.
 -}
 allOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a a
-allOf p onSuccess onFailure = go (0 :: Int)
+allOf p onSuccess onFailure = allOf' p onSuccess (const onFailure)
+
+{- |
+Variant of `allOf` that passes the value to the failure continuation.
+-}
+allOf' :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (a -> Int -> String) -> ProcessT IO a a
+allOf' p onSuccess onFailure = go (0 :: Int)
   where
     go count = MachineT $ pure $ Await onNext Refl onStop
       where
-        onNext a = if p a then MachineT $ pure $ Yield a (go (count + 1)) else failing (onFailure count)
+        onNext a = if p a then MachineT $ pure $ Yield a (go (count + 1)) else failing (onFailure a count)
         onStop = debugging (onSuccess count)
 
 {- |
@@ -706,13 +720,27 @@ isSchedulerEvent ev
     | otherwise = False
 
 {- |
+Show a scheduler event.
+-}
+showSchedulerEvent :: Event -> String
+showSchedulerEvent ev
+    | E.CreateThread{} <- E.evSpec ev = "CreateThread"
+    | E.RunThread{} <- E.evSpec ev = "RunThread"
+    | E.StopThread{} <- E.evSpec ev = "StopThread"
+    | E.MigrateThread{} <- E.evSpec ev = "MigrateThread"
+    | E.WakeupThread{} <- E.evSpec ev = "WakeupThread"
+    | E.ThreadRunnable{} <- E.evSpec ev = "ThreadRunnable"
+    | E.ThreadLabel{} <- E.evSpec ev = "ThreadLabel"
+    | otherwise = "Other"
+
+{- |
 Assert that the input stream contains a scheduler event.
 -}
 hasSchedulerEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasSchedulerEvent =
-    anyOf isSchedulerEvent onSuccess onFailure
+    anyOf' isSchedulerEvent onSuccess onFailure
   where
-    onSuccess = printf "Found scheduler event after %d events."
+    onSuccess ev n = printf "Found scheduler event (%s) after %d events." (showSchedulerEvent ev) n
     onFailure = printf "Did not find scheduler event after %d events."
 
 {- |
@@ -720,10 +748,10 @@ Assert that the input stream does not contain a scheduler event.
 -}
 hasNoSchedulerEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoSchedulerEvent =
-    allOf (not . isSchedulerEvent) onSuccess onFailure
+    allOf' (not . isSchedulerEvent) onSuccess onFailure
   where
     onSuccess = printf "Did not find scheduler event after %d events."
-    onFailure = printf "Found scheduler event after %d events."
+    onFailure ev n = printf "Found scheduler event (%s) after %d events." (showSchedulerEvent ev) n
 
 {- |
 Test if an `Event` is a GC event.
@@ -742,13 +770,29 @@ isGcEvent ev
     | otherwise = False
 
 {- |
+Show a GC event.
+-}
+showGcEvent :: Event -> String
+showGcEvent ev
+    | E.StartGC{} <- E.evSpec ev = "StartGC"
+    | E.EndGC{} <- E.evSpec ev = "EndGC"
+    | E.RequestSeqGC{} <- E.evSpec ev = "RequestSeqGC"
+    | E.RequestParGC{} <- E.evSpec ev = "RequestParGC"
+    | E.GCIdle{} <- E.evSpec ev = "GCIdle"
+    | E.GCWork{} <- E.evSpec ev = "GCWork"
+    | E.GCDone{} <- E.evSpec ev = "GCDone"
+    | E.GCStatsGHC{} <- E.evSpec ev = "GCStatsGHC"
+    | E.GlobalSyncGC{} <- E.evSpec ev = "GlobalSyncGC"
+    | otherwise = "Other"
+
+{- |
 Assert that the input stream contains a GC event.
 -}
 hasGcEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasGcEvent =
-    anyOf isGcEvent onSuccess onFailure
+    anyOf' isGcEvent onSuccess onFailure
   where
-    onSuccess = printf "Found GC event after %d events."
+    onSuccess ev n = printf "Found GC event (%s) after %d events." (showGcEvent ev) n
     onFailure = printf "Did not find GC event after %d events."
 
 {- |
@@ -756,10 +800,10 @@ Assert that the input stream does not contain a GC event.
 -}
 hasNoGcEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoGcEvent =
-    allOf (not . isGcEvent) onSuccess onFailure
+    allOf' (not . isGcEvent) onSuccess onFailure
   where
     onSuccess = printf "Did not find GC event after %d events."
-    onFailure = printf "Found GC event after %d events."
+    onFailure ev n = printf "Found GC event (%s) after %d events." (showGcEvent ev) n
 
 {- |
 Test if an `Event` is a nonmoving-GC event.
@@ -777,13 +821,28 @@ isNonmovingGcEvent ev
     | otherwise = False
 
 {- |
+Show a nonmoving-GC event.
+-}
+showNonmovingGcEvent :: Event -> String
+showNonmovingGcEvent ev
+    | E.ConcMarkBegin{} <- E.evSpec ev = "ConcMarkBegin"
+    | E.ConcMarkEnd{} <- E.evSpec ev = "ConcMarkEnd"
+    | E.ConcSyncBegin{} <- E.evSpec ev = "ConcSyncBegin"
+    | E.ConcSyncEnd{} <- E.evSpec ev = "ConcSyncEnd"
+    | E.ConcSweepBegin{} <- E.evSpec ev = "ConcSweepBegin"
+    | E.ConcSweepEnd{} <- E.evSpec ev = "ConcSweepEnd"
+    | E.ConcUpdRemSetFlush{} <- E.evSpec ev = "ConcUpdRemSetFlush"
+    | E.NonmovingHeapCensus{} <- E.evSpec ev = "NonmovingHeapCensus"
+    | otherwise = "Other"
+
+{- |
 Assert that the input stream contains a nonmoving-GC event.
 -}
 hasNonmovingGcEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNonmovingGcEvent =
-    anyOf isNonmovingGcEvent onSuccess onFailure
+    anyOf' isNonmovingGcEvent onSuccess onFailure
   where
-    onSuccess = printf "Found nonmoving-GC event after %d events."
+    onSuccess ev n = printf "Found nonmoving-GC event (%s) after %d events." (showNonmovingGcEvent ev) n
     onFailure = printf "Did not find nonmoving-GC event after %d events."
 
 {- |
@@ -791,10 +850,10 @@ Assert that the input stream does not contain a nonmoving-GC event.
 -}
 hasNoNonmovingGcEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoNonmovingGcEvent =
-    allOf (not . isNonmovingGcEvent) onSuccess onFailure
+    allOf' (not . isNonmovingGcEvent) onSuccess onFailure
   where
     onSuccess = printf "Did not find nonmoving-GC event after %d events."
-    onFailure = printf "Found nonmoving-GC event after %d events."
+    onFailure ev n = printf "Found nonmoving-GC event (%s) after %d events." (showNonmovingGcEvent ev) n
 
 {- |
 Test if an `Event` is a sampled sparks event.
@@ -805,13 +864,21 @@ isSparkSampledEvent ev
     | otherwise = False
 
 {- |
+Show a sampled sparks event.
+-}
+showSparkSampledEvent :: Event -> String
+showSparkSampledEvent ev
+    | E.SparkCounters{} <- E.evSpec ev = "SparkCounters"
+    | otherwise = "other"
+
+{- |
 Assert that the input stream contains a sampled sparks event.
 -}
 hasSparkSampledEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasSparkSampledEvent =
-    anyOf isSparkSampledEvent onSuccess onFailure
+    anyOf' isSparkSampledEvent onSuccess onFailure
   where
-    onSuccess = printf "Found sampled sparks event after %d events."
+    onSuccess ev n = printf "Found sampled sparks event (%s) after %d events." (showSparkSampledEvent ev) n
     onFailure = printf "Did not find sampled sparks event after %d events."
 
 {- |
@@ -819,10 +886,10 @@ Assert that the input stream does not contain a sampled sparks event.
 -}
 hasNoSparkSampledEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoSparkSampledEvent =
-    allOf (not . isSparkSampledEvent) onSuccess onFailure
+    allOf' (not . isSparkSampledEvent) onSuccess onFailure
   where
     onSuccess = printf "Did not find sampled sparks event after %d events."
-    onFailure = printf "Found sampled sparks event after %d events."
+    onFailure ev n = printf "Found sampled sparks event (%s) after %d events." (showSparkSampledEvent ev) n
 
 {- |
 Test if an `Event` is a full sparks event.
@@ -841,13 +908,28 @@ isSparkFullEvent ev
     | otherwise = False
 
 {- |
+Show a full sparks event.
+-}
+showSparkFullEvent :: Event -> String
+showSparkFullEvent ev
+    | E.CreateSparkThread{} <- E.evSpec ev = "CreateSparkThread"
+    | E.SparkCreate{} <- E.evSpec ev = "SparkCreate"
+    | E.SparkDud{} <- E.evSpec ev = "SparkDud"
+    | E.SparkOverflow{} <- E.evSpec ev = "SparkOverflow"
+    | E.SparkRun{} <- E.evSpec ev = "SparkRun"
+    | E.SparkSteal{} <- E.evSpec ev = "SparkSteal"
+    | E.SparkFizzle{} <- E.evSpec ev = "SparkFizzle"
+    | E.SparkGC{} <- E.evSpec ev = "SparkGC"
+    | otherwise = showSparkSampledEvent ev
+
+{- |
 Assert that the input stream contains a full sparks event.
 -}
 hasSparkFullEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasSparkFullEvent =
-    anyOf isSparkFullEvent onSuccess onFailure
+    anyOf' isSparkFullEvent onSuccess onFailure
   where
-    onSuccess = printf "Found full sparks event after %d events."
+    onSuccess ev n = printf "Found full sparks event (%s) after %d events." (showSparkFullEvent ev) n
     onFailure = printf "Did not find full sparks event after %d events."
 
 {- |
@@ -855,10 +937,10 @@ Assert that the input stream does not contain a full sparks event.
 -}
 hasNoSparkFullEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoSparkFullEvent =
-    allOf (not . isSparkFullEvent) onSuccess onFailure
+    allOf' (not . isSparkFullEvent) onSuccess onFailure
   where
     onSuccess = printf "Did not find full sparks event after %d events."
-    onFailure = printf "Found full sparks event after %d events."
+    onFailure ev n = printf "Found full sparks event (%s) after %d events." (showSparkFullEvent ev) n
 
 {- |
 Test if an `Event` is a user event.
@@ -871,13 +953,23 @@ isUserEvent ev
     | otherwise = False
 
 {- |
+Show a user event.
+-}
+showUserEvent :: Event -> String
+showUserEvent ev
+    | E.UserMarker{} <- E.evSpec ev = "UserMarker"
+    | E.UserMessage{} <- E.evSpec ev = "UserMessage"
+    | E.UserBinaryMessage{} <- E.evSpec ev = "UserBinaryMessage"
+    | otherwise = "Other"
+
+{- |
 Assert that the input stream contains a user event.
 -}
 hasUserEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasUserEvent =
-    anyOf isUserEvent onSuccess onFailure
+    anyOf' isUserEvent onSuccess onFailure
   where
-    onSuccess = printf "Found user event after %d events."
+    onSuccess ev n = printf "Found user event (%s) after %d events." (showUserEvent ev) n
     onFailure = printf "Did not find user event after %d events."
 
 {- |
@@ -885,10 +977,10 @@ Assert that the input stream does not contain a user event.
 -}
 hasNoUserEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoUserEvent =
-    allOf (not . isUserEvent) onSuccess onFailure
+    allOf' (not . isUserEvent) onSuccess onFailure
   where
     onSuccess = printf "Did not find user event after %d events."
-    onFailure = printf "Found user event after %d events."
+    onFailure ev n = printf "Found user event (%s) after %d events." (showUserEvent ev) n
 
 {- |
 Assert that the input stream does not contain a user event within the given timeout.
@@ -912,13 +1004,24 @@ isCapabilityEvent ev
     | otherwise = False
 
 {- |
+Show a capability event.
+-}
+showCapabilityEvent :: Event -> String
+showCapabilityEvent ev
+    | E.CapCreate{} <- E.evSpec ev = "CapCreate"
+    | E.CapDelete{} <- E.evSpec ev = "CapDelete"
+    | E.CapDisable{} <- E.evSpec ev = "CapDisable"
+    | E.CapEnable{} <- E.evSpec ev = "CapEnable"
+    | otherwise = "Other"
+
+{- |
 Assert that the input stream contains a capability event.
 -}
 hasCapabilityEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasCapabilityEvent =
-    anyOf isCapabilityEvent onSuccess onFailure
+    anyOf' isCapabilityEvent onSuccess onFailure
   where
-    onSuccess = printf "Found capability event after %d events."
+    onSuccess ev n = printf "Found capability event (%s) after %d events." (showCapabilityEvent ev) n
     onFailure = printf "Did not find capability event after %d events."
 
 {- |
@@ -926,10 +1029,10 @@ Assert that the input stream does not contain a capability event.
 -}
 hasNoCapabilityEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoCapabilityEvent =
-    allOf (not . isCapabilityEvent) onSuccess onFailure
+    allOf' (not . isCapabilityEvent) onSuccess onFailure
   where
     onSuccess = printf "Did not find capability event after %d events."
-    onFailure = printf "Found capability event after %d events."
+    onFailure ev n = printf "Found capability event (%s) after %d events." (showCapabilityEvent ev) n
 
 {- |
 Test if an `Event` is a `HeapProfSampleBegin` event.
