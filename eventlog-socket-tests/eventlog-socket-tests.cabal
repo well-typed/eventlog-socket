@@ -34,6 +34,13 @@ flag debug-events
   default:     False
   manual:      True
 
+flag force-dynamic-trace-flags
+  description:
+    Force @eventlog-socket@ to compile with support for dynamic trace flags.
+
+  default:     False
+  manual:      True
+
 source-repository head
   type:     git
   location: https://github.com/well-typed/eventlog-socket.git
@@ -94,6 +101,9 @@ library
 
   if flag(debug-events)
     cpp-options: -DDEBUG_EVENTS
+
+  if flag(force-dynamic-trace-flags)
+    cpp-options: -DFORCE_DYNAMIC_TRACE_FLAGS
 
 test-suite eventlog-socket-tests
   import:         language

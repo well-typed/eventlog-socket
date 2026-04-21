@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -25,37 +26,48 @@ main = do
     -- Create list of tasty ingredients:
     let ingredients = [includingOptions [keepProgramBuildOption]] <> defaultIngredients
 
+    -- Create list of basic tests:
+    let basicTests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
+        basicTests =
+            [ test_fibber
+            , test_fibberCMain
+            , test_oddball_HasHeapProfSample
+            , test_oddball_NoAutomaticHeapSamples
+            , test_oddball_Reconnect
+            , test_oddball_HookOnReconnect
+            , test_oddball_ResetOnReconnect
+            , test_oddball_StartAndStopHeapProfiling
+            , test_oddball_RequestHeapCensus
+            , test_oddball_Junk ("\0\0", "TOASTY")
+            , test_oddball_Junk ("\x01DEAD", "DORK")
+            , test_customCommand
+            ]
+
+    -- Create list of dynamic trace flag tests:
+    enableDynamicTraceFlagTests <- shouldEnableDynamicTraceFlagTests
+
+    let dynamicTraceFlagTests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
+        dynamicTraceFlagTests
+            | enableDynamicTraceFlagTests =
+                [ test_oddball_StartAndStopSchedulerTracing
+                , test_oddball_StartAndStopGcTracing
+                , test_oddball_StartAndStopNonmovingGcTracing
+                , test_parfib_StartAndStopSparkSampledTracing
+                , test_parfib_StartAndStopSparkFullTracing
+                , test_oddball_StartAndStopUserTracing
+                , test_capnDance_StartAndStopCapabilityTracing
+                ]
+            | otherwise = []
+
     -- Create logger:
     withLogger $ do
         -- Create temporary directory:
         withTempDirectory "/tmp" "eventlog-socket" $ \tmpDir -> do
             -- Base socket addresses
+            let tests = basicTests <> dynamicTraceFlagTests
             let unixTests = tests <*> pure (EventlogSocketUnixAddr $ tmpDir </> "ghc_eventlog.sock")
             let inetTests = tests <*> pure (EventlogSocketInetAddr "127.0.0.1" tcpPort)
             defaultMainWithIngredients ingredients . testGroup "Tests" . runProgramTests $ unixTests <> inetTests
-  where
-    tests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
-    tests =
-        [ test_fibber
-        , test_fibberCMain
-        , test_oddball_HasHeapProfSample
-        , test_oddball_NoAutomaticHeapSamples
-        , test_oddball_Reconnect
-        , test_oddball_HookOnReconnect
-        , test_oddball_ResetOnReconnect
-        , test_oddball_StartAndStopHeapProfiling
-        , test_oddball_RequestHeapCensus
-        , test_oddball_StartAndStopSchedulerTracing
-        , test_oddball_StartAndStopGcTracing
-        , test_oddball_StartAndStopNonmovingGcTracing
-        , test_parfib_StartAndStopSparkSampledTracing
-        , test_parfib_StartAndStopSparkFullTracing
-        , test_oddball_StartAndStopUserTracing
-        , test_capnDance_StartAndStopCapabilityTracing
-        , test_oddball_Junk ("\0\0", "TOASTY")
-        , test_oddball_Junk ("\x01DEAD", "DORK")
-        , test_customCommand
-        ]
 
 {- |
 Test that @fibber 35@ produces a parseable eventlog.
@@ -272,7 +284,7 @@ test_oddball_StartAndStopSchedulerTracing =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_oddball_StartAndStopSchedulerTracing" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -300,7 +312,7 @@ test_oddball_StartAndStopGcTracing =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_oddball_StartAndStopGcTracing" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -328,7 +340,7 @@ test_oddball_StartAndStopNonmovingGcTracing =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1", "--nonmoving-gc"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_oddball_StartAndStopNonmovingGcTracing" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -356,7 +368,7 @@ test_parfib_StartAndStopSparkSampledTracing =
                 { name = "parfib"
                 , args = ["10", "45"]
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_parfib_StartAndStopSparkSampledTracing" parfib $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -384,7 +396,7 @@ test_parfib_StartAndStopSparkFullTracing =
                 { name = "parfib"
                 , args = ["10", "45"]
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_parfib_StartAndStopSparkFullTracing" parfib $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -412,7 +424,7 @@ test_oddball_StartAndStopUserTracing =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-aug", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_oddball_StartAndStopUserTracing" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -437,7 +449,7 @@ test_capnDance_StartAndStopCapabilityTracing =
                 { name = "capn-dance"
                 , args = []
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_capnDance_StartAndStopCapabilityTracing" capnDance $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->

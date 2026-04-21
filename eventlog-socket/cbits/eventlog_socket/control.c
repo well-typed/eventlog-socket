@@ -194,11 +194,40 @@ static void es_control_request_heap_census(
   DEBUG_DEBUG("%s", "Requested heap census.");
 }
 
+/******************************************************************************
+ * Dynamic Trace Flags (Supported by GHC>=10)
+ ******************************************************************************/
+
+// Dynamic trace flags are supported by GHC version 10 and later, but both the
+// macros GHC_HAS_SET_TRACE_FLAG and FORCE_DYNAMIC_TRACE_FLAGS can be used to
+// override the GHC version check and force support for dynamic trace flags.
+
+#ifndef GHC_HAS_SET_TRACE_FLAG
+#ifdef FORCE_DYNAMIC_TRACE_FLAGS
+#define GHC_HAS_SET_TRACE_FLAG 1
+#else /* FORCE_DYNAMIC_TRACE_FLAGS */
+#ifdef MIN_VERSION_GLASGOW_HASKELL
+#if MIN_VERSION_GLASGOW_HASKELL(10, 0, 0, 0)
+#define GHC_HAS_SET_TRACE_FLAG 1
+#endif /* MIN_VERSION_GLASGOW_HASKELL(10,0,0,0) */
+#endif /* MIN_VERSION_GLASGOW_HASKELL */
+#endif /* FORCE_DYNAMIC_TRACE_FLAGS */
+#endif /* GHC_HAS_SET_TRACE_FLAG */
+
+#ifdef GHC_HAS_SET_TRACE_FLAG
+
+/// @brief A trace flag assignment.
 typedef struct {
   const RUNTIME_TRACE_FLAG flag;
   const bool value;
-} EventlogSocketRuntimeTraceFlagValue;
+} EventlogSocketRuntimeTraceFlagAssignment;
 
+/// @brief Create a `EventlogSocketRuntimeTraceFlagAssignment` value.
+#define RUNTIME_TRACE_FLAG_VALUE(my_flag, my_value)                            \
+  (&(EventlogSocketRuntimeTraceFlagAssignment){.flag = (my_flag),              \
+                                               .value = (my_value)})
+
+/// @brief Show a trace flag name.
 static char *
 es_show_RUNTIME_TRACE_FLAG(const RUNTIME_TRACE_FLAG runtime_trace_flag) {
   switch (runtime_trace_flag) {
@@ -220,18 +249,44 @@ es_show_RUNTIME_TRACE_FLAG(const RUNTIME_TRACE_FLAG runtime_trace_flag) {
 }
 
 /// @brief Handler for "SetRuntimeTraceFlag" commands
-/// (eventlog-socket::6-eventlog-socket::20).
+/// (eventlog-socket::6-eventlog-socket::19).
 static void es_control_set_runtime_trace_flag(
     const EventlogSocketControlNamespace *const namespace,
     const EventlogSocketControlCommandId command_id, const void *user_data) {
   (void)namespace;
   (void)command_id;
-  const EventlogSocketRuntimeTraceFlagValue *const runtime_trace_flag_value =
-      user_data;
+  const EventlogSocketRuntimeTraceFlagAssignment *const
+      runtime_trace_flag_value = user_data;
   setTraceFlag(runtime_trace_flag_value->flag, runtime_trace_flag_value->value);
   DEBUG_DEBUG("%s %s.", runtime_trace_flag_value->value ? "Start" : "Stop",
               es_show_RUNTIME_TRACE_FLAG(runtime_trace_flag_value->flag));
 }
+#else /* GHC_HAS_SET_TRACE_FLAG */
+
+/// @brief Always return @c NULL.
+#define RUNTIME_TRACE_FLAG_VALUE(my_flag, my_value) NULL
+
+// Shims for the values of the RUNTIME_TRACE_FLAG enum.
+#define TRACE_SCHEDULER ((void)0)
+#define TRACE_GC ((void)0)
+#define TRACE_NONMOVING_GC ((void)0)
+#define TRACE_SPARK_SAMPLED ((void)0)
+#define TRACE_SPARK_FULL ((void)0)
+#define TRACE_USER ((void)0)
+#define TRACE_CAP ((void)0)
+
+/// @brief Handler for "SetRuntimeTraceFlag" commands
+/// (eventlog-socket::6-eventlog-socket::19).
+static void es_control_set_runtime_trace_flag(
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *user_data) {
+  (void)namespace;
+  (void)command_id;
+  (void)user_data;
+  DEBUG_ERROR("%s",
+              "This binary was built without support for dynamic trace flags.");
+}
+#endif /* GHC_HAS_SET_TRACE_FLAG */
 
 /******************************************************************************
  * Namespace and Command Registry
@@ -286,15 +341,12 @@ struct EventlogSocketControlNamespace {
   EventlogSocketControlCommand *command_registry;
 };
 
+/// @brief Create a builtin command registry entry.
 #define BUILTIN_COMMAND(my_id, my_handler, my_data, my_next)                   \
   (&(EventlogSocketControlCommand){.command_id = (my_id),                      \
                                    .command_handler = (my_handler),            \
                                    .command_data = (my_data),                  \
                                    .next = (my_next)})
-
-#define RUNTIME_TRACE_FLAG_VALUE(my_flag, my_value)                            \
-  (&(EventlogSocketRuntimeTraceFlagValue){.flag = (my_flag),                   \
-                                          .value = (my_value)})
 
 /// @brief The global namespace registry.
 ///
