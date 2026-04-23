@@ -32,7 +32,7 @@ main = do
             , test_oddball_Reconnect
             , test_oddball_HookOnReconnect
             , test_oddball_ResetOnReconnect
-            , test_oddball_StartAndStopHeapProfiling
+            , test_oddball_ControlHeapProfiling
             , test_oddball_RequestHeapCensus
             , test_oddball_Junk ("\0\0", "TOASTY")
             , test_oddball_Junk ("\x01DEAD", "DORK")
@@ -45,13 +45,13 @@ main = do
     let dynamicTraceFlagTests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
         dynamicTraceFlagTests
             | enableDynamicTraceFlagTests =
-                [ test_oddball_StartAndStopSchedulerTracing
-                , test_oddball_StartAndStopGcTracing
-                , test_oddball_StartAndStopNonmovingGcTracing
-                , test_parfib_StartAndStopSparkSampledTracing
-                , test_parfib_StartAndStopSparkFullTracing
-                , test_oddball_StartAndStopUserTracing
-                , test_capnDance_StartAndStopCapabilityTracing
+                [ test_oddball_ControlSchedulerTracing
+                , test_oddball_ControlGcTracing
+                , test_oddball_ControlNonmovingGcTracing
+                , test_parfib_ControlSparkSampledTracing
+                , test_parfib_ControlSparkFullTracing
+                , test_oddball_ControlUserTracing
+                , test_capnDance_ControlCapabilityTracing
                 ]
             | otherwise = []
 
@@ -219,8 +219,8 @@ respected, i.e., that once the `StartHeapProfiling` command is sent, heap
 profile samples are received, and once the `StopHeapProfiling` command is
 sent, after some iterations, no more heap profile samples are received.
 -}
-test_oddball_StartAndStopHeapProfiling :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_oddball_StartAndStopHeapProfiling =
+test_oddball_ControlHeapProfiling :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_oddball_ControlHeapProfiling =
     let oddball =
             Program
                 { name = "oddball"
@@ -228,7 +228,7 @@ test_oddball_StartAndStopHeapProfiling =
                 , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_oddball_StartAndStopHeapProfiling" oddball $ \eventlogSocket -> do
+     in programTestFor "test_oddball_ControlHeapProfiling" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
                     &> hasNoHeapProfSampleString
@@ -273,8 +273,8 @@ respected, i.e., that once the `StartSchedulerTracing` command is sent,
 scheduler events are received, and once the `StopSchedulerTracing` command is
 sent, after some iterations, no more scheduler events are received.
 -}
-test_oddball_StartAndStopSchedulerTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_oddball_StartAndStopSchedulerTracing =
+test_oddball_ControlSchedulerTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_oddball_ControlSchedulerTracing =
     let oddball =
             Program
                 { name = "oddball"
@@ -282,7 +282,7 @@ test_oddball_StartAndStopSchedulerTracing =
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_oddball_StartAndStopSchedulerTracing" oddball $ \eventlogSocket -> do
+     in programTestFor "test_oddball_ControlSchedulerTracing" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
                 -- Validate that the Summing marker is seen...
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
@@ -301,8 +301,8 @@ respected, i.e., that once the `StartGcTracing` command is sent,
 GC events are received, and once the `StopGcTracing` command is
 sent, after some iterations, no more GC events are received.
 -}
-test_oddball_StartAndStopGcTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_oddball_StartAndStopGcTracing =
+test_oddball_ControlGcTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_oddball_ControlGcTracing =
     let oddball =
             Program
                 { name = "oddball"
@@ -310,7 +310,7 @@ test_oddball_StartAndStopGcTracing =
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_oddball_StartAndStopGcTracing" oddball $ \eventlogSocket -> do
+     in programTestFor "test_oddball_ControlGcTracing" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
                 -- Validate that the Summing marker is seen...
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
@@ -329,8 +329,8 @@ respected, i.e., that once the `StartNonmovingGcTracing` command is sent,
 nonmoving-GC events are received, and once the `StopNonmovingGcTracing` command is
 sent, after some iterations, no more nonmoving-GC events are received.
 -}
-test_oddball_StartAndStopNonmovingGcTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_oddball_StartAndStopNonmovingGcTracing =
+test_oddball_ControlNonmovingGcTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_oddball_ControlNonmovingGcTracing =
     let oddball =
             Program
                 { name = "oddball"
@@ -338,7 +338,7 @@ test_oddball_StartAndStopNonmovingGcTracing =
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1", "--nonmoving-gc"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_oddball_StartAndStopNonmovingGcTracing" oddball $ \eventlogSocket -> do
+     in programTestFor "test_oddball_ControlNonmovingGcTracing" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
                 -- Validate that the Summing marker is seen...
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
@@ -357,8 +357,8 @@ respected, i.e., that once the `StartSparkSampledTracing` command is sent,
 sampled spark events are received, and once the `StopSparkSampledTracing` command is
 sent, after some iterations, no more sampled spark events are received.
 -}
-test_parfib_StartAndStopSparkSampledTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_parfib_StartAndStopSparkSampledTracing =
+test_parfib_ControlSparkSampledTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_parfib_ControlSparkSampledTracing =
     let parfib =
             Program
                 { name = "parfib"
@@ -366,7 +366,7 @@ test_parfib_StartAndStopSparkSampledTracing =
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_parfib_StartAndStopSparkSampledTracing" parfib $ \eventlogSocket -> do
+     in programTestFor "test_parfib_ControlSparkSampledTracing" parfib $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
                 -- Validate that the Fibbing marker is seen...
                 hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`)
@@ -385,8 +385,8 @@ respected, i.e., that once the `StartSparkFullTracing` command is sent,
 full spark events are received, and once the `StopSparkFullTracing` command is
 sent, after some iterations, no more full spark events are received.
 -}
-test_parfib_StartAndStopSparkFullTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_parfib_StartAndStopSparkFullTracing =
+test_parfib_ControlSparkFullTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_parfib_ControlSparkFullTracing =
     let parfib =
             Program
                 { name = "parfib"
@@ -394,7 +394,7 @@ test_parfib_StartAndStopSparkFullTracing =
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_parfib_StartAndStopSparkFullTracing" parfib $ \eventlogSocket -> do
+     in programTestFor "test_parfib_ControlSparkFullTracing" parfib $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
                 -- Validate that the Fibbing marker is seen...
                 hasMatchingUserMarker ("Fibbing" `T.isPrefixOf`)
@@ -413,8 +413,8 @@ respected, i.e., that once the `StartUserTracing` command is sent,
 user events are received, and once the `StopUserTracing` command is
 sent, after some iterations, no more user events are received.
 -}
-test_oddball_StartAndStopUserTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_oddball_StartAndStopUserTracing =
+test_oddball_ControlUserTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_oddball_ControlUserTracing =
     let oddball =
             Program
                 { name = "oddball"
@@ -422,7 +422,7 @@ test_oddball_StartAndStopUserTracing =
                 , rtsopts = ["-l-aug", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_oddball_StartAndStopUserTracing" oddball $ \eventlogSocket -> do
+     in programTestFor "test_oddball_ControlUserTracing" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
                 -- Validate that the Summing marker is seen...
                 hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
@@ -438,8 +438,8 @@ respected, i.e., that once the `StartCapabilityTracing` command is sent,
 capability events are received, and once the `StopCapabilityTracing` command is
 sent, after some iterations, no more capability events are received.
 -}
-test_capnDance_StartAndStopCapabilityTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
-test_capnDance_StartAndStopCapabilityTracing =
+test_capnDance_ControlCapabilityTracing :: (HasLogger) => EventlogSocketAddr -> ProgramTest
+test_capnDance_ControlCapabilityTracing =
     let capnDance =
             Program
                 { name = "capn-dance"
@@ -447,7 +447,7 @@ test_capnDance_StartAndStopCapabilityTracing =
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 , eventlogSocketBuildFlags = ["+control"]
                 }
-     in programTestFor "test_capnDance_StartAndStopCapabilityTracing" capnDance $ \eventlogSocket -> do
+     in programTestFor "test_capnDance_ControlCapabilityTracing" capnDance $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
                 -- Validate that the Dancing marker is seen...
                 hasMatchingUserMarker ("Dancing" `T.isPrefixOf`)
