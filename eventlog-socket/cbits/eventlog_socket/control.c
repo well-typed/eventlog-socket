@@ -29,7 +29,6 @@
 #include <unistd.h>
 
 #include <Rts.h>
-#include <rts/prof/Heap.h>
 
 #include "./control.h"
 #include "./debug.h"
@@ -37,7 +36,7 @@
 #include "./poll.h"
 #include "eventlog_socket.h"
 #include "init_state.h"
-#include "rts/prof/CCS.h"
+#include "rts/EventLogWriter.h"
 
 // CONTROL_MAGIC should be the UTF-8 encoding of some code point between
 // U+010000 and U+10FFFF. Let's pick code point U+01E5CC, for Eventlog
@@ -92,6 +91,48 @@ static const uint8_t g_control_magic[CONTROL_MAGIC_LEN] = {
 
 /// @brief The ID of the builtin `RequestHeapCensus` command.
 #define BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS 5
+
+/// @brief The ID of the builtin `StartSchedulerTracing` command.
+#define BUILTIN_COMMAND_ID_START_SCHEDULER_TRACING 6
+
+/// @brief The ID of the builtin `StopSchedulerTracing` command.
+#define BUILTIN_COMMAND_ID_STOP_SCHEDULER_TRACING 7
+
+/// @brief The ID of the builtin `StartGcTracing` command.
+#define BUILTIN_COMMAND_ID_START_GC_TRACING 8
+
+/// @brief The ID of the builtin `StopGcTracing` command.
+#define BUILTIN_COMMAND_ID_STOP_GC_TRACING 9
+
+/// @brief The ID of the builtin `StartNonmovingGcTracing` command.
+#define BUILTIN_COMMAND_ID_START_NONMOVING_GC_TRACING 10
+
+/// @brief The ID of the builtin `StopNonmovingGcTracing` command.
+#define BUILTIN_COMMAND_ID_STOP_NONMOVING_GC_TRACING 11
+
+/// @brief The ID of the builtin `StartSparkSampledTracing` command.
+#define BUILTIN_COMMAND_ID_START_SPARK_SAMPLED_TRACING 12
+
+/// @brief The ID of the builtin `StopSparkSampledTracing` command.
+#define BUILTIN_COMMAND_ID_STOP_SPARK_SAMPLED_TRACING 13
+
+/// @brief The ID of the builtin `StartSparkFullTracing` command.
+#define BUILTIN_COMMAND_ID_START_SPARK_FULL_TRACING 14
+
+/// @brief The ID of the builtin `StopSparkFullTracing` command.
+#define BUILTIN_COMMAND_ID_STOP_SPARK_FULL_TRACING 15
+
+/// @brief The ID of the builtin `StartUserTracing` command.
+#define BUILTIN_COMMAND_ID_START_USER_TRACING 16
+
+/// @brief The ID of the builtin `StopUserTracing` command.
+#define BUILTIN_COMMAND_ID_STOP_USER_TRACING 17
+
+/// @brief The ID of the builtin `StartCapTracing` command.
+#define BUILTIN_COMMAND_ID_START_CAP_TRACING 18
+
+/// @brief The ID of the builtin `StopCapTracing` command.
+#define BUILTIN_COMMAND_ID_STOP_CAP_TRACING 19
 
 /******************************************************************************
  * Handlers for Builtin Commands
@@ -154,6 +195,100 @@ static void es_control_request_heap_census(
 }
 
 /******************************************************************************
+ * Dynamic Trace Flags (Supported by GHC>=10)
+ ******************************************************************************/
+
+// Dynamic trace flags are supported by GHC version 10 and later, but both the
+// macros GHC_HAS_SET_TRACE_FLAG and FORCE_DYNAMIC_TRACE_FLAGS can be used to
+// override the GHC version check and force support for dynamic trace flags.
+
+#ifndef GHC_HAS_SET_TRACE_FLAG
+#ifdef FORCE_DYNAMIC_TRACE_FLAGS
+#define GHC_HAS_SET_TRACE_FLAG 1
+#else /* FORCE_DYNAMIC_TRACE_FLAGS */
+#ifdef MIN_VERSION_GLASGOW_HASKELL
+#if MIN_VERSION_GLASGOW_HASKELL(10, 0, 0, 0)
+#define GHC_HAS_SET_TRACE_FLAG 1
+#endif /* MIN_VERSION_GLASGOW_HASKELL(10,0,0,0) */
+#endif /* MIN_VERSION_GLASGOW_HASKELL */
+#endif /* FORCE_DYNAMIC_TRACE_FLAGS */
+#endif /* GHC_HAS_SET_TRACE_FLAG */
+
+#ifdef GHC_HAS_SET_TRACE_FLAG
+
+/// @brief A trace flag assignment.
+typedef struct {
+  const RUNTIME_TRACE_FLAG flag;
+  const bool value;
+} EventlogSocketRuntimeTraceFlagAssignment;
+
+/// @brief Create a `EventlogSocketRuntimeTraceFlagAssignment` value.
+#define RUNTIME_TRACE_FLAG_VALUE(my_flag, my_value)                            \
+  (&(EventlogSocketRuntimeTraceFlagAssignment){.flag = (my_flag),              \
+                                               .value = (my_value)})
+
+/// @brief Show a trace flag name.
+static char *
+es_show_RUNTIME_TRACE_FLAG(const RUNTIME_TRACE_FLAG runtime_trace_flag) {
+  switch (runtime_trace_flag) {
+  case TRACE_SCHEDULER:
+    return "TRACE_SCHEDULER";
+  case TRACE_GC:
+    return "TRACE_GC";
+  case TRACE_NONMOVING_GC:
+    return "TRACE_NONMOVING_GC";
+  case TRACE_SPARK_SAMPLED:
+    return "TRACE_SPARK_SAMPLED";
+  case TRACE_SPARK_FULL:
+    return "TRACE_SPARK_FULL";
+  case TRACE_USER:
+    return "TRACE_USER";
+  case TRACE_CAP:
+    return "TRACE_CAP";
+  }
+}
+
+/// @brief Handler for "SetRuntimeTraceFlag" commands
+/// (eventlog-socket::6-eventlog-socket::19).
+static void es_control_set_runtime_trace_flag(
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *user_data) {
+  (void)namespace;
+  (void)command_id;
+  const EventlogSocketRuntimeTraceFlagAssignment *const
+      runtime_trace_flag_value = user_data;
+  setTraceFlag(runtime_trace_flag_value->flag, runtime_trace_flag_value->value);
+  DEBUG_DEBUG("%s %s.", runtime_trace_flag_value->value ? "Start" : "Stop",
+              es_show_RUNTIME_TRACE_FLAG(runtime_trace_flag_value->flag));
+}
+#else /* GHC_HAS_SET_TRACE_FLAG */
+
+/// @brief Always return @c NULL.
+#define RUNTIME_TRACE_FLAG_VALUE(my_flag, my_value) NULL
+
+// Shims for the values of the RUNTIME_TRACE_FLAG enum.
+#define TRACE_SCHEDULER ((void)0)
+#define TRACE_GC ((void)0)
+#define TRACE_NONMOVING_GC ((void)0)
+#define TRACE_SPARK_SAMPLED ((void)0)
+#define TRACE_SPARK_FULL ((void)0)
+#define TRACE_USER ((void)0)
+#define TRACE_CAP ((void)0)
+
+/// @brief Handler for "SetRuntimeTraceFlag" commands
+/// (eventlog-socket::6-eventlog-socket::19).
+static void es_control_set_runtime_trace_flag(
+    const EventlogSocketControlNamespace *const namespace,
+    const EventlogSocketControlCommandId command_id, const void *user_data) {
+  (void)namespace;
+  (void)command_id;
+  (void)user_data;
+  DEBUG_ERROR("%s",
+              "This binary was built without support for dynamic trace flags.");
+}
+#endif /* GHC_HAS_SET_TRACE_FLAG */
+
+/******************************************************************************
  * Namespace and Command Registry
  ******************************************************************************/
 
@@ -206,52 +341,104 @@ struct EventlogSocketControlNamespace {
   EventlogSocketControlCommand *command_registry;
 };
 
+/// @brief Create a builtin command registry entry.
+#define BUILTIN_COMMAND(my_id, my_handler, my_data, my_next)                   \
+  (&(EventlogSocketControlCommand){.command_id = (my_id),                      \
+                                   .command_handler = (my_handler),            \
+                                   .command_data = (my_data),                  \
+                                   .next = (my_next)})
+
 /// @brief The global namespace registry.
 ///
 /// See `eventlog_socket_control_namespace`.
 ///
 /// This is initialised with the builtin namespace and the builtin commands.
+// clang-format off
 static EventlogSocketControlNamespace g_control_namespace_registry = {
     .namespace = BUILTIN_NAMESPACE,
     .namespace_len = strlen(BUILTIN_NAMESPACE),
     .next = NULL,
     .command_registry =
-        &(EventlogSocketControlCommand){
-            .command_id = BUILTIN_COMMAND_ID_START_PROFILING,
-            .command_handler = es_control_start_profiling,
-            .command_data = NULL,
-            .next =
-                &(EventlogSocketControlCommand){
-                    .command_id = BUILTIN_COMMAND_ID_STOP_PROFILING,
-                    .command_handler = es_control_stop_profiling,
-                    .command_data = NULL,
-                    .next =
-                        &(EventlogSocketControlCommand){
-                            .command_id =
-                                BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
-                            .command_handler = es_control_start_heap_profiling,
-                            .command_data = NULL,
-                            .next =
-                                &(EventlogSocketControlCommand){
-                                    .command_id =
-                                        BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
-                                    .command_handler =
-                                        es_control_stop_heap_profiling,
-                                    .command_data = NULL,
-                                    .next =
-                                        &(EventlogSocketControlCommand){
-                                            .command_id =
-                                                BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS,
-                                            .command_handler =
-                                                es_control_request_heap_census,
-                                            .command_data = NULL,
-                                            .next = NULL,
-                                        },
-                                },
-                        },
-                },
-        },
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_PROFILING,
+      es_control_start_profiling,
+      NULL,
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_PROFILING,
+      es_control_stop_profiling,
+      NULL,
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_HEAP_PROFILING,
+      es_control_start_heap_profiling,
+      NULL,
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_HEAP_PROFILING,
+      es_control_stop_heap_profiling,
+      NULL,
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_REQUEST_HEAP_CENSUS,
+      es_control_request_heap_census,
+      NULL,
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_SCHEDULER_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_SCHEDULER, true),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_SCHEDULER_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_SCHEDULER, false),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_GC_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_GC, true),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_GC_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_GC, false),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_NONMOVING_GC_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_NONMOVING_GC, true),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_NONMOVING_GC_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_NONMOVING_GC, false),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_SPARK_SAMPLED_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_SPARK_SAMPLED, true),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_SPARK_SAMPLED_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_SPARK_SAMPLED, false),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_SPARK_FULL_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_SPARK_FULL, true),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_SPARK_FULL_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_SPARK_FULL, false),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_USER_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_USER, true),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_USER_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_USER, false),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_START_CAP_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_CAP, true),
+    BUILTIN_COMMAND(
+      BUILTIN_COMMAND_ID_STOP_CAP_TRACING,
+      es_control_set_runtime_trace_flag,
+      RUNTIME_TRACE_FLAG_VALUE(TRACE_CAP, false),
+      NULL
+    ))))))))))))))))))),
 };
+// clang-format on
 
 /// @brief The mutex that guards the global namespace registry.
 ///
