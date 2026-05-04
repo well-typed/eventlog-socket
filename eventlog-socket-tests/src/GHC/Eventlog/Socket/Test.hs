@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module GHC.Eventlog.Socket.Test (
     -- * Example Programs
@@ -75,6 +76,9 @@ module GHC.Eventlog.Socket.Test (
     Message (..),
     debug,
     debugEvents,
+
+    -- * Custom options
+    keepProgramBuildOption,
 ) where
 
 import Control.Concurrent (forkIO, killThread, threadDelay)
@@ -94,6 +98,7 @@ import qualified Data.List.NonEmpty as NE
 import Data.Machine
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isNothing)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Word (Word16, Word64)
 import GHC.Clock (getMonotonicTimeNSec)
@@ -114,8 +119,9 @@ import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (CreateProcess (..), Pid, ProcessHandle, StdStream (..), createProcess_, getPid, getProcessExitCode, proc, readProcessWithExitCode, showCommandForUser, terminateProcess, waitForProcess)
 import System.Process.Internals (ignoreSigPipe)
-import Test.Tasty (TestName, TestTree, testGroup, withResource)
+import Test.Tasty (TestName, TestTree, askOption, testGroup, withResource)
 import Test.Tasty.HUnit (Assertion, HasCallStack, assertFailure, testCase)
+import Test.Tasty.Options (IsOption (..), OptionDescription (..), safeReadBool)
 import Text.Printf (printf)
 
 #if defined(DEBUG)
@@ -123,6 +129,27 @@ import qualified Control.Concurrent.STM as T
 import GHC.RTS.Events (TimeFormat (..), ppEvent)
 import System.Posix.Types (CPid (..))
 #endif
+
+--------------------------------------------------------------------------------
+-- Tasty Options
+--------------------------------------------------------------------------------
+
+newtype KeepProgramBuild = KeepProgramBuild Bool
+
+instance IsOption KeepProgramBuild where
+    defaultValue :: KeepProgramBuild
+    defaultValue = KeepProgramBuild False
+    parseValue :: String -> Maybe KeepProgramBuild
+    parseValue = fmap KeepProgramBuild . safeReadBool
+
+    -- optionName :: Tagged KeepProgramBuild String
+    optionName = "keep-program-build"
+
+    -- optionHelp :: Tagged KeepProgramBuild String
+    optionHelp = "If true, keep the cabal build directories for the test programs."
+
+keepProgramBuildOption :: OptionDescription
+keepProgramBuildOption = Option (Proxy :: Proxy KeepProgramBuild)
 
 --------------------------------------------------------------------------------
 -- Example Programs
@@ -1050,9 +1077,11 @@ runProgramTests = fmap toTestGroup . groupByDesc
     toTestGroup (pt :| pts) =
         -- Assert that all tests have the same program description.
         assert (all (((==) `on` (.programDesc)) pt) pts) $
-            withResource pt.makeProgram pt.freeProgram $ \findProgram ->
-                testGroup ("With program " <> pt.programDesc <> ":") $
-                    [pt'.testProgram findProgram | pt' <- (pt : pts)]
+            askOption @KeepProgramBuild $ \(KeepProgramBuild keepProgramBuild) -> do
+                let maybeFreeProgram programBin = if keepProgramBuild then pure () else pt.freeProgram programBin
+                withResource pt.makeProgram maybeFreeProgram $ \findProgram ->
+                    testGroup ("With program " <> pt.programDesc <> ":") $
+                        [pt'.testProgram findProgram | pt' <- (pt : pts)]
 
 inetPortCounter :: MVar Word16
 inetPortCounter = unsafePerformIO (newMVar 0)

@@ -14,13 +14,16 @@ import GHC.Eventlog.Socket.Test
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withTempDirectory)
-import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty (defaultIngredients, defaultMainWithIngredients, includingOptions, testGroup)
 import Text.Read (readMaybe)
 
 main :: IO ()
 main = do
     -- Allow the user to overwrite the TCP port:
     tcpPort <- (fromMaybe "4242" . (readMaybe =<<)) <$> lookupEnv "GHC_EVENTLOG_INET_PORT"
+
+    -- Create list of tasty ingredients:
+    let ingredients = [includingOptions [keepProgramBuildOption]] <> defaultIngredients
 
     -- Create logger:
     withLogger $ do
@@ -29,7 +32,7 @@ main = do
             -- Base socket addresses
             let unixTests = tests <*> pure (EventlogSocketUnixAddr $ tmpDir </> "ghc_eventlog.sock")
             let inetTests = tests <*> pure (EventlogSocketInetAddr "127.0.0.1" tcpPort)
-            defaultMain . testGroup "Tests" . runProgramTests $ unixTests <> inetTests
+            defaultMainWithIngredients ingredients . testGroup "Tests" . runProgramTests $ unixTests <> inetTests
   where
     tests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
     tests =
