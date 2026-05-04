@@ -180,7 +180,7 @@ programResource program = ProgramResource{..}
   where
     -- Shared information
     eventlogSocketBuildFlags = program.eventlogSocketBuildFlags <> defaultBuildFlags
-    constraintArgs
+    buildFlags
         | null eventlogSocketBuildFlags = []
         | otherwise = ["--constraint", "eventlog-socket " <> unwords eventlogSocketBuildFlags]
     buildDir = "dist-newstyle/" <> L.intercalate "-" ("test" : program.name : eventlogSocketBuildFlags)
@@ -204,7 +204,7 @@ programResource program = ProgramResource{..}
 
         -- Build program
         debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
-        let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", buildDir] <> constraintArgs
+        let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", buildDir] <> buildFlags
         debugInfo (showCommandForUser cabal buildArgs)
         (buildExit, buildOut, buildErr) <- readProcessWithExitCode cabal buildArgs ""
         when (buildExit /= ExitSuccess) $ do
@@ -213,7 +213,7 @@ programResource program = ProgramResource{..}
 
         -- Find binary for program
         debugInfo $ "Find binary for program " <> program.name
-        let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", buildDir]
+        let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", buildDir] <> buildFlags
         debugInfo (showCommandForUser cabal findArgs)
         (findExit, findOut, findErr) <- readProcessWithExitCode cabal findArgs ""
         when (findExit /= ExitSuccess) $ do
