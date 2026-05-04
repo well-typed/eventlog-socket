@@ -47,7 +47,7 @@ jobs:
           ghc-version: ${{ matrix.ghc-version }}
 
       - name: 🚀 Testing
-        run: ./scripts/test.sh
+        run: ./scripts/test.sh -f+debug -f+debug-verbosity-trace
 
       - name: 📦 Upload test logs
         if: ${{ always() }}
