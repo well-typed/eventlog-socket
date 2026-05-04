@@ -83,13 +83,14 @@ module GHC.Eventlog.Socket.Test (
 
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar)
-import Control.Exception (Exception (..), assert, bracket, bracketOnError, catch, mask_, throwIO)
-import Control.Monad (when)
+import Control.Exception (ErrorCall (..), Exception (..), assert, bracket, bracketOnError, catch, mask_, throwIO)
+import Control.Monad (filterM, unless, when)
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.Binary as B
 import Data.Bool (bool)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
+import Data.Char (isSpace)
 import Data.Foldable (traverse_)
 import Data.Function (on, (&))
 import qualified Data.List as L
@@ -100,6 +101,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
+import Data.Traversable (for)
 import Data.Word (Word16, Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Eventlog.Socket (EventlogSocketAddr (..))
@@ -110,6 +112,7 @@ import GHC.RTS.Events.Incremental (Decoder (..), decodeEventLog)
 import Network.Socket (Socket)
 import qualified Network.Socket as S
 import qualified Network.Socket.ByteString as SB
+import System.Directory (doesFileExist)
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (splitFileName, (</>))
@@ -248,12 +251,12 @@ programResource program = ProgramResource{..}
                 let cabalProgram = Program{name = "cabal", args = buildArgs, rtsopts = [], eventlogSocketBuildFlags = []}
                 let cabalProgramPidIO = getPid processHandle
                 cabalProgramPid <- cabalProgramPidIO
-                let cabalInfo = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
-                let ?programInfo = cabalInfo
+                let info = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
+                let ?programInfo = info
 
                 -- Start loggers for stderr and stdout:
-                maybeKillDebugOut <- traverse (debugHandle $ ProgramOut cabalInfo) maybeHandleOut
-                maybeKillDebugErr <- traverse (debugHandle $ ProgramErr cabalInfo) maybeHandleErr
+                maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
+                maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
                 let kill = mask_ $ do
                         debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
                         sequence_ maybeKillDebugOut
@@ -264,15 +267,14 @@ programResource program = ProgramResource{..}
                         debugInfo $ "Process was killed with exit code " <> show exitCode
                         pure ()
                 let wait = do
-                        debugInfo $ "Waiting for " <> program.name <> " to finish."
-                        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
+                        debugInfo $ "Wait for " <> showCommandForUser cabal buildArgs
+                        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
+                            debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal buildArgs
                             when (exitCode /= ExitSuccess) . assertFailure $
                                 "Program " <> program.name <> " failed with exit code " <> show exitCode
 
                 -- Wait for building program to finish
                 wait
-
-        buildProgram
 
         -- Find the program binary
         let findProgram :: IO FilePath
@@ -305,20 +307,29 @@ programResource program = ProgramResource{..}
                         debugInfo $ "Process was killed with exit code " <> show exitCode
                         pure ()
                 let wait = do
-                        debugInfo $ "Waiting for " <> program.name <> " to finish."
-                        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
+                        debugInfo $ "Wait for " <> showCommandForUser cabal findArgs
+                        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
+                            debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal findArgs
                             when (exitCode /= ExitSuccess) . assertFailure $
                                 "Program " <> program.name <> " failed with exit code " <> show exitCode
 
                 wait
 
-                programBin <- IO.hGetContents handleOut
+                -- The last line of output from list-bin should be the path:
+                findOut <- IO.hGetContents handleOut
+                programBins <- filterM doesFileExist (lines findOut)
+                case programBins of
+                    [] -> do
+                        let msg = "Could not find program binary for " <> program.name
+                        debugFail msg >> throwIO (ErrorCall msg)
+                    [programBin] -> do
+                        debugInfo $ "Found program binary at " <> programBin
+                        pure programBin
+                    (_programBin : _programBins) -> do
+                        let msg = unlines ("Found multiple program binaries for " <> program.name : programBins)
+                        debugFail msg >> throwIO (ErrorCall msg)
 
-                debugInfo $ "Found program binary at " <> programBin
-
-                pure programBin
-
-        programBin <- findProgram
+        programBin <- buildProgram >> findProgram
 
         debug Footer
 
@@ -346,6 +357,11 @@ programResource program = ProgramResource{..}
     -- Fork the program binary
     forkProgram :: FilePath -> EventlogSocketAddr -> IO ProgramHandle
     forkProgram programBin eventlogSocketAddr = do
+        -- Check if program exists:
+        programBinExists <- doesFileExist programBin
+        if programBinExists
+            then debugInfo $ "Program binary exists: " <> programBin
+            else debugFail $ "Program binary does NOT exist: " <> programBin
         -- Start program
         debugInfo $ "Launching program " <> programDesc
         inheritedEnv <- filter shouldInherit <$> getEnvironment
