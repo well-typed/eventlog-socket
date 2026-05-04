@@ -202,29 +202,99 @@ programResource program = ProgramResource{..}
         ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
         cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
 
-        -- Build program
-        debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
-        let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", buildDir] <> buildFlags
-        debugInfo (showCommandForUser cabal buildArgs)
-        (buildExit, buildOut, buildErr) <- readProcessWithExitCode cabal buildArgs ""
-        when (buildExit /= ExitSuccess) $ do
-            debugFail . unlines $ ["Failed to build program", buildOut, buildErr]
-            throwIO buildExit
+        -- Build the program binary
+        let buildProgram :: IO ()
+            buildProgram = do
+                -- Start building program binary
+                debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
+                let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", buildDir] <> buildFlags
+                debugInfo (showCommandForUser cabal buildArgs)
+                let createProcess =
+                        (proc cabal buildArgs)
+                            { std_in = CreatePipe
+                            , std_out = CreatePipe
+                            , std_err = CreatePipe
+                            }
+                (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
 
-        -- Find binary for program
-        debugInfo $ "Find binary for program " <> program.name
-        let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", buildDir] <> buildFlags
-        debugInfo (showCommandForUser cabal findArgs)
-        (findExit, findOut, findErr) <- readProcessWithExitCode cabal findArgs ""
-        when (findExit /= ExitSuccess) $ do
-            debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
-            throwIO findExit
-        let maybeProgramBin = fmap fst . L.uncons . lines $ findOut
-        programBin <- flip (`maybe` pure) maybeProgramBin $ do
-            debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
-            throwIO findExit
+                -- Create the ProgramInfo:
+                let cabalProgram = Program{name = "cabal", args = buildArgs, rtsopts = [], eventlogSocketBuildFlags = []}
+                let cabalProgramPidIO = getPid processHandle
+                cabalProgramPid <- cabalProgramPidIO
+                let cabalInfo = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
+                let ?programInfo = cabalInfo
+
+                -- Start loggers for stderr and stdout:
+                maybeKillDebugOut <- traverse (debugHandle $ ProgramOut cabalInfo) maybeHandleOut
+                maybeKillDebugErr <- traverse (debugHandle $ ProgramErr cabalInfo) maybeHandleErr
+                let kill = mask_ $ do
+                        debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
+                        sequence_ maybeKillDebugOut
+                        debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+                        sequence_ maybeKillDebugErr
+                        debugInfo $ "Cleaning up process for " <> program.name <> "."
+                        exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
+                        debugInfo $ "Process was killed with exit code " <> show exitCode
+                        pure ()
+                let wait = do
+                        debugInfo $ "Waiting for " <> program.name <> " to finish."
+                        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
+                            when (exitCode /= ExitSuccess) . assertFailure $
+                                "Program " <> program.name <> " failed with exit code " <> show exitCode
+
+                -- Wait for building program to finish
+                wait
+
+        buildProgram
+
+        -- Find the program binary
+        let findProgram :: IO FilePath
+            findProgram = do
+                debugInfo $ "Find binary for program " <> program.name
+                let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", buildDir] <> buildFlags
+                debugInfo (showCommandForUser cabal findArgs)
+                let createProcess =
+                        (proc cabal findArgs)
+                            { std_in = CreatePipe
+                            , std_out = CreatePipe
+                            , std_err = CreatePipe
+                            }
+                (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
+
+                -- Create the ProgramInfo:
+                let cabalProgram = Program{name = "cabal", args = findArgs, rtsopts = [], eventlogSocketBuildFlags = []}
+                let cabalProgramPidIO = getPid processHandle
+                cabalProgramPid <- cabalProgramPidIO
+                let cabalInfo = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
+                let ?programInfo = cabalInfo
+
+                -- Start loggers for stderr and stdout:
+                maybeKillDebugErr <- traverse (debugHandle $ ProgramErr cabalInfo) maybeHandleErr
+                let kill = mask_ $ do
+                        debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+                        sequence_ maybeKillDebugErr
+                        debugInfo $ "Cleaning up process for " <> program.name <> "."
+                        exitCode <- murderProcess program.name (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle)
+                        debugInfo $ "Process was killed with exit code " <> show exitCode
+                        pure ()
+                let wait = do
+                        debugInfo $ "Waiting for " <> program.name <> " to finish."
+                        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
+                            when (exitCode /= ExitSuccess) . assertFailure $
+                                "Program " <> program.name <> " failed with exit code " <> show exitCode
+
+                wait
+
+                programBin <- IO.hGetContents handleOut
+
+                debugInfo $ "Found program binary at " <> programBin
+
+                pure programBin
+
+        programBin <- findProgram
 
         debug Footer
+
         pure programBin
 
     -- Free the program binary
