@@ -60,7 +60,7 @@ test_fibber =
                 { name = "fibber"
                 , args = ["40"]
                 , rtsopts = ["-l-au"]
-                , eventlogSocketBuildFlags = []
+                , buildFlags = []
                 }
      in programTestFor "test_fibber" fibber $ \eventlogSocket -> do
             assertEventlogWith eventlogSocket $
@@ -79,7 +79,7 @@ test_fibberCMain =
                 { name = "fibber-c-main"
                 , args = ["40"]
                 , rtsopts = ["-l-au"]
-                , eventlogSocketBuildFlags = []
+                , buildFlags = []
                 }
      in programTestFor "test_fibberCMain" fibberCMain $ \eventlogSocket -> do
             threadDelay 3_000_000
@@ -103,7 +103,7 @@ test_oddball_HasHeapProfSample =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = []
+                , buildFlags = []
                 }
      in programTestFor "test_oddball_HasHeapProfSample" oddball $ \eventlogSocket -> do
             assertEventlogWith eventlogSocket $
@@ -122,7 +122,7 @@ test_oddball_NoAutomaticHeapSamples =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , eventlogSocketBuildFlags = []
+                , buildFlags = []
                 }
      in programTestFor "test_oddball_NoAutomaticHeapSamples" oddball $ \eventlogSocket -> do
             assertEventlogWith eventlogSocket $
@@ -142,7 +142,7 @@ test_oddball_Reconnect =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = []
+                , buildFlags = []
                 }
      in programTestFor "test_oddball_Reconnect" oddball $ \eventlogSocket -> do
             -- Validate that reconnecting works and that each stream has a WallClockTime
@@ -160,7 +160,7 @@ test_oddball_HookOnReconnect =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = []
+                , buildFlags = []
                 }
      in programTestFor "test_oddball_HookOnReconnect" oddball $ \eventlogSocket -> do
             -- Validate that reconnecting works and that each stream has a WallClockTime
@@ -182,7 +182,7 @@ test_oddball_ResetOnReconnect =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_oddball_ResetOnReconnect" oddball $ \eventlogSocket -> do
             -- Validate that the event stream contains at least one heap
@@ -211,7 +211,7 @@ test_oddball_StartAndStopHeapProfiling =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_oddball_StartAndStopHeapProfiling" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -236,7 +236,7 @@ test_oddball_RequestHeapCensus =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_oddball_RequestHeapCensus" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -263,7 +263,7 @@ test_oddball_Junk (junkBefore, junkAfter) =
                 { name = "oddball"
                 , args = []
                 , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor ("test_oddball_Junk[" <> show junkBefore <> "," <> show junkAfter <> "]") oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -286,7 +286,7 @@ test_customCommand =
                 { name = "custom-command"
                 , args = ["--forever"]
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , eventlogSocketBuildFlags = ["+control"]
+                , buildFlags = ["--constraint=eventlog-socket+control"]
                 }
      in programTestFor "test_customCommand" customCommand $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
