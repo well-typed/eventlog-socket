@@ -84,15 +84,15 @@ module GHC.Eventlog.Socket.Test (
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar (MVar, modifyMVar, newMVar)
 import Control.Exception (ErrorCall (..), Exception (..), assert, bracket, bracketOnError, catch, mask_, throwIO)
-import Control.Monad (filterM, unless, when)
+import Control.Monad (filterM, when)
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.Binary as B
 import Data.Bool (bool)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
-import Data.Char (isSpace)
 import Data.Foldable (traverse_)
 import Data.Function (on, (&))
+import Data.Hashable (Hashable (..))
 import qualified Data.List as L
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -101,7 +101,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import Data.Traversable (for)
 import Data.Word (Word16, Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Eventlog.Socket (EventlogSocketAddr (..))
@@ -112,6 +111,7 @@ import GHC.RTS.Events.Incremental (Decoder (..), decodeEventLog)
 import Network.Socket (Socket)
 import qualified Network.Socket as S
 import qualified Network.Socket.ByteString as SB
+import Numeric (showHex)
 import System.Directory (doesFileExist)
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
@@ -162,7 +162,7 @@ data Program = Program
     { name :: String
     , args :: [String]
     , rtsopts :: [String]
-    , eventlogSocketBuildFlags :: [String]
+    , buildFlags :: [String]
     }
 
 type HasProgramInfo = (?programInfo :: ProgramInfo)
@@ -190,38 +190,35 @@ data ProgramResource = ProgramResource
 
 buildFlagDebug :: [String]
 #if defined(DEBUG)
-buildFlagDebug = ["+debug"]
+buildFlagDebug = ["--constraint=eventlog-socket+debug"]
 #else
 buildFlagDebug = []
 #endif
 
 buildFlagDebugVerbosity :: [String]
 #if defined(DEBUG_VERBOSITY_TRACE)
-buildFlagDebugVerbosity = ["+debug-verbosity-trace"]
+buildFlagDebugVerbosity = ["--constraint=eventlog-socket+debug-verbosity-trace"]
 #else
 buildFlagDebugVerbosity = []
 #endif
 
 defaultBuildFlags :: [String]
-defaultBuildFlags = ["+optimise-heavily"] <> buildFlagDebug <> buildFlagDebugVerbosity
+defaultBuildFlags = ["--constraint=eventlog-socket+optimise-heavily"] <> buildFlagDebug <> buildFlagDebugVerbosity
 
 programResource :: (HasLogger, HasTestInfo) => Program -> ProgramResource
 programResource program = ProgramResource{..}
   where
     -- Shared information
-    eventlogSocketBuildFlags = program.eventlogSocketBuildFlags <> defaultBuildFlags
-    buildFlags
-        | null eventlogSocketBuildFlags = []
-        | otherwise = ["--constraint", "eventlog-socket " <> unwords eventlogSocketBuildFlags]
-    buildDir = "dist-newstyle/" <> L.intercalate "-" ("test" : program.name : eventlogSocketBuildFlags)
+    buildFlags = program.buildFlags <> defaultBuildFlags
+    buildDir = "dist-newstyle/" <> L.intercalate "-" ("test" : program.name : buildFlags)
 
     -- The program description
     programDesc :: TestName
     programDesc = program.name <> flagDesc
       where
         flagDesc
-            | null program.eventlogSocketBuildFlags = ""
-            | otherwise = "[" <> unwords program.eventlogSocketBuildFlags <> "]"
+            | null program.buildFlags = ""
+            | otherwise = "[" <> unwords program.buildFlags <> "]"
 
     -- Make the program binary
     makeProgram :: IO FilePath
@@ -248,7 +245,7 @@ programResource program = ProgramResource{..}
                 (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
 
                 -- Create the ProgramInfo:
-                let cabalProgram = Program{name = "cabal", args = buildArgs, rtsopts = [], eventlogSocketBuildFlags = []}
+                let cabalProgram = Program{name = "cabal", args = buildArgs, rtsopts = [], buildFlags = []}
                 let cabalProgramPidIO = getPid processHandle
                 cabalProgramPid <- cabalProgramPidIO
                 let info = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
@@ -291,7 +288,7 @@ programResource program = ProgramResource{..}
                 (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
 
                 -- Create the ProgramInfo:
-                let cabalProgram = Program{name = "cabal", args = findArgs, rtsopts = [], eventlogSocketBuildFlags = []}
+                let cabalProgram = Program{name = "cabal", args = findArgs, rtsopts = [], buildFlags = []}
                 let cabalProgramPidIO = getPid processHandle
                 cabalProgramPid <- cabalProgramPidIO
                 let cabalInfo = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
@@ -1125,7 +1122,15 @@ programTestFor testBaseName program eventlogAssertion = \case
                     debug Header
                     -- Update the eventlog socket to avoid conflicts
                     let (directory, fileName) = splitFileName esaUnixPath
-                    let unixPath' = directory </> testName <> "_" <> fileName
+                    let testHash = showHex hshW ""
+                          where
+                            hshI :: Int
+                            hshI = hash testName
+                            hshW :: Word
+                            hshW
+                                | hshI >= 0 = fromIntegral hshI + fromIntegral (maxBound :: Int)
+                                | otherwise = fromIntegral (abs hshI)
+                    let unixPath' = directory </> testHash <> "_" <> fileName
                     let eventlogSocketAddr = EventlogSocketUnixAddr unixPath'
                     -- Find and start the program
                     programBin <- findProgram
