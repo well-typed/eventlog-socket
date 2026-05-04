@@ -36,6 +36,20 @@ module GHC.Eventlog.Socket.Control (
     startHeapProfiling,
     stopHeapProfiling,
     requestHeapCensus,
+    startSchedulerTracing,
+    stopSchedulerTracing,
+    startGcTracing,
+    stopGcTracing,
+    startNonmovingGcTracing,
+    stopNonmovingGcTracing,
+    startSparkSampledTracing,
+    stopSparkSampledTracing,
+    startSparkFullTracing,
+    stopSparkFullTracing,
+    startUserTracing,
+    stopUserTracing,
+    startCapabilityTracing,
+    stopCapabilityTracing,
     userNamespace,
     userCommand,
     encodeLazy,
@@ -426,6 +440,118 @@ See `GHC.Profiling.requestHeapCensus`.
 -}
 requestHeapCensus :: Command
 requestHeapCensus = Command eventlogSocketNamespace (CommandId 5)
+
+{- |
+The builtin control command message that starts scheduler tracing.
+
+@since 0.1.4.0
+-}
+startSchedulerTracing :: Command
+startSchedulerTracing = Command eventlogSocketNamespace (CommandId 6)
+
+{- |
+The builtin control command message that stops scheduler tracing.
+
+@since 0.1.4.0
+-}
+stopSchedulerTracing :: Command
+stopSchedulerTracing = Command eventlogSocketNamespace (CommandId 7)
+
+{- |
+The builtin control command message that starts GC tracing.
+
+@since 0.1.4.0
+-}
+startGcTracing :: Command
+startGcTracing = Command eventlogSocketNamespace (CommandId 8)
+
+{- |
+The builtin control command message that stops GC tracing.
+
+@since 0.1.4.0
+-}
+stopGcTracing :: Command
+stopGcTracing = Command eventlogSocketNamespace (CommandId 9)
+
+{- |
+The builtin control command message that starts nonmoving-GC tracing.
+
+@since 0.1.4.0
+-}
+startNonmovingGcTracing :: Command
+startNonmovingGcTracing = Command eventlogSocketNamespace (CommandId 10)
+
+{- |
+The builtin control command message that stops nonmoving-GC tracing.
+
+@since 0.1.4.0
+-}
+stopNonmovingGcTracing :: Command
+stopNonmovingGcTracing = Command eventlogSocketNamespace (CommandId 11)
+
+{- |
+The builtin control command message that starts sampled spark tracing.
+
+@since 0.1.4.0
+-}
+startSparkSampledTracing :: Command
+startSparkSampledTracing = Command eventlogSocketNamespace (CommandId 12)
+
+{- |
+The builtin control command message that stops sampled spark tracing.
+
+@since 0.1.4.0
+-}
+stopSparkSampledTracing :: Command
+stopSparkSampledTracing = Command eventlogSocketNamespace (CommandId 13)
+
+{- |
+The builtin control command message that starts full spark tracing.
+
+@since 0.1.4.0
+-}
+startSparkFullTracing :: Command
+startSparkFullTracing = Command eventlogSocketNamespace (CommandId 14)
+
+{- |
+The builtin control command message that stops full spark tracing.
+
+@since 0.1.4.0
+-}
+stopSparkFullTracing :: Command
+stopSparkFullTracing = Command eventlogSocketNamespace (CommandId 15)
+
+{- |
+The builtin control command message that starts user tracing.
+
+@since 0.1.4.0
+-}
+startUserTracing :: Command
+startUserTracing = Command eventlogSocketNamespace (CommandId 16)
+
+{- |
+The builtin control command message that stops user tracing.
+
+@since 0.1.4.0
+-}
+stopUserTracing :: Command
+stopUserTracing = Command eventlogSocketNamespace (CommandId 17)
+
+{- |
+The builtin control command message that starts capability tracing.
+
+@since 0.1.4.0
+-}
+startCapabilityTracing :: Command
+startCapabilityTracing = Command eventlogSocketNamespace (CommandId 18)
+
+{- |
+The builtin control command message that stops capability tracing.
+
+@since 0.1.4.0
+-}
+stopCapabilityTracing :: Command
+stopCapabilityTracing = Command eventlogSocketNamespace (CommandId 19)
 
 --------------------------------------------------------------------------------
 -- Internal helpers

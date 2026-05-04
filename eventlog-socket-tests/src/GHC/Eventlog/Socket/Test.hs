@@ -29,6 +29,28 @@ module GHC.Eventlog.Socket.Test (
     hasWallClockTimeWithinSec,
     hasWallClockTimeWithin,
     hasWallClockTime,
+    isSchedulerEvent,
+    hasSchedulerEvent,
+    hasNoSchedulerEvent,
+    isGcEvent,
+    hasGcEvent,
+    hasNoGcEvent,
+    isNonmovingGcEvent,
+    hasNonmovingGcEvent,
+    hasNoNonmovingGcEvent,
+    isSparkSampledEvent,
+    hasSparkSampledEvent,
+    hasNoSparkSampledEvent,
+    isSparkFullEvent,
+    hasSparkFullEvent,
+    hasNoSparkFullEvent,
+    isUserEvent,
+    hasUserEvent,
+    hasNoUserEvent,
+    hasNoUserEventWithinSec,
+    isCapabilityEvent,
+    hasCapabilityEvent,
+    hasNoCapabilityEvent,
     isHeapProfSampleBegin,
     hasHeapProfSampleBeginWithinSec,
     hasHeapProfSampleBeginWithin,
@@ -780,6 +802,246 @@ hasWallClockTime =
     onFailure = printf "Did not find WallClockTime after %d events."
 
 {- |
+Test if an `Event` is a scheduler event.
+-}
+isSchedulerEvent :: Event -> Bool
+isSchedulerEvent ev
+    | E.CreateThread{} <- E.evSpec ev = True
+    | E.RunThread{} <- E.evSpec ev = True
+    | E.StopThread{} <- E.evSpec ev = True
+    | E.MigrateThread{} <- E.evSpec ev = True
+    | E.WakeupThread{} <- E.evSpec ev = True
+    | E.ThreadRunnable{} <- E.evSpec ev = True
+    | E.ThreadLabel{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a scheduler event.
+-}
+hasSchedulerEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasSchedulerEvent =
+    anyOf isSchedulerEvent onSuccess onFailure
+  where
+    onSuccess = printf "Found scheduler event after %d events."
+    onFailure = printf "Did not find scheduler event after %d events."
+
+{- |
+Assert that the input stream does not contain a scheduler event.
+-}
+hasNoSchedulerEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoSchedulerEvent =
+    allOf (not . isSchedulerEvent) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find scheduler event after %d events."
+    onFailure = printf "Found scheduler event after %d events."
+
+{- |
+Test if an `Event` is a GC event.
+-}
+isGcEvent :: Event -> Bool
+isGcEvent ev
+    | E.StartGC{} <- E.evSpec ev = True
+    | E.EndGC{} <- E.evSpec ev = True
+    | E.RequestSeqGC{} <- E.evSpec ev = True
+    | E.RequestParGC{} <- E.evSpec ev = True
+    | E.GCIdle{} <- E.evSpec ev = True
+    | E.GCWork{} <- E.evSpec ev = True
+    | E.GCDone{} <- E.evSpec ev = True
+    | E.GCStatsGHC{} <- E.evSpec ev = True
+    | E.GlobalSyncGC{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a GC event.
+-}
+hasGcEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasGcEvent =
+    anyOf isGcEvent onSuccess onFailure
+  where
+    onSuccess = printf "Found GC event after %d events."
+    onFailure = printf "Did not find GC event after %d events."
+
+{- |
+Assert that the input stream does not contain a GC event.
+-}
+hasNoGcEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoGcEvent =
+    allOf (not . isGcEvent) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find GC event after %d events."
+    onFailure = printf "Found GC event after %d events."
+
+{- |
+Test if an `Event` is a nonmoving-GC event.
+-}
+isNonmovingGcEvent :: Event -> Bool
+isNonmovingGcEvent ev
+    | E.ConcMarkBegin{} <- E.evSpec ev = True
+    | E.ConcMarkEnd{} <- E.evSpec ev = True
+    | E.ConcSyncBegin{} <- E.evSpec ev = True
+    | E.ConcSyncEnd{} <- E.evSpec ev = True
+    | E.ConcSweepBegin{} <- E.evSpec ev = True
+    | E.ConcSweepEnd{} <- E.evSpec ev = True
+    | E.ConcUpdRemSetFlush{} <- E.evSpec ev = True
+    | E.NonmovingHeapCensus{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a nonmoving-GC event.
+-}
+hasNonmovingGcEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNonmovingGcEvent =
+    anyOf isNonmovingGcEvent onSuccess onFailure
+  where
+    onSuccess = printf "Found nonmoving-GC event after %d events."
+    onFailure = printf "Did not find nonmoving-GC event after %d events."
+
+{- |
+Assert that the input stream does not contain a nonmoving-GC event.
+-}
+hasNoNonmovingGcEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoNonmovingGcEvent =
+    allOf (not . isNonmovingGcEvent) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find nonmoving-GC event after %d events."
+    onFailure = printf "Found nonmoving-GC event after %d events."
+
+{- |
+Test if an `Event` is a sampled sparks event.
+-}
+isSparkSampledEvent :: Event -> Bool
+isSparkSampledEvent ev
+    | E.SparkCounters{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a sampled sparks event.
+-}
+hasSparkSampledEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasSparkSampledEvent =
+    anyOf isSparkSampledEvent onSuccess onFailure
+  where
+    onSuccess = printf "Found sampled sparks event after %d events."
+    onFailure = printf "Did not find sampled sparks event after %d events."
+
+{- |
+Assert that the input stream does not contain a sampled sparks event.
+-}
+hasNoSparkSampledEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoSparkSampledEvent =
+    allOf (not . isSparkSampledEvent) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find sampled sparks event after %d events."
+    onFailure = printf "Found sampled sparks event after %d events."
+
+{- |
+Test if an `Event` is a full sparks event.
+-}
+isSparkFullEvent :: Event -> Bool
+isSparkFullEvent ev
+    | isSparkSampledEvent ev = True
+    | E.CreateSparkThread{} <- E.evSpec ev = True
+    | E.SparkCreate{} <- E.evSpec ev = True
+    | E.SparkDud{} <- E.evSpec ev = True
+    | E.SparkOverflow{} <- E.evSpec ev = True
+    | E.SparkRun{} <- E.evSpec ev = True
+    | E.SparkSteal{} <- E.evSpec ev = True
+    | E.SparkFizzle{} <- E.evSpec ev = True
+    | E.SparkGC{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a full sparks event.
+-}
+hasSparkFullEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasSparkFullEvent =
+    anyOf isSparkFullEvent onSuccess onFailure
+  where
+    onSuccess = printf "Found full sparks event after %d events."
+    onFailure = printf "Did not find full sparks event after %d events."
+
+{- |
+Assert that the input stream does not contain a full sparks event.
+-}
+hasNoSparkFullEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoSparkFullEvent =
+    allOf (not . isSparkFullEvent) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find full sparks event after %d events."
+    onFailure = printf "Found full sparks event after %d events."
+
+{- |
+Test if an `Event` is a user event.
+-}
+isUserEvent :: Event -> Bool
+isUserEvent ev
+    | E.UserMarker{} <- E.evSpec ev = True
+    | E.UserMessage{} <- E.evSpec ev = True
+    | E.UserBinaryMessage{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a user event.
+-}
+hasUserEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasUserEvent =
+    anyOf isUserEvent onSuccess onFailure
+  where
+    onSuccess = printf "Found user event after %d events."
+    onFailure = printf "Did not find user event after %d events."
+
+{- |
+Assert that the input stream does not contain a user event.
+-}
+hasNoUserEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoUserEvent =
+    allOf (not . isUserEvent) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find user event after %d events."
+    onFailure = printf "Found user event after %d events."
+
+{- |
+Assert that the input stream does not contain a user event within the given timeout.
+-}
+hasNoUserEventWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
+hasNoUserEventWithinSec timeoutSec =
+    allFor timeoutSec (not . isUserEvent) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find user event within %0.2f seconds." timeoutSec
+    onFailure = printf "Found user event within %0.2f seconds." timeoutSec
+
+{- |
+Test if an `Event` is a capability event.
+-}
+isCapabilityEvent :: Event -> Bool
+isCapabilityEvent ev
+    | E.CapCreate{} <- E.evSpec ev = True
+    | E.CapDelete{} <- E.evSpec ev = True
+    | E.CapDisable{} <- E.evSpec ev = True
+    | E.CapEnable{} <- E.evSpec ev = True
+    | otherwise = False
+
+{- |
+Assert that the input stream contains a capability event.
+-}
+hasCapabilityEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasCapabilityEvent =
+    anyOf isCapabilityEvent onSuccess onFailure
+  where
+    onSuccess = printf "Found capability event after %d events."
+    onFailure = printf "Did not find capability event after %d events."
+
+{- |
+Assert that the input stream does not contain a capability event.
+-}
+hasNoCapabilityEvent :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
+hasNoCapabilityEvent =
+    allOf (not . isCapabilityEvent) onSuccess onFailure
+  where
+    onSuccess = printf "Did not find capability event after %d events."
+    onFailure = printf "Found capability event after %d events."
+
+{- |
 Test if an `Event` is a `HeapProfSampleBegin` event.
 -}
 isHeapProfSampleBegin :: Event -> Bool
@@ -818,7 +1080,7 @@ Assert that the input stream does not contain a `HeapProfSampleString` event wit
 -}
 hasNoHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasNoHeapProfSampleBeginWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
+    allFor timeoutSec (not . isHeapProfSampleBegin) onSuccess onFailure
   where
     onSuccess = printf "Did not find HeapProfSampleBegin within %0.2f seconds." timeoutSec
     onFailure = printf "Found HeapProfSampleBegin within %0.2f seconds." timeoutSec
@@ -834,7 +1096,7 @@ Assert that the input stream does not contain a `HeapProfSampleString` event.
 -}
 hasNoHeapProfSampleBegin :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoHeapProfSampleBegin =
-    anyOf isHeapProfSampleBegin onSuccess onFailure
+    allOf (not . isHeapProfSampleBegin) onSuccess onFailure
   where
     onSuccess = printf "Did not find HeapProfSampleBegin after %d events."
     onFailure = printf "Found HeapProfSampleBegin after %d events."
@@ -878,7 +1140,7 @@ Assert that the input stream does not contain a `HeapProfSampleEnd` event within
 -}
 hasNoHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasNoHeapProfSampleEndWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
+    allFor timeoutSec (not . isHeapProfSampleEnd) onSuccess onFailure
   where
     onSuccess = printf "Did not find HeapProfSampleEnd within %0.2f seconds." timeoutSec
     onFailure = printf "Found HeapProfSampleEnd within %0.2f seconds." timeoutSec
@@ -894,7 +1156,7 @@ Assert that the input stream does not contain a `HeapProfSampleEnd` event.
 -}
 hasNoHeapProfSampleEnd :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoHeapProfSampleEnd =
-    anyOf isHeapProfSampleEnd onSuccess onFailure
+    allOf (not . isHeapProfSampleEnd) onSuccess onFailure
   where
     onSuccess = printf "Did not find HeapProfSampleEnd after %d events."
     onFailure = printf "Found HeapProfSampleEnd after %d events."
@@ -1122,15 +1384,15 @@ programTestFor testBaseName program eventlogAssertion = \case
                     debug Header
                     -- Update the eventlog socket to avoid conflicts
                     let (directory, fileName) = splitFileName esaUnixPath
-                    let testHash = showHex hshW ""
+                    let programDescHash = showHex hshW ""
                           where
                             hshI :: Int
-                            hshI = hash testName
+                            hshI = hash programDesc
                             hshW :: Word
                             hshW
                                 | hshI >= 0 = fromIntegral hshI + fromIntegral (maxBound :: Int)
                                 | otherwise = fromIntegral (abs hshI)
-                    let unixPath' = directory </> testHash <> "_" <> fileName
+                    let unixPath' = directory </> programDescHash <> "_" <> fileName
                     let eventlogSocketAddr = EventlogSocketUnixAddr unixPath'
                     -- Find and start the program
                     programBin <- findProgram
