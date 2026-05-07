@@ -109,7 +109,7 @@ module GHC.Eventlog.Socket.Test (
 ) where
 
 import Control.Concurrent (forkIO, killThread, threadDelay)
-import Control.Concurrent.MVar (MVar, modifyMVar, newMVar)
+import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
 import Control.Exception (ErrorCall (..), Exception (..), assert, bracket, bracketOnError, catch, mask_, throwIO)
 import Control.Monad (filterM, when)
 import Control.Monad.IO.Class (MonadIO (..))
@@ -119,11 +119,13 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import Data.Foldable (traverse_)
 import Data.Function (on, (&))
-import Data.Hashable (Hashable (..))
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as S
 import qualified Data.List as L
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Machine
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Proxy (Proxy (..))
@@ -131,7 +133,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Version (Version)
 import qualified Data.Version as V
-import Data.Word (Word16, Word64)
+import Data.Word (Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Eventlog.Socket (EventlogSocketAddr (..))
 import GHC.Eventlog.Socket.Control (Command)
@@ -141,12 +143,11 @@ import GHC.RTS.Events.Incremental (Decoder (..), decodeEventLog)
 import Network.Socket (Socket)
 import qualified Network.Socket as S
 import qualified Network.Socket.ByteString as SB
-import Numeric (showHex)
 import System.Directory (doesFileExist)
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
-import System.FilePath (splitFileName, (</>))
-import System.IO
+import System.FilePath (splitExtensions)
+import System.IO (Handle, hWaitForInput)
 import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError)
 import System.IO.Unsafe (unsafePerformIO)
@@ -1502,9 +1503,6 @@ runProgramTests = fmap toTestGroup . groupByDesc
                     testGroup ("With program " <> pt.programDesc <> ":") $
                         [pt'.testProgram findProgram | pt' <- (pt : pts)]
 
-inetPortCounter :: MVar Word16
-inetPortCounter = unsafePerformIO (newMVar 0)
-
 programTestFor ::
     (HasLogger) =>
     TestName ->
@@ -1527,22 +1525,13 @@ programTestFor testBaseName program eventlogAssertion = \case
                 testCase testName $ do
                     debug Header
                     -- Update the eventlog socket to avoid conflicts
-                    let (directory, fileName) = splitFileName esaUnixPath
-                    let programDescHash = showHex hshW ""
-                          where
-                            hshI :: Int
-                            hshI = hash programDesc
-                            hshW :: Word
-                            hshW
-                                | hshI >= 0 = fromIntegral hshI + fromIntegral (maxBound :: Int)
-                                | otherwise = fromIntegral (abs hshI)
-                    let unixPath' = directory </> programDescHash <> "_" <> fileName
-                    let eventlogSocketAddr = EventlogSocketUnixAddr unixPath'
+                    esaUnixPath' <- updateUnixSocketPath esaUnixPath
+                    let eventlogSocketAddr = EventlogSocketUnixAddr esaUnixPath'
                     -- Find and start the program
                     programBin <- findProgram
                     withProgram programBin eventlogSocketAddr $ do
                         -- The the eventlog assertion
-                        debugInfo $ "Using Unix socket: " <> unixPath'
+                        debugInfo $ "Using Unix socket: " <> esaUnixPath'
                         eventlogAssertion eventlogSocketAddr
                     debug Footer
         ProgramTest{..}
@@ -1559,20 +1548,55 @@ programTestFor testBaseName program eventlogAssertion = \case
         let testProgram findProgram = do
                 testCase testName $ do
                     -- Update the eventlog socket to avoid conflicts
-                    esainetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
-                        let nextTcpPortOffset = currentTcpPortOffset + 1
-                        pure (nextTcpPortOffset, currentTcpPortOffset)
-                    let esaInetPortWithOffset = show (read esaInetPort + esainetPortOffset)
-                    let eventlogSocketAddr = EventlogSocketInetAddr esaInetHost esaInetPortWithOffset
+                    esaInetPort' <- updateInetPort esaInetPort
+                    let eventlogSocketAddr = EventlogSocketInetAddr esaInetHost esaInetPort'
                     -- Find and start the program
                     programBin <- findProgram
                     withProgram programBin eventlogSocketAddr $ do
                         -- The the eventlog assertion
                         debug Header
-                        debugInfo $ "Using Inet socket: " <> esaInetHost <> ":" <> esaInetPortWithOffset
+                        debugInfo $ "Using Inet socket: " <> esaInetHost <> ":" <> esaInetPort'
                         eventlogAssertion eventlogSocketAddr
                         debug Footer
         ProgramTest{..}
+
+inetPortSetVar :: MVar IntSet
+inetPortSetVar = unsafePerformIO (newMVar mempty)
+
+updateInetPort :: String -> IO String
+updateInetPort inetPortString = do
+    inetPortSet <- takeMVar inetPortSetVar
+    let inetPort = read inetPortString
+    let (inetPort', inetPortSet') = findUnusedPort inetPort inetPortSet False
+    putMVar inetPortSetVar inetPortSet'
+    pure $ show inetPort'
+
+findUnusedPort :: Int -> IntSet -> Bool -> (Int, IntSet)
+findUnusedPort inetPort inetPortSet didLoop
+    | inetPort `S.notMember` inetPortSet = (inetPort, S.insert inetPort inetPortSet)
+    | 1024 <= inetPort && inetPort < 65535 = findUnusedPort (inetPort + 1) inetPortSet didLoop
+    | not didLoop = findUnusedPort 49152 inetPortSet True
+    | otherwise = error $ "I could not find an unused private port (49152-65535). Do you have " <> show (S.size inetPortSet) <> " tests?"
+
+unixPathMapVar :: MVar (Map FilePath Int)
+unixPathMapVar = unsafePerformIO (newMVar mempty)
+
+updateUnixSocketPath :: FilePath -> IO FilePath
+updateUnixSocketPath unixPath = do
+    unixPathMap <- takeMVar unixPathMapVar
+    let (unixPath', unixPathMap') = findUnusedSocketPath unixPath unixPathMap
+    putMVar unixPathMapVar unixPathMap'
+    pure unixPath'
+
+findUnusedSocketPath :: FilePath -> Map FilePath Int -> (FilePath, Map FilePath Int)
+findUnusedSocketPath unixPath unixPathMap
+    | count == 0 = (unixPath, unixPathMap)
+    | otherwise = findUnusedSocketPath unixPath' unixPathMap'
+  where
+    count = maybe 0 (+ 1) $ M.lookup unixPath unixPathMap
+    (unixPathBase, unixPathExt) = splitExtensions unixPath
+    unixPath' = unixPathBase <> "." <> show count <> unixPathExt
+    unixPathMap' = M.insert unixPath count unixPathMap
 
 type HasLogger = (?logger :: Logger, HasCallStack)
 
@@ -1625,8 +1649,7 @@ withLogger action = do
     let ?logger = logger
     let runner = do
             (testInfo, message) <- T.atomically (T.readTChan . logChan $ logger)
-            IO.hPutStrLn stderr (renderMessage testInfo message)
-            -- IO.hFlush stderr
+            IO.hPutStrLn IO.stderr (renderMessage testInfo message)
             runner
     bracket (forkIO runner) killThread $ \_threadId -> do
         action

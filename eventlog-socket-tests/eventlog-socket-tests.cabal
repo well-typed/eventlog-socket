@@ -84,7 +84,6 @@ library
     , eventlog-socket-control  >=0.1.1 && <0.2
     , filepath                 >=1.5   && <1.6
     , ghc-events               >=0.20  && <0.21
-    , hashable                 >=1.0   && <1.6
     , machines                 >=0.7.4 && <0.8
     , network                  >=3.2.7 && <3.3
     , process                  >=1.6   && <1.7
