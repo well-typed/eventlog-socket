@@ -1,5 +1,9 @@
 # Revision history for eventlog-socket
 
+## 0.1.3.1 -- 2026-06-01
+
+- Fix [#74](https://github.com/well-typed/eventlog-socket/issues/74): Prevent `eventlog-socket` from resolving, e.g., `localhost` to an IPv4 address.
+
 ## 0.1.3.0 -- 2026-03-27
 
 - Add support for hooks that fire at certain points in the `eventlog-socket` lifecycle.
