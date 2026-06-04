@@ -56,11 +56,9 @@ Test that @fibber 35@ produces a parseable eventlog.
 test_fibber :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_fibber =
     let fibber =
-            Program
-                { name = "fibber"
-                , args = ["40"]
+            (buildProgram "fibber")
+                { args = ["40"]
                 , rtsopts = ["-l-au"]
-                , buildFlags = []
                 }
      in programTestFor "test_fibber" fibber $ \eventlogSocket -> do
             assertEventlogWith eventlogSocket $
@@ -75,11 +73,9 @@ Test that @fibber-c-main 35@ produces a parseable eventlog.
 test_fibberCMain :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_fibberCMain =
     let fibberCMain =
-            Program
-                { name = "fibber-c-main"
-                , args = ["40"]
+            (buildProgram "fibber-c-main")
+                { args = ["40"]
                 , rtsopts = ["-l-au"]
-                , buildFlags = []
                 }
      in programTestFor "test_fibberCMain" fibberCMain $ \eventlogSocket -> do
             threadDelay 3_000_000
@@ -99,11 +95,8 @@ Test that @oddball@ produces heap profile samples.
 test_oddball_HasHeapProfSample :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_HasHeapProfSample =
     let oddball =
-            Program
-                { name = "oddball"
-                , args = []
-                , rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
-                , buildFlags = []
+            (buildProgram "oddball")
+                { rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
                 }
      in programTestFor "test_oddball_HasHeapProfSample" oddball $ \eventlogSocket -> do
             assertEventlogWith eventlogSocket $
@@ -118,11 +111,8 @@ Test that @--no-automatic-heap-samples@ is respected.
 test_oddball_NoAutomaticHeapSamples :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_NoAutomaticHeapSamples =
     let oddball =
-            Program
-                { name = "oddball"
-                , args = []
-                , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildFlags = []
+            (buildProgram "oddball")
+                { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
                 }
      in programTestFor "test_oddball_NoAutomaticHeapSamples" oddball $ \eventlogSocket -> do
             assertEventlogWith eventlogSocket $
@@ -138,11 +128,8 @@ Test that @oddball@ produces the init events and heap samples on each connection
 test_oddball_Reconnect :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_Reconnect =
     let oddball =
-            Program
-                { name = "oddball"
-                , args = []
-                , rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
-                , buildFlags = []
+            (buildProgram "oddball")
+                { rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
                 }
      in programTestFor "test_oddball_Reconnect" oddball $ \eventlogSocket -> do
             -- Validate that reconnecting works and that each stream has a WallClockTime
@@ -156,11 +143,8 @@ Test that @oddball@ triggers the post-startEventLogging hook on reconnect.
 test_oddball_HookOnReconnect :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_HookOnReconnect =
     let oddball =
-            Program
-                { name = "oddball"
-                , args = []
-                , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , buildFlags = []
+            (buildProgram "oddball")
+                { rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
                 }
      in programTestFor "test_oddball_HookOnReconnect" oddball $ \eventlogSocket -> do
             -- Validate that reconnecting works and that each stream has a WallClockTime
@@ -178,11 +162,9 @@ Test that the command parsing state is reset on reconnect.
 test_oddball_ResetOnReconnect :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_ResetOnReconnect =
     let oddball =
-            Program
-                { name = "oddball"
-                , args = []
-                , rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildFlags = ["--constraint=eventlog-socket+control"]
+            (buildProgram "oddball")
+                { rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
                 }
      in programTestFor "test_oddball_ResetOnReconnect" oddball $ \eventlogSocket -> do
             -- Validate that the event stream contains at least one heap
@@ -207,11 +189,9 @@ sent, after some iterations, no more heap profile samples are received.
 test_oddball_StartAndStopHeapProfiling :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_StartAndStopHeapProfiling =
     let oddball =
-            Program
-                { name = "oddball"
-                , args = []
-                , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildFlags = ["--constraint=eventlog-socket+control"]
+            (buildProgram "oddball")
+                { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
                 }
      in programTestFor "test_oddball_StartAndStopHeapProfiling" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -232,11 +212,9 @@ Test that the `RequestHeapCensus` signal is respected, i.e., that once the
 test_oddball_RequestHeapCensus :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_RequestHeapCensus =
     let oddball =
-            Program
-                { name = "oddball"
-                , args = []
-                , rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildFlags = ["--constraint=eventlog-socket+control"]
+            (buildProgram "oddball")
+                { rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
                 }
      in programTestFor "test_oddball_RequestHeapCensus" oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -259,11 +237,9 @@ been sent over the control socket.
 test_oddball_Junk :: (HasLogger) => (ByteString, ByteString) -> EventlogSocketAddr -> ProgramTest
 test_oddball_Junk (junkBefore, junkAfter) =
     let oddball =
-            Program
-                { name = "oddball"
-                , args = []
-                , rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildFlags = ["--constraint=eventlog-socket+control"]
+            (buildProgram "oddball")
+                { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
                 }
      in programTestFor ("test_oddball_Junk[" <> show junkBefore <> "," <> show junkAfter <> "]") oddball $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->
@@ -282,11 +258,10 @@ Test that custom commands are respected.
 test_customCommand :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_customCommand =
     let customCommand =
-            Program
-                { name = "custom-command"
-                , args = ["--forever"]
+            (buildProgram "custom-command")
+                { args = ["--forever"]
                 , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , buildFlags = ["--constraint=eventlog-socket+control"]
+                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
                 }
      in programTestFor "test_customCommand" customCommand $ \eventlogSocket -> do
             assertEventlogWith' eventlogSocket $ \socket ->

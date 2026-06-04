@@ -3,11 +3,17 @@
 
 module GHC.Eventlog.Socket.Test (
     -- * Example Programs
-    Program (..),
+    Program (name, args, rtsopts, buildOrFind, maybeEventlogSocket),
+    BuildOrFind (..),
+    buildProgram,
+    buildProgramWith,
+    findProgram,
+    withProgram,
     HasProgramInfo,
-    ProgramInfo,
-    ProgramHandle (..),
+    ProgramInfo (..),
+    ProgramResource (..),
     programResource,
+    withProgramResource,
 
     -- * Eventlog Validation
     EventlogSocketAddr (..),
@@ -75,6 +81,8 @@ module GHC.Eventlog.Socket.Test (
     withLogger,
     Message (..),
     debug,
+    debugInfo,
+    debugHandle,
     debugEvents,
 
     -- * Custom options
@@ -108,15 +116,15 @@ import GHC.Eventlog.Socket.Control (Command)
 import GHC.RTS.Events (Event)
 import qualified GHC.RTS.Events as E
 import GHC.RTS.Events.Incremental (Decoder (..), decodeEventLog)
+import GHC.Records (HasField (..))
 import Network.Socket (Socket)
 import qualified Network.Socket as S
 import qualified Network.Socket.ByteString as SB
 import Numeric (showHex)
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, findExecutable)
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (splitFileName, (</>))
-import System.IO
 import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorString, ioeGetLocation, isEOFError)
 import System.IO.Unsafe (unsafePerformIO)
@@ -158,12 +166,39 @@ keepProgramBuildOption = Option (Proxy :: Proxy KeepProgramBuild)
 -- Example Programs
 --------------------------------------------------------------------------------
 
+data BuildOrFind
+    = Build {buildFlags :: [String]}
+    | Find
+
 data Program = Program
     { name :: String
     , args :: [String]
     , rtsopts :: [String]
-    , buildFlags :: [String]
+    , buildOrFind :: BuildOrFind
+    , maybeEventlogSocket :: Maybe EventlogSocketAddr
     }
+
+instance HasField "buildFlags" Program [String] where
+    getField :: Program -> [String]
+    getField program
+        | Build{buildFlags} <- program.buildOrFind = buildFlags
+        | otherwise = []
+
+buildProgramWith :: String -> [String] -> Program
+buildProgramWith name buildFlags =
+    Program
+        { name
+        , args = []
+        , rtsopts = []
+        , buildOrFind = Build{buildFlags}
+        , maybeEventlogSocket = Nothing
+        }
+
+buildProgram :: String -> Program
+buildProgram name = buildProgramWith name []
+
+findProgram :: String -> Program
+findProgram name = (buildProgram name){buildOrFind = Find}
 
 type HasProgramInfo = (?programInfo :: ProgramInfo)
 
@@ -181,11 +216,23 @@ data ProgramHandle = ProgramHandle
 
 type ProgramDesc = String
 
+instance HasField "programDesc" Program ProgramDesc where
+    getField :: Program -> ProgramDesc
+    getField program =
+        program.name <> program.buildFlagDesc
+
+type BuildFlagsDesc = String
+
+instance HasField "buildFlagDesc" Program BuildFlagsDesc where
+    getField :: Program -> BuildFlagsDesc
+    getField program
+        | Build{buildFlags} <- program.buildOrFind, not (null buildFlags) = "[" <> unwords program.buildFlags <> "]"
+        | otherwise = ""
+
 data ProgramResource = ProgramResource
-    { programDesc :: ProgramDesc
-    , makeProgram :: IO FilePath
-    , freeProgram :: FilePath -> IO ()
-    , withProgram :: (HasCallStack, HasLogger, HasTestInfo) => FilePath -> EventlogSocketAddr -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
+    { program :: Program
+    , setupProgram :: IO FilePath
+    , cleanProgram :: FilePath -> IO ()
     }
 
 buildFlagDebug :: [String]
@@ -205,217 +252,237 @@ buildFlagDebugVerbosity = []
 defaultBuildFlags :: [String]
 defaultBuildFlags = ["--constraint=eventlog-socket+optimise-heavily"] <> buildFlagDebug <> buildFlagDebugVerbosity
 
-programResource :: (HasLogger, HasTestInfo) => Program -> ProgramResource
-programResource program = ProgramResource{..}
-  where
-    -- Shared information
-    buildFlags = program.buildFlags <> defaultBuildFlags
-    buildDir = "dist-newstyle/" <> L.intercalate "-" ("test" : program.name : buildFlags)
-
-    -- The program description
-    programDesc :: TestName
-    programDesc = program.name <> flagDesc
-      where
-        flagDesc
-            | null program.buildFlags = ""
-            | otherwise = "[" <> unwords program.buildFlags <> "]"
-
-    -- Make the program binary
-    makeProgram :: IO FilePath
-    makeProgram = do
-        let ?testInfo = TestInfo{testName = "make_" <> programDesc}
-        debug Header
-
-        ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
-        cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
-
-        -- Build the program binary
-        let buildProgram :: IO ()
-            buildProgram = do
-                -- Start building program binary
-                debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
-                let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", buildDir] <> buildFlags
-                debugInfo (showCommandForUser cabal buildArgs)
-                let createProcess =
-                        (proc cabal buildArgs)
-                            { std_in = CreatePipe
-                            , std_out = CreatePipe
-                            , std_err = CreatePipe
-                            }
-                (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
-
-                -- Create the ProgramInfo:
-                let cabalProgram = Program{name = "cabal", args = buildArgs, rtsopts = [], buildFlags = []}
-                let cabalProgramPidIO = getPid processHandle
-                cabalProgramPid <- cabalProgramPidIO
-                let info = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
-                let ?programInfo = info
-
-                -- Start loggers for stderr and stdout:
-                maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
-                maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
-                let kill = mask_ $ do
-                        debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
-                        sequence_ maybeKillDebugOut
-                        debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
-                        sequence_ maybeKillDebugErr
-                        debugInfo $ "Cleaning up process for " <> program.name <> "."
-                        exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
-                        debugInfo $ "Process was killed with exit code " <> show exitCode
-                        pure ()
-                let wait = do
-                        debugInfo $ "Wait for " <> showCommandForUser cabal buildArgs
-                        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
-                            debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal buildArgs
-                            when (exitCode /= ExitSuccess) . assertFailure $
-                                "Program " <> program.name <> " failed with exit code " <> show exitCode
-
-                -- Wait for building program to finish
-                wait
-
-        -- Find the program binary
-        let findProgram :: IO FilePath
-            findProgram = do
+programResource :: (HasLogger) => Program -> ProgramResource
+programResource program = case program.buildOrFind of
+    Find{} ->
+        let setupProgram :: IO FilePath
+            setupProgram = do
+                let ?testInfo = TestInfo{testName = "find_" <> program.programDesc}
+                debug Header
                 debugInfo $ "Find binary for program " <> program.name
-                let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", buildDir] <> buildFlags
-                debugInfo (showCommandForUser cabal findArgs)
-                let createProcess =
-                        (proc cabal findArgs)
-                            { std_in = CreatePipe
-                            , std_out = CreatePipe
-                            , std_err = CreatePipe
-                            }
-                (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
+                programBin <-
+                    findExecutable program.name >>= \case
+                        Just programBin -> do
+                            debugInfo $ "Found program binary at " <> programBin
+                            pure programBin
+                        Nothing -> do
+                            let msg = "Could not find binary for program " <> program.name
+                            debugFail msg
+                            error msg
+                debug Footer
+                pure programBin
 
-                -- Create the ProgramInfo:
-                let cabalProgram = Program{name = "cabal", args = findArgs, rtsopts = [], buildFlags = []}
-                let cabalProgramPidIO = getPid processHandle
-                cabalProgramPid <- cabalProgramPidIO
-                let cabalInfo = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
-                let ?programInfo = cabalInfo
+            cleanProgram :: FilePath -> IO ()
+            cleanProgram _programBin = pure ()
+         in ProgramResource{..}
+    Build{buildFlags} ->
+        -- Shared information
+        let programBuildFlags = buildFlags <> defaultBuildFlags
+            programBuildDir = "dist-newstyle/" <> L.intercalate "-" ("test" : program.name : programBuildFlags)
 
-                -- Start loggers for stderr and stdout:
-                maybeKillDebugErr <- traverse (debugHandle $ ProgramErr cabalInfo) maybeHandleErr
-                let kill = mask_ $ do
-                        debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
-                        sequence_ maybeKillDebugErr
-                        debugInfo $ "Cleaning up process for " <> program.name <> "."
-                        exitCode <- murderProcess program.name (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle)
-                        debugInfo $ "Process was killed with exit code " <> show exitCode
-                        pure ()
-                let wait = do
-                        debugInfo $ "Wait for " <> showCommandForUser cabal findArgs
-                        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
-                            debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal findArgs
-                            when (exitCode /= ExitSuccess) . assertFailure $
-                                "Program " <> program.name <> " failed with exit code " <> show exitCode
+            -- Make the program binary
+            setupProgram :: IO FilePath
+            setupProgram = do
+                let ?testInfo = TestInfo{testName = "make_" <> program.programDesc}
+                debug Header
 
-                wait
+                ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
+                cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
 
-                -- The last line of output from list-bin should be the path:
-                findOut <- IO.hGetContents handleOut
-                programBins <- filterM doesFileExist (lines findOut)
-                case programBins of
-                    [] -> do
-                        let msg = "Could not find program binary for " <> program.name
-                        debugFail msg >> throwIO (ErrorCall msg)
-                    [programBin] -> do
-                        debugInfo $ "Found program binary at " <> programBin
-                        pure programBin
-                    (_programBin : _programBins) -> do
-                        let msg = unlines ("Found multiple program binaries for " <> program.name : programBins)
-                        debugFail msg >> throwIO (ErrorCall msg)
+                -- Build the program binary
+                let build :: IO ()
+                    build = do
+                        -- Start building program binary
+                        debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
+                        let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", programBuildDir] <> programBuildFlags
+                        debugInfo (showCommandForUser cabal buildArgs)
+                        let createProcess =
+                                (proc cabal buildArgs)
+                                    { std_in = CreatePipe
+                                    , std_out = CreatePipe
+                                    , std_err = CreatePipe
+                                    }
+                        (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
 
-        programBin <- buildProgram >> findProgram
+                        -- Create the ProgramInfo:
+                        let cabalProgram = (findProgram "cabal"){args = buildArgs}
+                        let cabalProgramPidIO = getPid processHandle
+                        cabalProgramPid <- cabalProgramPidIO
+                        let info = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
+                        let ?programInfo = info
 
-        debug Footer
+                        -- Start loggers for stderr and stdout:
+                        maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
+                        maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
+                        let kill = mask_ $ do
+                                debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
+                                sequence_ maybeKillDebugOut
+                                debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+                                sequence_ maybeKillDebugErr
+                                debugInfo $ "Cleaning up process for " <> program.name <> "."
+                                exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
+                                debugInfo $ "Process was killed with exit code " <> show exitCode
+                                pure ()
+                        let wait = do
+                                debugInfo $ "Wait for " <> showCommandForUser cabal buildArgs
+                                bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
+                                    debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal buildArgs
+                                    when (exitCode /= ExitSuccess) . assertFailure $
+                                        "Program " <> program.name <> " failed with exit code " <> show exitCode
 
-        pure programBin
+                        -- Wait for building program to finish
+                        wait
 
-    -- Free the program binary
-    freeProgram :: FilePath -> IO ()
-    freeProgram _programBin = do
-        let ?testInfo = TestInfo{testName = "free_" <> programDesc}
-        debug Header
+                -- Find the program binary
+                let find :: IO FilePath
+                    find = do
+                        debugInfo $ "Find binary for program " <> program.name
+                        let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", programBuildDir] <> programBuildFlags
+                        debugInfo (showCommandForUser cabal findArgs)
+                        let createProcess =
+                                (proc cabal findArgs)
+                                    { std_in = CreatePipe
+                                    , std_out = CreatePipe
+                                    , std_err = CreatePipe
+                                    }
+                        (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
 
-        cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
+                        -- Create the ProgramInfo:
+                        let cabalProgram = (findProgram "cabal"){args = findArgs}
+                        let cabalProgramPidIO = getPid processHandle
+                        cabalProgramPid <- cabalProgramPidIO
+                        let cabalInfo = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
+                        let ?programInfo = cabalInfo
 
-        -- Clean up the build directory
-        debugInfo $ "Clean build directory " <> buildDir
-        let cleanArgs = ["clean", "--builddir", buildDir]
-        debugInfo (showCommandForUser cabal cleanArgs)
-        (findExit, findOut, findErr) <- readProcessWithExitCode cabal cleanArgs ""
-        when (findExit /= ExitSuccess) $ do
-            debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
-            throwIO findExit
+                        -- Start loggers for stderr and stdout:
+                        maybeKillDebugErr <- traverse (debugHandle $ ProgramErr cabalInfo) maybeHandleErr
+                        let kill = mask_ $ do
+                                debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+                                sequence_ maybeKillDebugErr
+                                debugInfo $ "Cleaning up process for " <> program.name <> "."
+                                exitCode <- murderProcess program.name (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle)
+                                debugInfo $ "Process was killed with exit code " <> show exitCode
+                                pure ()
+                        let wait = do
+                                debugInfo $ "Wait for " <> showCommandForUser cabal findArgs
+                                bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
+                                    debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal findArgs
+                                    when (exitCode /= ExitSuccess) . assertFailure $
+                                        "Program " <> program.name <> " failed with exit code " <> show exitCode
 
-        debug Footer
+                        wait
 
-    -- Fork the program binary
-    forkProgram :: FilePath -> EventlogSocketAddr -> IO ProgramHandle
-    forkProgram programBin eventlogSocketAddr = do
-        -- Check if program exists:
-        programBinExists <- doesFileExist programBin
-        if programBinExists
-            then debugInfo $ "Program binary exists: " <> programBin
-            else debugFail $ "Program binary does NOT exist: " <> programBin
-        -- Start program
-        debugInfo $ "Launching program " <> programDesc
-        inheritedEnv <- filter shouldInherit <$> getEnvironment
-        let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
-        let extraEnv = eventlogSocketEnv eventlogSocketAddr
-        debugInfo . unlines . concat $
-            [ [showCommandForUser programBin programArgs]
-            , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
-              | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
-              ]
-            ]
-        -- Create the process:
-        let createProcess =
-                (proc programBin programArgs)
-                    { env = Just (inheritedEnv <> extraEnv)
-                    , std_in = CreatePipe
-                    , std_out = CreatePipe
-                    , std_err = CreatePipe
-                    }
-        (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
-        -- Create the ProgramInfo:
-        let programPidIO = getPid processHandle
-        programPid <- programPidIO
-        let info = ProgramInfo{..}
-        let ?programInfo = info
-        debugInfo $ "Launched " <> programDesc
-        -- Start loggers for stderr and stdout:
-        maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
-        maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
-        let kill = mask_ $ do
-                debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
-                sequence_ maybeKillDebugOut
-                debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
-                sequence_ maybeKillDebugErr
-                debugInfo $ "Cleaning up process for " <> program.name <> "."
-                exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
-                debugInfo $ "Process was killed with exit code " <> show exitCode
-                pure ()
-        let wait = do
-                debugInfo $ "Waiting for " <> program.name <> " to finish."
-                bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
-                    when (exitCode /= ExitSuccess) . assertFailure $
-                        "Program " <> program.name <> " failed with exit code " <> show exitCode
-        pure ProgramHandle{..}
+                        -- The last line of output from list-bin should be the path:
+                        findOut <- IO.hGetContents handleOut
+                        programBins <- filterM doesFileExist (lines findOut)
+                        case programBins of
+                            [] -> do
+                                let msg = "Could not find program binary for " <> program.name
+                                debugFail msg >> throwIO (ErrorCall msg)
+                            [programBin] -> do
+                                debugInfo $ "Found program binary at " <> programBin
+                                pure programBin
+                            (_programBin : _programBins) -> do
+                                let msg = unlines ("Found multiple program binaries for " <> program.name : programBins)
+                                debugFail msg >> throwIO (ErrorCall msg)
 
-    -- Run a test with a program
-    withProgram :: FilePath -> EventlogSocketAddr -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
-    withProgram programBin eventlogSocketAddr action =
-        bracket (forkProgram programBin eventlogSocketAddr) kill $ \ProgramHandle{..} ->
-            let ?programInfo = info in action
+                programBin <- build >> find
+
+                debug Footer
+
+                pure programBin
+
+            -- Free the program binary
+            cleanProgram :: FilePath -> IO ()
+            cleanProgram _programBin = do
+                let ?testInfo = TestInfo{testName = "free_" <> program.programDesc}
+                debug Header
+
+                cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
+
+                -- Clean up the build directory
+                debugInfo $ "Clean build directory " <> programBuildDir
+                let cleanArgs = ["clean", "--builddir", programBuildDir]
+                debugInfo (showCommandForUser cabal cleanArgs)
+                (findExit, findOut, findErr) <- readProcessWithExitCode cabal cleanArgs ""
+                when (findExit /= ExitSuccess) $ do
+                    debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
+                    throwIO findExit
+
+                debug Footer
+         in ProgramResource{..}
+
+-- Fork the program binary
+forkProgram :: (HasLogger, HasTestInfo) => Program -> FilePath -> IO ProgramHandle
+forkProgram program programBin = do
+    -- Check if program exists:
+    programBinExists <- doesFileExist programBin
+    if programBinExists
+        then debugInfo $ "Program binary exists: " <> programBin
+        else debugFail $ "Program binary does NOT exist: " <> programBin
+    -- Start program
+    debugInfo $ "Launching program " <> program.programDesc
+    inheritedEnv <- filter shouldInherit <$> getEnvironment
+    let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
+    let extraEnv = maybe [] eventlogSocketEnv program.maybeEventlogSocket
+    debugInfo . unlines . concat $
+        [ [showCommandForUser programBin programArgs]
+        , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
+          | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
+          ]
+        ]
+    -- Create the process:
+    let createProcess =
+            (proc programBin programArgs)
+                { env = Just (inheritedEnv <> extraEnv)
+                , std_in = CreatePipe
+                , std_out = CreatePipe
+                , std_err = CreatePipe
+                }
+    (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
+    -- Create the ProgramInfo:
+    let programPidIO = getPid processHandle
+    programPid <- programPidIO
+    let info = ProgramInfo{..}
+    let ?programInfo = info
+    debugInfo $ "Launched " <> program.programDesc
+    -- Start loggers for stderr and stdout:
+    maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
+    maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
+    let kill = mask_ $ do
+            debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
+            sequence_ maybeKillDebugOut
+            debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+            sequence_ maybeKillDebugErr
+            debugInfo $ "Cleaning up process for " <> program.name <> "."
+            exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
+            debugInfo $ "Process was killed with exit code " <> show exitCode
+            pure ()
+    let wait = do
+            debugInfo $ "Waiting for " <> program.name <> " to finish."
+            bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
+                when (exitCode /= ExitSuccess) . assertFailure $
+                    "Program " <> program.name <> " failed with exit code " <> show exitCode
+    pure ProgramHandle{..}
+
+-- Run a test with a program
+withProgram :: (HasLogger, HasTestInfo) => Program -> FilePath -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
+withProgram program programBin action =
+    bracket (forkProgram program programBin) kill $ \ProgramHandle{..} ->
+        let ?programInfo = info in action
+
+-- Run a test with a program resource
+withProgramResource :: (HasLogger, HasTestInfo) => ProgramResource -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
+withProgramResource ProgramResource{..} action =
+    bracket setupProgram cleanProgram $ \programBin ->
+        withProgram program programBin action
 
 {- |
 Kill the process harder than `terminateProcess`.
 
 This function also hides the evidence by closing the handles.
 -}
-murderProcess :: (HasLogger, HasTestInfo) => String -> (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO ExitCode
+murderProcess :: (HasLogger, HasTestInfo) => String -> (Maybe IO.Handle, Maybe IO.Handle, Maybe IO.Handle, ProcessHandle) -> IO ExitCode
 murderProcess programName (maybeStdIn, maybeStdOut, maybeStdErr, processHandle) = do
     -- Murder the process until it's dead:
     let murderLoop :: Int -> IO ExitCode
@@ -597,12 +664,12 @@ fromSocket _timeoutMSec chunkSizeBytes socket = construct go
 isReady ::
     (HasLogger, HasTestInfo) =>
     Int ->
-    Handle ->
+    IO.Handle ->
     IO (Maybe Bool)
 isReady timeoutMSec handle = catch ready onEOF
   where
     ready =
-        hWaitForInput handle timeoutMSec
+        IO.hWaitForInput handle timeoutMSec
             >>= pure . Just
     onEOF (e :: IOError) =
         if isEOFError e
@@ -1069,9 +1136,9 @@ data TestInfo = TestInfo
 
 data ProgramTest = ProgramTest
     { testInfo :: TestInfo
-    , programDesc :: ProgramDesc
-    , makeProgram :: IO FilePath
-    , freeProgram :: FilePath -> IO ()
+    , program :: Program
+    , setupProgram :: IO FilePath
+    , cleanProgram :: FilePath -> IO ()
     , testProgram :: IO FilePath -> TestTree
     }
 
@@ -1081,7 +1148,7 @@ runProgramTests = fmap toTestGroup . groupByDesc
     groupByDesc :: [ProgramTest] -> [NonEmpty ProgramTest]
     groupByDesc pts =
         pts
-            & fmap (\pt -> M.singleton pt.programDesc (NE.singleton pt))
+            & fmap (\pt -> M.singleton pt.program.programDesc (NE.singleton pt))
             & foldr (M.unionWith (<>)) M.empty
             & M.elems
             & fmap (NE.sortBy (compare `on` (.testInfo.testName)))
@@ -1089,12 +1156,12 @@ runProgramTests = fmap toTestGroup . groupByDesc
     toTestGroup :: NonEmpty ProgramTest -> TestTree
     toTestGroup (pt :| pts) =
         -- Assert that all tests have the same program description.
-        assert (all (((==) `on` (.programDesc)) pt) pts) $
+        assert (all (((==) `on` (.program.programDesc)) pt) pts) $
             askOption @KeepProgramBuild $ \(KeepProgramBuild keepProgramBuild) -> do
-                let maybeFreeProgram programBin = if keepProgramBuild then pure () else pt.freeProgram programBin
-                withResource pt.makeProgram maybeFreeProgram $ \findProgram ->
-                    testGroup ("With program " <> pt.programDesc <> ":") $
-                        [pt'.testProgram findProgram | pt' <- (pt : pts)]
+                let maybeFreeProgram programBin = if keepProgramBuild then pure () else pt.cleanProgram programBin
+                withResource pt.setupProgram maybeFreeProgram $ \find ->
+                    testGroup ("With program " <> pt.program.programDesc <> ":") $
+                        [pt'.testProgram find | pt' <- (pt : pts)]
 
 inetPortCounter :: MVar Word16
 inetPortCounter = unsafePerformIO (newMVar 0)
@@ -1114,10 +1181,13 @@ programTestFor testBaseName program eventlogAssertion = \case
         let ?testInfo = testInfo
 
         -- Create program resource
-        let ProgramResource{..} = programResource program
+        --
+        -- NOTE: The `Program` passed to `programResource` does not have an
+        --       `EventlogSocketAddr`, as this is only used by `withProgram`.
+        let ProgramResource{program = _, ..} = programResource program
 
         -- Create program test
-        let testProgram findProgram = do
+        let testProgram find = do
                 testCase testName $ do
                     debug Header
                     -- Update the eventlog socket to avoid conflicts
@@ -1133,8 +1203,8 @@ programTestFor testBaseName program eventlogAssertion = \case
                     let unixPath' = directory </> testHash <> "_" <> fileName
                     let eventlogSocketAddr = EventlogSocketUnixAddr unixPath'
                     -- Find and start the program
-                    programBin <- findProgram
-                    withProgram programBin eventlogSocketAddr $ do
+                    programBin <- find
+                    withProgram program{maybeEventlogSocket = Just eventlogSocketAddr} programBin $ do
                         -- The the eventlog assertion
                         debugInfo $ "Using Unix socket: " <> unixPath'
                         eventlogAssertion eventlogSocketAddr
@@ -1147,10 +1217,10 @@ programTestFor testBaseName program eventlogAssertion = \case
         let ?testInfo = testInfo
 
         -- Create program resource
-        let ProgramResource{..} = programResource program
+        let ProgramResource{program = _, ..} = programResource program
 
         -- Create program test
-        let testProgram findProgram = do
+        let testProgram find = do
                 testCase testName $ do
                     -- Update the eventlog socket to avoid conflicts
                     esainetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
@@ -1159,8 +1229,8 @@ programTestFor testBaseName program eventlogAssertion = \case
                     let esaInetPortWithOffset = show (read esaInetPort + esainetPortOffset)
                     let eventlogSocketAddr = EventlogSocketInetAddr esaInetHost esaInetPortWithOffset
                     -- Find and start the program
-                    programBin <- findProgram
-                    withProgram programBin eventlogSocketAddr $ do
+                    programBin <- find
+                    withProgram program{maybeEventlogSocket = Just eventlogSocketAddr} programBin $ do
                         -- The the eventlog assertion
                         debug Header
                         debugInfo $ "Using Inet socket: " <> esaInetHost <> ":" <> esaInetPortWithOffset
@@ -1219,7 +1289,7 @@ withLogger action = do
     let ?logger = logger
     let runner = do
             (testInfo, message) <- T.atomically (T.readTChan . logChan $ logger)
-            IO.hPutStrLn stderr (renderMessage testInfo message)
+            IO.hPutStrLn IO.stderr (renderMessage testInfo message)
             -- IO.hFlush stderr
             runner
     bracket (forkIO runner) killThread $ \_threadId -> do
@@ -1254,7 +1324,7 @@ withLogger action = do
     action
 #endif
 
-debugHandle :: (HasLogger, HasTestInfo) => (String -> Message) -> Handle -> IO (IO ())
+debugHandle :: (HasLogger, HasTestInfo) => (String -> Message) -> IO.Handle -> IO (IO ())
 debugHandle wrapper handle = do
     let runner = do
             threadDelay 30 -- Wait 30mcg.
