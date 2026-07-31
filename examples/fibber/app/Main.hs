@@ -30,34 +30,34 @@ performPreferablyBlockingMajorGC = performMajorGC
 
 main :: IO ()
 main = do
-    -- Register hooks:
-    registerHook HookPostStartEventLogging $
-        traceMarkerIO "HookPostStartEventLogging fired."
-    registerHook HookPreEndEventLogging $
-        traceMarkerIO "HookPreEndEventLogging fired."
-    -- Start eventlog-socket:
-    startFromEnv
-    -- Start fibber:
-    args <- getArgs
-    let (mode, fibArgs) = parseArgs args
-        workload = for_ fibArgs $ \arg -> do
-            traceMarkerIO $ "Starting fib " <> arg
-            print $ fib (read arg)
-            traceMarkerIO $ "Finished fib " <> arg
-            performPreferablyBlockingMajorGC
+  -- Register hooks:
+  registerHook HookPostStartEventLogging $
+    traceMarkerIO "HookPostStartEventLogging fired."
+  registerHook HookPreEndEventLogging $
+    traceMarkerIO "HookPreEndEventLogging fired."
+  -- Start eventlog-socket:
+  startFromEnv
+  -- Start fibber:
+  args <- getArgs
+  let (mode, fibArgs) = parseArgs args
+      workload = for_ fibArgs $ \arg -> do
+        traceMarkerIO $ "Starting fib " <> arg
+        print $ fib (read arg)
+        traceMarkerIO $ "Finished fib " <> arg
+        performPreferablyBlockingMajorGC
 
-            -- Poll for asynchronous errors
-            testWorkerStatus
-            testControlStatus
-    case (mode, fibArgs) of
-        (_, []) -> putStrLn "Provide at least one integer argument."
-        (Finite, _) -> workload
-        (Infinite, _) -> forever workload
-    flushEventLog
+        -- Poll for asynchronous errors
+        testWorkerStatus
+        testControlStatus
+  case (mode, fibArgs) of
+    (_, []) -> putStrLn "Provide at least one integer argument."
+    (Finite, _) -> workload
+    (Infinite, _) -> forever workload
+  flushEventLog
 
-    -- Poll for asynchronous errors
-    testWorkerStatus
-    testControlStatus
+  -- Poll for asynchronous errors
+  testWorkerStatus
+  testControlStatus
 
 fib :: Integer -> Integer
 fib 0 = 0

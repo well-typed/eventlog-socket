@@ -19,166 +19,166 @@ import Text.Read (readMaybe)
 
 main :: IO ()
 main = do
-    -- Allow the user to overwrite the TCP port:
-    tcpPort <- (fromMaybe "4242" . (readMaybe =<<)) <$> lookupEnv "GHC_EVENTLOG_INET_PORT"
+  -- Allow the user to overwrite the TCP port:
+  tcpPort <- (fromMaybe "4242" . (readMaybe =<<)) <$> lookupEnv "GHC_EVENTLOG_INET_PORT"
 
-    -- Create list of tasty ingredients:
-    let ingredients = [includingOptions [keepProgramBuildOption]] <> defaultIngredients
+  -- Create list of tasty ingredients:
+  let ingredients = [includingOptions [keepProgramBuildOption]] <> defaultIngredients
 
-    -- Create logger:
-    withLogger $ do
-        -- Create temporary directory:
-        withTempDirectory "/tmp" "eventlog-socket" $ \tmpDir -> do
-            -- Base socket addresses
-            let unixTests = tests <*> pure (EventlogSocketUnixAddr $ tmpDir </> "ghc_eventlog.sock")
-            let inetTests = tests <*> pure (EventlogSocketInetAddr "127.0.0.1" tcpPort)
-            defaultMainWithIngredients ingredients . testGroup "Tests" . runProgramTests $ unixTests <> inetTests
-  where
-    tests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
-    tests =
-        [ test_fibber
-        , test_fibberCMain
-        , test_oddball_HasHeapProfSample
-        , test_oddball_NoAutomaticHeapSamples
-        , test_oddball_Reconnect
-        , test_oddball_HookOnReconnect
-        , test_oddball_ResetOnReconnect
-        , test_oddball_StartAndStopHeapProfiling
-        , test_oddball_RequestHeapCensus
-        , test_oddball_Junk ("\0\0", "TOASTY")
-        , test_oddball_Junk ("\x01DEAD", "DORK")
-        , test_customCommand
-        ]
+  -- Create logger:
+  withLogger $ do
+    -- Create temporary directory:
+    withTempDirectory "/tmp" "eventlog-socket" $ \tmpDir -> do
+      -- Base socket addresses
+      let unixTests = tests <*> pure (EventlogSocketUnixAddr $ tmpDir </> "ghc_eventlog.sock")
+      let inetTests = tests <*> pure (EventlogSocketInetAddr "127.0.0.1" tcpPort)
+      defaultMainWithIngredients ingredients . testGroup "Tests" . runProgramTests $ unixTests <> inetTests
+ where
+  tests :: (HasLogger) => [EventlogSocketAddr -> ProgramTest]
+  tests =
+    [ test_fibber
+    , test_fibberCMain
+    , test_oddball_HasHeapProfSample
+    , test_oddball_NoAutomaticHeapSamples
+    , test_oddball_Reconnect
+    , test_oddball_HookOnReconnect
+    , test_oddball_ResetOnReconnect
+    , test_oddball_StartAndStopHeapProfiling
+    , test_oddball_RequestHeapCensus
+    , test_oddball_Junk ("\0\0", "TOASTY")
+    , test_oddball_Junk ("\x01DEAD", "DORK")
+    , test_customCommand
+    ]
 
 {- |
 Test that @fibber 35@ produces a parseable eventlog.
 -}
 test_fibber :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_fibber =
-    let fibber =
-            (buildProgram "fibber")
-                { args = ["40"]
-                , rtsopts = ["-l-au"]
-                }
-     in programTestFor "test_fibber" fibber $ \eventlogSocket -> do
-            assertEventlogWith eventlogSocket $
-                -- Validate that the startEventLogging hook fires.
-                hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
-                    -- Validate that the Finished marker is seen.
-                    &> hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
+  let fibber =
+        (buildProgram "fibber")
+          { args = ["40"]
+          , rtsopts = ["-l-au"]
+          }
+   in programTestFor "test_fibber" fibber $ \eventlogSocket -> do
+        assertEventlogWith eventlogSocket $
+          -- Validate that the startEventLogging hook fires.
+          hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
+            -- Validate that the Finished marker is seen.
+            &> hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
 
 {- |
 Test that @fibber-c-main 35@ produces a parseable eventlog.
 -}
 test_fibberCMain :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_fibberCMain =
-    let fibberCMain =
-            (buildProgram "fibber-c-main")
-                { args = ["40"]
-                , rtsopts = ["-l-au"]
-                }
-     in programTestFor "test_fibberCMain" fibberCMain $ \eventlogSocket -> do
-            threadDelay 3_000_000
-            assertEventlogWith eventlogSocket $
-                -- Validate that the startEventLogging hook fires.
-                hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
-                    -- Validate that the Initialising marker is seen.
-                    &> hasMatchingUserMarker ("Initialising" `T.isPrefixOf`)
-                    -- Validate that the Starting marker is seen.
-                    &> hasMatchingUserMarker ("Starting" `T.isPrefixOf`)
-                    -- Validate that the Finished marker is seen.
-                    &> hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
+  let fibberCMain =
+        (buildProgram "fibber-c-main")
+          { args = ["40"]
+          , rtsopts = ["-l-au"]
+          }
+   in programTestFor "test_fibberCMain" fibberCMain $ \eventlogSocket -> do
+        threadDelay 3_000_000
+        assertEventlogWith eventlogSocket $
+          -- Validate that the startEventLogging hook fires.
+          hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
+            -- Validate that the Initialising marker is seen.
+            &> hasMatchingUserMarker ("Initialising" `T.isPrefixOf`)
+            -- Validate that the Starting marker is seen.
+            &> hasMatchingUserMarker ("Starting" `T.isPrefixOf`)
+            -- Validate that the Finished marker is seen.
+            &> hasMatchingUserMarker ("Finished" `T.isPrefixOf`)
 
 {- |
 Test that @oddball@ produces heap profile samples.
 -}
 test_oddball_HasHeapProfSample :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_HasHeapProfSample =
-    let oddball =
-            (buildProgram "oddball")
-                { rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
-                }
-     in programTestFor "test_oddball_HasHeapProfSample" oddball $ \eventlogSocket -> do
-            assertEventlogWith eventlogSocket $
-                -- Validate that the Summing marker is seen, and that the event
-                -- stream contains at least one heap profile sample.
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> hasHeapProfSampleString
+  let oddball =
+        (buildProgram "oddball")
+          { rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
+          }
+   in programTestFor "test_oddball_HasHeapProfSample" oddball $ \eventlogSocket -> do
+        assertEventlogWith eventlogSocket $
+          -- Validate that the Summing marker is seen, and that the event
+          -- stream contains at least one heap profile sample.
+          hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> hasHeapProfSampleString
 
 {- |
 Test that @--no-automatic-heap-samples@ is respected.
 -}
 test_oddball_NoAutomaticHeapSamples :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_NoAutomaticHeapSamples =
-    let oddball =
-            (buildProgram "oddball")
-                { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                }
-     in programTestFor "test_oddball_NoAutomaticHeapSamples" oddball $ \eventlogSocket -> do
-            assertEventlogWith eventlogSocket $
-                -- Validate that the Summing marker is seen, and that the event
-                -- stream contains no heap profile samples for two iterations.
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> hasNoHeapProfSampleString
-                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+  let oddball =
+        (buildProgram "oddball")
+          { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+          }
+   in programTestFor "test_oddball_NoAutomaticHeapSamples" oddball $ \eventlogSocket -> do
+        assertEventlogWith eventlogSocket $
+          -- Validate that the Summing marker is seen, and that the event
+          -- stream contains no heap profile samples for two iterations.
+          hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> hasNoHeapProfSampleString
+            ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
 {- |
 Test that @oddball@ produces the init events and heap samples on each connection.
 -}
 test_oddball_Reconnect :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_Reconnect =
-    let oddball =
-            (buildProgram "oddball")
-                { rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
-                }
-     in programTestFor "test_oddball_Reconnect" oddball $ \eventlogSocket -> do
-            -- Validate that reconnecting works and that each stream has a WallClockTime
-            -- event (as proxy for the init events) and at least one heap profile sample.
-            assertEventlogWith eventlogSocket $ hasWallClockTime &> hasHeapProfSampleString
-            assertEventlogWith eventlogSocket $ hasWallClockTime &> hasHeapProfSampleString
+  let oddball =
+        (buildProgram "oddball")
+          { rtsopts = ["-l-au", "-hT", "-A256K", "-i0", "--eventlog-flush-interval=1"]
+          }
+   in programTestFor "test_oddball_Reconnect" oddball $ \eventlogSocket -> do
+        -- Validate that reconnecting works and that each stream has a WallClockTime
+        -- event (as proxy for the init events) and at least one heap profile sample.
+        assertEventlogWith eventlogSocket $ hasWallClockTime &> hasHeapProfSampleString
+        assertEventlogWith eventlogSocket $ hasWallClockTime &> hasHeapProfSampleString
 
 {- |
 Test that @oddball@ triggers the post-startEventLogging hook on reconnect.
 -}
 test_oddball_HookOnReconnect :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_HookOnReconnect =
-    let oddball =
-            (buildProgram "oddball")
-                { rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                }
-     in programTestFor "test_oddball_HookOnReconnect" oddball $ \eventlogSocket -> do
-            -- Validate that reconnecting works and that each stream has a WallClockTime
-            -- event (as proxy for the init events) and triggers the post-startEventLogging hook.
-            assertEventlogWith eventlogSocket $
-                hasWallClockTime
-                    &> hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
-            assertEventlogWith eventlogSocket $
-                hasWallClockTime
-                    &> hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
+  let oddball =
+        (buildProgram "oddball")
+          { rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
+          }
+   in programTestFor "test_oddball_HookOnReconnect" oddball $ \eventlogSocket -> do
+        -- Validate that reconnecting works and that each stream has a WallClockTime
+        -- event (as proxy for the init events) and triggers the post-startEventLogging hook.
+        assertEventlogWith eventlogSocket $
+          hasWallClockTime
+            &> hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
+        assertEventlogWith eventlogSocket $
+          hasWallClockTime
+            &> hasMatchingUserMarker ("HookPostStartEventLogging" `T.isPrefixOf`)
 
 {- |
 Test that the command parsing state is reset on reconnect.
 -}
 test_oddball_ResetOnReconnect :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_ResetOnReconnect =
-    let oddball =
-            (buildProgram "oddball")
-                { rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
-                }
-     in programTestFor "test_oddball_ResetOnReconnect" oddball $ \eventlogSocket -> do
-            -- Validate that the event stream contains at least one heap
-            -- profile sample twice, connecting to the socket each time.
-            let (requestHeapCensusPart1, requestHeapCensusPart2) = BSL.splitAt 6 (B.encode requestHeapCensus)
-            assertEventlogWith' eventlogSocket $ \socket ->
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendJunk socket requestHeapCensusPart1
-                    !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-            assertEventlogWith' eventlogSocket $ \socket ->
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendJunk socket requestHeapCensusPart2
-                    !> hasNoHeapProfSampleString
-                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+  let oddball =
+        (buildProgram "oddball")
+          { rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+          , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
+          }
+   in programTestFor "test_oddball_ResetOnReconnect" oddball $ \eventlogSocket -> do
+        -- Validate that the event stream contains at least one heap
+        -- profile sample twice, connecting to the socket each time.
+        let (requestHeapCensusPart1, requestHeapCensusPart2) = BSL.splitAt 6 (B.encode requestHeapCensus)
+        assertEventlogWith' eventlogSocket $ \socket ->
+          hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> sendJunk socket requestHeapCensusPart1
+            !> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+        assertEventlogWith' eventlogSocket $ \socket ->
+          hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> sendJunk socket requestHeapCensusPart2
+            !> hasNoHeapProfSampleString
+            ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
 {- |
 Test that the `StartHeapProfiling` and `StopHeapProfiling` commands are
@@ -188,22 +188,22 @@ sent, after some iterations, no more heap profile samples are received.
 -}
 test_oddball_StartAndStopHeapProfiling :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_StartAndStopHeapProfiling =
-    let oddball =
-            (buildProgram "oddball")
-                { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
-                }
-     in programTestFor "test_oddball_StartAndStopHeapProfiling" oddball $ \eventlogSocket -> do
-            assertEventlogWith' eventlogSocket $ \socket ->
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> hasNoHeapProfSampleString
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendCommand socket startHeapProfiling
-                    !> (2 `times` (hasHeapProfSampleString &> hasHeapProfSampleEnd))
-                    &> sendCommand socket stopHeapProfiling
-                    !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
-                    &> hasNoHeapProfSampleString
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+  let oddball =
+        (buildProgram "oddball")
+          { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+          , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
+          }
+   in programTestFor "test_oddball_StartAndStopHeapProfiling" oddball $ \eventlogSocket -> do
+        assertEventlogWith' eventlogSocket $ \socket ->
+          hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> hasNoHeapProfSampleString
+            ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> sendCommand socket startHeapProfiling
+            !> (2 `times` (hasHeapProfSampleString &> hasHeapProfSampleEnd))
+            &> sendCommand socket stopHeapProfiling
+            !> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+            &> hasNoHeapProfSampleString
+            ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
 
 {- |
 Test that the `RequestHeapCensus` signal is respected, i.e., that once the
@@ -211,24 +211,24 @@ Test that the `RequestHeapCensus` signal is respected, i.e., that once the
 -}
 test_oddball_RequestHeapCensus :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_oddball_RequestHeapCensus =
-    let oddball =
-            (buildProgram "oddball")
-                { rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
-                }
-     in programTestFor "test_oddball_RequestHeapCensus" oddball $ \eventlogSocket -> do
-            assertEventlogWith' eventlogSocket $ \socket ->
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> hasNoHeapProfSampleString
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendCommand socket requestHeapCensus
-                    -- validate that there is exactly one heap sample, and that
-                    -- afterwards there are no further samples, either in this
-                    -- or the next iteration.
-                    !> hasHeapProfSampleString
-                    &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
-                    &> hasNoHeapProfSampleString
-                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+  let oddball =
+        (buildProgram "oddball")
+          { rtsopts = ["-l", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+          , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
+          }
+   in programTestFor "test_oddball_RequestHeapCensus" oddball $ \eventlogSocket -> do
+        assertEventlogWith' eventlogSocket $ \socket ->
+          hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> hasNoHeapProfSampleString
+            ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> sendCommand socket requestHeapCensus
+            -- validate that there is exactly one heap sample, and that
+            -- afterwards there are no further samples, either in this
+            -- or the next iteration.
+            !> hasHeapProfSampleString
+            &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
+            &> hasNoHeapProfSampleString
+            ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
 {- |
 Test that the `RequestHeapCensus` command is still respected after junk has
@@ -236,40 +236,40 @@ been sent over the control socket.
 -}
 test_oddball_Junk :: (HasLogger) => (ByteString, ByteString) -> EventlogSocketAddr -> ProgramTest
 test_oddball_Junk (junkBefore, junkAfter) =
-    let oddball =
-            (buildProgram "oddball")
-                { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
-                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
-                }
-     in programTestFor ("test_oddball_Junk[" <> show junkBefore <> "," <> show junkAfter <> "]") oddball $ \eventlogSocket -> do
-            assertEventlogWith' eventlogSocket $ \socket ->
-                hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> hasNoHeapProfSampleString
-                    ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
-                    &> sendCommandWithJunk socket junkBefore requestHeapCensus junkAfter
-                    !> hasHeapProfSampleString
-                    &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
-                    &> hasNoHeapProfSampleString
-                    ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
+  let oddball =
+        (buildProgram "oddball")
+          { rtsopts = ["-l-au", "-hT", "-A256K", "--eventlog-flush-interval=1", "--no-automatic-heap-samples"]
+          , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
+          }
+   in programTestFor ("test_oddball_Junk[" <> show junkBefore <> "," <> show junkAfter <> "]") oddball $ \eventlogSocket -> do
+        assertEventlogWith' eventlogSocket $ \socket ->
+          hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> hasNoHeapProfSampleString
+            ~> hasMatchingUserMarker ("Summing" `T.isPrefixOf`)
+            &> sendCommandWithJunk socket junkBefore requestHeapCensus junkAfter
+            !> hasHeapProfSampleString
+            &> hasHeapProfSampleEnd -- TODO: This needs to be delimited.
+            &> hasNoHeapProfSampleString
+            ~> (2 `times` hasMatchingUserMarker ("Summing" `T.isPrefixOf`))
 
 {- |
 Test that custom commands are respected.
 -}
 test_customCommand :: (HasLogger) => EventlogSocketAddr -> ProgramTest
 test_customCommand =
-    let customCommand =
-            (buildProgram "custom-command")
-                { args = ["--forever"]
-                , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
-                , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
-                }
-     in programTestFor "test_customCommand" customCommand $ \eventlogSocket -> do
-            assertEventlogWith' eventlogSocket $ \socket ->
-                hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`)
-                    &> sendCommand socket (userCommand (userNamespace "custom-command") (CommandId 1))
-                    !> hasMatchingUserMessage ("handled ping" ==)
-                    &> sendCommand socket (userCommand (userNamespace "custom-command") (CommandId 2))
-                    !> hasMatchingUserMessage ("handled pong" ==)
-                    &> (2 `times` hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`))
+  let customCommand =
+        (buildProgram "custom-command")
+          { args = ["--forever"]
+          , rtsopts = ["-l-au", "--eventlog-flush-interval=1"]
+          , buildOrFind = Build{buildFlags = ["--constraint=eventlog-socket+control"]}
+          }
+   in programTestFor "test_customCommand" customCommand $ \eventlogSocket -> do
+        assertEventlogWith' eventlogSocket $ \socket ->
+          hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`)
+            &> sendCommand socket (userCommand (userNamespace "custom-command") (CommandId 1))
+            !> hasMatchingUserMessage ("handled ping" ==)
+            &> sendCommand socket (userCommand (userNamespace "custom-command") (CommandId 2))
+            !> hasMatchingUserMessage ("handled pong" ==)
+            &> (2 `times` hasMatchingUserMarker ("custom workload iteration " `T.isPrefixOf`))
 
 -- -}

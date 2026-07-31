@@ -2,91 +2,91 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module GHC.Eventlog.Socket.Test (
-    -- * Example Programs
-    Program (name, args, rtsopts, env, buildOrFind, maybeEventlogSocket),
-    BuildOrFind (..),
-    buildProgram,
-    buildProgramWith,
-    findProgram,
-    withProgram,
-    HasProgramInfo,
-    ProgramInfo (..),
-    ProgramResource (..),
-    programResource,
-    withProgramResource,
+  -- * Example Programs
+  Program (name, args, rtsopts, env, buildOrFind, maybeEventlogSocket),
+  BuildOrFind (..),
+  buildProgram,
+  buildProgramWith,
+  findProgram,
+  withProgram,
+  HasProgramInfo,
+  ProgramInfo (..),
+  ProgramResource (..),
+  programResource,
+  withProgramResource,
 
-    -- * Eventlog Validation
-    EventlogSocketAddr (..),
-    isEventlogSocketUnixAddr,
-    isEventlogSocketInetAddr,
-    EventlogAssertion (initialTimeoutS, timeoutExponent, eventlogSocket, validateEvents),
-    defaultEventlogAssertion,
-    assertEventlogOk,
-    assertEventlogWith,
-    assertEventlogWith',
-    runEventlogAssertion,
-    (!>),
-    (&>),
-    times,
-    anyOf,
-    allOf,
-    droppingFor,
-    isWallClockTime,
-    hasWallClockTimeWithinSec,
-    hasWallClockTimeWithin,
-    hasWallClockTime,
-    isHeapProfSampleBegin,
-    hasHeapProfSampleBeginWithinSec,
-    hasHeapProfSampleBeginWithin,
-    hasHeapProfSampleBegin,
-    hasNoHeapProfSampleBeginWithinSec,
-    hasNoHeapProfSampleBeginWithin,
-    hasNoHeapProfSampleBegin,
-    isHeapProfSampleEnd,
-    hasHeapProfSampleEndWithinSec,
-    hasHeapProfSampleEndWithin,
-    hasHeapProfSampleEnd,
-    hasNoHeapProfSampleEndWithinSec,
-    hasNoHeapProfSampleEndWithin,
-    hasNoHeapProfSampleEnd,
-    isHeapProfSampleString,
-    hasHeapProfSampleStringWithinSec,
-    hasHeapProfSampleStringWithin,
-    hasHeapProfSampleString,
-    hasNoHeapProfSampleStringWithinSec,
-    hasNoHeapProfSampleStringWithin,
-    hasNoHeapProfSampleString,
-    isMatchingUserMarker,
-    hasMatchingUserMarkerWithinSec,
-    hasMatchingUserMarkerWithin,
-    hasMatchingUserMarker,
-    isMatchingUserMessage,
-    hasMatchingUserMessageWithinSec,
-    hasMatchingUserMessageWithin,
-    hasMatchingUserMessage,
-    failing,
-    debugging,
-    sendCommand,
-    sendJunk,
-    sendCommandWithJunk,
+  -- * Eventlog Validation
+  EventlogSocketAddr (..),
+  isEventlogSocketUnixAddr,
+  isEventlogSocketInetAddr,
+  EventlogAssertion (initialTimeoutS, timeoutExponent, eventlogSocket, validateEvents),
+  defaultEventlogAssertion,
+  assertEventlogOk,
+  assertEventlogWith,
+  assertEventlogWith',
+  runEventlogAssertion,
+  (!>),
+  (&>),
+  times,
+  anyOf,
+  allOf,
+  droppingFor,
+  isWallClockTime,
+  hasWallClockTimeWithinSec,
+  hasWallClockTimeWithin,
+  hasWallClockTime,
+  isHeapProfSampleBegin,
+  hasHeapProfSampleBeginWithinSec,
+  hasHeapProfSampleBeginWithin,
+  hasHeapProfSampleBegin,
+  hasNoHeapProfSampleBeginWithinSec,
+  hasNoHeapProfSampleBeginWithin,
+  hasNoHeapProfSampleBegin,
+  isHeapProfSampleEnd,
+  hasHeapProfSampleEndWithinSec,
+  hasHeapProfSampleEndWithin,
+  hasHeapProfSampleEnd,
+  hasNoHeapProfSampleEndWithinSec,
+  hasNoHeapProfSampleEndWithin,
+  hasNoHeapProfSampleEnd,
+  isHeapProfSampleString,
+  hasHeapProfSampleStringWithinSec,
+  hasHeapProfSampleStringWithin,
+  hasHeapProfSampleString,
+  hasNoHeapProfSampleStringWithinSec,
+  hasNoHeapProfSampleStringWithin,
+  hasNoHeapProfSampleString,
+  isMatchingUserMarker,
+  hasMatchingUserMarkerWithinSec,
+  hasMatchingUserMarkerWithin,
+  hasMatchingUserMarker,
+  isMatchingUserMessage,
+  hasMatchingUserMessageWithinSec,
+  hasMatchingUserMessageWithin,
+  hasMatchingUserMessage,
+  failing,
+  debugging,
+  sendCommand,
+  sendJunk,
+  sendCommandWithJunk,
 
-    -- * Debug
-    HasTestInfo,
-    TestInfo,
-    ProgramTest,
-    programTestFor,
-    runProgramTests,
-    HasLogger,
-    Logger,
-    withLogger,
-    Message (..),
-    debug,
-    debugInfo,
-    debugHandle,
-    debugEvents,
+  -- * Debug
+  HasTestInfo,
+  TestInfo,
+  ProgramTest,
+  programTestFor,
+  runProgramTests,
+  HasLogger,
+  Logger,
+  withLogger,
+  Message (..),
+  debug,
+  debugInfo,
+  debugHandle,
+  debugEvents,
 
-    -- * Custom options
-    keepProgramBuildOption,
+  -- * Custom options
+  keepProgramBuildOption,
 ) where
 
 import Control.Concurrent (forkIO, killThread, threadDelay)
@@ -148,16 +148,16 @@ import System.Posix.Types (CPid (..))
 newtype KeepProgramBuild = KeepProgramBuild Bool
 
 instance IsOption KeepProgramBuild where
-    defaultValue :: KeepProgramBuild
-    defaultValue = KeepProgramBuild False
-    parseValue :: String -> Maybe KeepProgramBuild
-    parseValue = fmap KeepProgramBuild . safeReadBool
+  defaultValue :: KeepProgramBuild
+  defaultValue = KeepProgramBuild False
+  parseValue :: String -> Maybe KeepProgramBuild
+  parseValue = fmap KeepProgramBuild . safeReadBool
 
-    -- optionName :: Tagged KeepProgramBuild String
-    optionName = "keep-program-build"
+  -- optionName :: Tagged KeepProgramBuild String
+  optionName = "keep-program-build"
 
-    -- optionHelp :: Tagged KeepProgramBuild String
-    optionHelp = "If true, keep the cabal build directories for the test programs."
+  -- optionHelp :: Tagged KeepProgramBuild String
+  optionHelp = "If true, keep the cabal build directories for the test programs."
 
 keepProgramBuildOption :: OptionDescription
 keepProgramBuildOption = Option (Proxy :: Proxy KeepProgramBuild)
@@ -167,34 +167,34 @@ keepProgramBuildOption = Option (Proxy :: Proxy KeepProgramBuild)
 --------------------------------------------------------------------------------
 
 data BuildOrFind
-    = Build {buildFlags :: [String]}
-    | Find
+  = Build {buildFlags :: [String]}
+  | Find
 
 data Program = Program
-    { name :: String
-    , args :: [String]
-    , rtsopts :: [String]
-    , env :: [(String, String)]
-    , buildOrFind :: BuildOrFind
-    , maybeEventlogSocket :: Maybe EventlogSocketAddr
-    }
+  { name :: String
+  , args :: [String]
+  , rtsopts :: [String]
+  , env :: [(String, String)]
+  , buildOrFind :: BuildOrFind
+  , maybeEventlogSocket :: Maybe EventlogSocketAddr
+  }
 
 instance HasField "buildFlags" Program [String] where
-    getField :: Program -> [String]
-    getField program
-        | Build{buildFlags} <- program.buildOrFind = buildFlags
-        | otherwise = []
+  getField :: Program -> [String]
+  getField program
+    | Build{buildFlags} <- program.buildOrFind = buildFlags
+    | otherwise = []
 
 buildProgramWith :: String -> [String] -> Program
 buildProgramWith name buildFlags =
-    Program
-        { name
-        , args = []
-        , rtsopts = []
-        , env = []
-        , buildOrFind = Build{buildFlags}
-        , maybeEventlogSocket = Nothing
-        }
+  Program
+    { name
+    , args = []
+    , rtsopts = []
+    , env = []
+    , buildOrFind = Build{buildFlags}
+    , maybeEventlogSocket = Nothing
+    }
 
 buildProgram :: String -> Program
 buildProgram name = buildProgramWith name []
@@ -205,37 +205,37 @@ findProgram name = (buildProgram name){buildOrFind = Find}
 type HasProgramInfo = (?programInfo :: ProgramInfo)
 
 data ProgramInfo = ProgramInfo
-    { program :: Program
-    , programPidIO :: IO (Maybe Pid)
-    , programPid :: Maybe Pid
-    }
+  { program :: Program
+  , programPidIO :: IO (Maybe Pid)
+  , programPid :: Maybe Pid
+  }
 
 data ProgramHandle = ProgramHandle
-    { wait :: IO ()
-    , kill :: IO ()
-    , info :: ProgramInfo
-    }
+  { wait :: IO ()
+  , kill :: IO ()
+  , info :: ProgramInfo
+  }
 
 type ProgramDesc = String
 
 instance HasField "programDesc" Program ProgramDesc where
-    getField :: Program -> ProgramDesc
-    getField program =
-        program.name <> program.buildFlagDesc
+  getField :: Program -> ProgramDesc
+  getField program =
+    program.name <> program.buildFlagDesc
 
 type BuildFlagsDesc = String
 
 instance HasField "buildFlagDesc" Program BuildFlagsDesc where
-    getField :: Program -> BuildFlagsDesc
-    getField program
-        | Build{buildFlags} <- program.buildOrFind, not (null buildFlags) = "[" <> unwords program.buildFlags <> "]"
-        | otherwise = ""
+  getField :: Program -> BuildFlagsDesc
+  getField program
+    | Build{buildFlags} <- program.buildOrFind, not (null buildFlags) = "[" <> unwords program.buildFlags <> "]"
+    | otherwise = ""
 
 data ProgramResource = ProgramResource
-    { program :: Program
-    , setupProgram :: IO FilePath
-    , cleanProgram :: FilePath -> IO ()
-    }
+  { program :: Program
+  , setupProgram :: IO FilePath
+  , cleanProgram :: FilePath -> IO ()
+  }
 
 buildFlagDebug :: [String]
 #if defined(DEBUG)
@@ -256,228 +256,228 @@ defaultBuildFlags = ["--constraint=eventlog-socket+optimise-heavily"] <> buildFl
 
 programResource :: (HasLogger) => Program -> ProgramResource
 programResource program = case program.buildOrFind of
-    Find{} ->
-        let setupProgram :: IO FilePath
-            setupProgram = do
-                let ?testInfo = TestInfo{testName = "find_" <> program.programDesc}
-                debug Header
+  Find{} ->
+    let setupProgram :: IO FilePath
+        setupProgram = do
+          let ?testInfo = TestInfo{testName = "find_" <> program.programDesc}
+          debug Header
+          debugInfo $ "Find binary for program " <> program.name
+          programBin <-
+            findExecutable program.name >>= \case
+              Just programBin -> do
+                debugInfo $ "Found program binary at " <> programBin
+                pure programBin
+              Nothing -> do
+                let msg = "Could not find binary for program " <> program.name
+                debugFail msg
+                error msg
+          debug Footer
+          pure programBin
+
+        cleanProgram :: FilePath -> IO ()
+        cleanProgram _programBin = pure ()
+     in ProgramResource{..}
+  Build{buildFlags} ->
+    -- Shared information
+    let programBuildFlags = buildFlags <> defaultBuildFlags
+        programBuildDir = "dist-newstyle/" <> L.intercalate "-" ("test" : program.name : programBuildFlags)
+
+        -- Make the program binary
+        setupProgram :: IO FilePath
+        setupProgram = do
+          let ?testInfo = TestInfo{testName = "make_" <> program.programDesc}
+          debug Header
+
+          ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
+          cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
+
+          -- Build the program binary
+          let build :: IO ()
+              build = do
+                -- Start building program binary
+                debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
+                let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", programBuildDir] <> programBuildFlags
+                debugInfo (showCommandForUser cabal buildArgs)
+                let createProcess =
+                      (proc cabal buildArgs)
+                        { std_in = CreatePipe
+                        , std_out = CreatePipe
+                        , std_err = CreatePipe
+                        }
+                (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
+
+                -- Create the ProgramInfo:
+                let cabalProgram = (findProgram "cabal"){args = buildArgs}
+                let cabalProgramPidIO = getPid processHandle
+                cabalProgramPid <- cabalProgramPidIO
+                let info = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
+                let ?programInfo = info
+
+                -- Start loggers for stderr and stdout:
+                maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
+                maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
+                let kill = mask_ $ do
+                      debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
+                      sequence_ maybeKillDebugOut
+                      debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+                      sequence_ maybeKillDebugErr
+                      debugInfo $ "Cleaning up process for " <> program.name <> "."
+                      exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
+                      debugInfo $ "Process was killed with exit code " <> show exitCode
+                      pure ()
+                let wait = do
+                      debugInfo $ "Wait for " <> showCommandForUser cabal buildArgs
+                      bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
+                        debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal buildArgs
+                        when (exitCode /= ExitSuccess) . assertFailure $
+                          "Program " <> program.name <> " failed with exit code " <> show exitCode
+
+                -- Wait for building program to finish
+                wait
+
+          -- Find the program binary
+          let find :: IO FilePath
+              find = do
                 debugInfo $ "Find binary for program " <> program.name
-                programBin <-
-                    findExecutable program.name >>= \case
-                        Just programBin -> do
-                            debugInfo $ "Found program binary at " <> programBin
-                            pure programBin
-                        Nothing -> do
-                            let msg = "Could not find binary for program " <> program.name
-                            debugFail msg
-                            error msg
-                debug Footer
-                pure programBin
+                let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", programBuildDir] <> programBuildFlags
+                debugInfo (showCommandForUser cabal findArgs)
+                let createProcess =
+                      (proc cabal findArgs)
+                        { std_in = CreatePipe
+                        , std_out = CreatePipe
+                        , std_err = CreatePipe
+                        }
+                (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
 
-            cleanProgram :: FilePath -> IO ()
-            cleanProgram _programBin = pure ()
-         in ProgramResource{..}
-    Build{buildFlags} ->
-        -- Shared information
-        let programBuildFlags = buildFlags <> defaultBuildFlags
-            programBuildDir = "dist-newstyle/" <> L.intercalate "-" ("test" : program.name : programBuildFlags)
+                -- Create the ProgramInfo:
+                let cabalProgram = (findProgram "cabal"){args = findArgs}
+                let cabalProgramPidIO = getPid processHandle
+                cabalProgramPid <- cabalProgramPidIO
+                let cabalInfo = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
+                let ?programInfo = cabalInfo
 
-            -- Make the program binary
-            setupProgram :: IO FilePath
-            setupProgram = do
-                let ?testInfo = TestInfo{testName = "make_" <> program.programDesc}
-                debug Header
+                -- Start loggers for stderr and stdout:
+                maybeKillDebugErr <- traverse (debugHandle $ ProgramErr cabalInfo) maybeHandleErr
+                let kill = mask_ $ do
+                      debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+                      sequence_ maybeKillDebugErr
+                      debugInfo $ "Cleaning up process for " <> program.name <> "."
+                      exitCode <- murderProcess program.name (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle)
+                      debugInfo $ "Process was killed with exit code " <> show exitCode
+                      pure ()
+                let wait = do
+                      debugInfo $ "Wait for " <> showCommandForUser cabal findArgs
+                      bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
+                        debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal findArgs
+                        when (exitCode /= ExitSuccess) . assertFailure $
+                          "Program " <> program.name <> " failed with exit code " <> show exitCode
 
-                ghc <- fromMaybe "ghc" <$> lookupEnv "GHC"
-                cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
+                wait
 
-                -- Build the program binary
-                let build :: IO ()
-                    build = do
-                        -- Start building program binary
-                        debugInfo $ "Build program " <> program.name <> " with " <> ghc <> " and " <> cabal
-                        let buildArgs = ["build", program.name, "-w" <> ghc, "--builddir", programBuildDir] <> programBuildFlags
-                        debugInfo (showCommandForUser cabal buildArgs)
-                        let createProcess =
-                                (proc cabal buildArgs)
-                                    { std_in = CreatePipe
-                                    , std_out = CreatePipe
-                                    , std_err = CreatePipe
-                                    }
-                        (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
+                -- The last line of output from list-bin should be the path:
+                findOut <- IO.hGetContents handleOut
+                programBins <- filterM doesFileExist (lines findOut)
+                case programBins of
+                  [] -> do
+                    let msg = "Could not find program binary for " <> program.name
+                    debugFail msg >> throwIO (ErrorCall msg)
+                  [programBin] -> do
+                    debugInfo $ "Found program binary at " <> programBin
+                    pure programBin
+                  (_programBin : _programBins) -> do
+                    let msg = unlines ("Found multiple program binaries for " <> program.name : programBins)
+                    debugFail msg >> throwIO (ErrorCall msg)
 
-                        -- Create the ProgramInfo:
-                        let cabalProgram = (findProgram "cabal"){args = buildArgs}
-                        let cabalProgramPidIO = getPid processHandle
-                        cabalProgramPid <- cabalProgramPidIO
-                        let info = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
-                        let ?programInfo = info
+          programBin <- build >> find
 
-                        -- Start loggers for stderr and stdout:
-                        maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
-                        maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
-                        let kill = mask_ $ do
-                                debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
-                                sequence_ maybeKillDebugOut
-                                debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
-                                sequence_ maybeKillDebugErr
-                                debugInfo $ "Cleaning up process for " <> program.name <> "."
-                                exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
-                                debugInfo $ "Process was killed with exit code " <> show exitCode
-                                pure ()
-                        let wait = do
-                                debugInfo $ "Wait for " <> showCommandForUser cabal buildArgs
-                                bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
-                                    debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal buildArgs
-                                    when (exitCode /= ExitSuccess) . assertFailure $
-                                        "Program " <> program.name <> " failed with exit code " <> show exitCode
+          debug Footer
 
-                        -- Wait for building program to finish
-                        wait
+          pure programBin
 
-                -- Find the program binary
-                let find :: IO FilePath
-                    find = do
-                        debugInfo $ "Find binary for program " <> program.name
-                        let findArgs = ["list-bin", program.name, "-w" <> ghc, "--builddir", programBuildDir] <> programBuildFlags
-                        debugInfo (showCommandForUser cabal findArgs)
-                        let createProcess =
-                                (proc cabal findArgs)
-                                    { std_in = CreatePipe
-                                    , std_out = CreatePipe
-                                    , std_err = CreatePipe
-                                    }
-                        (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle) <- createProcess_ "cabal" createProcess
+        -- Free the program binary
+        cleanProgram :: FilePath -> IO ()
+        cleanProgram _programBin = do
+          let ?testInfo = TestInfo{testName = "free_" <> program.programDesc}
+          debug Header
 
-                        -- Create the ProgramInfo:
-                        let cabalProgram = (findProgram "cabal"){args = findArgs}
-                        let cabalProgramPidIO = getPid processHandle
-                        cabalProgramPid <- cabalProgramPidIO
-                        let cabalInfo = ProgramInfo{program = cabalProgram, programPid = cabalProgramPid, programPidIO = cabalProgramPidIO}
-                        let ?programInfo = cabalInfo
+          cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
 
-                        -- Start loggers for stderr and stdout:
-                        maybeKillDebugErr <- traverse (debugHandle $ ProgramErr cabalInfo) maybeHandleErr
-                        let kill = mask_ $ do
-                                debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
-                                sequence_ maybeKillDebugErr
-                                debugInfo $ "Cleaning up process for " <> program.name <> "."
-                                exitCode <- murderProcess program.name (maybeHandleIn, Just handleOut, maybeHandleErr, processHandle)
-                                debugInfo $ "Process was killed with exit code " <> show exitCode
-                                pure ()
-                        let wait = do
-                                debugInfo $ "Wait for " <> showCommandForUser cabal findArgs
-                                bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode -> do
-                                    debugInfo $ "Finished (" <> show exitCode <> "): " <> showCommandForUser cabal findArgs
-                                    when (exitCode /= ExitSuccess) . assertFailure $
-                                        "Program " <> program.name <> " failed with exit code " <> show exitCode
+          -- Clean up the build directory
+          debugInfo $ "Clean build directory " <> programBuildDir
+          let cleanArgs = ["clean", "--builddir", programBuildDir]
+          debugInfo (showCommandForUser cabal cleanArgs)
+          (findExit, findOut, findErr) <- readProcessWithExitCode cabal cleanArgs ""
+          when (findExit /= ExitSuccess) $ do
+            debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
+            throwIO findExit
 
-                        wait
-
-                        -- The last line of output from list-bin should be the path:
-                        findOut <- IO.hGetContents handleOut
-                        programBins <- filterM doesFileExist (lines findOut)
-                        case programBins of
-                            [] -> do
-                                let msg = "Could not find program binary for " <> program.name
-                                debugFail msg >> throwIO (ErrorCall msg)
-                            [programBin] -> do
-                                debugInfo $ "Found program binary at " <> programBin
-                                pure programBin
-                            (_programBin : _programBins) -> do
-                                let msg = unlines ("Found multiple program binaries for " <> program.name : programBins)
-                                debugFail msg >> throwIO (ErrorCall msg)
-
-                programBin <- build >> find
-
-                debug Footer
-
-                pure programBin
-
-            -- Free the program binary
-            cleanProgram :: FilePath -> IO ()
-            cleanProgram _programBin = do
-                let ?testInfo = TestInfo{testName = "free_" <> program.programDesc}
-                debug Header
-
-                cabal <- fromMaybe "cabal" <$> lookupEnv "CABAL"
-
-                -- Clean up the build directory
-                debugInfo $ "Clean build directory " <> programBuildDir
-                let cleanArgs = ["clean", "--builddir", programBuildDir]
-                debugInfo (showCommandForUser cabal cleanArgs)
-                (findExit, findOut, findErr) <- readProcessWithExitCode cabal cleanArgs ""
-                when (findExit /= ExitSuccess) $ do
-                    debugFail . unlines $ ["Failed to find binary for program ", findOut, findErr]
-                    throwIO findExit
-
-                debug Footer
-         in ProgramResource{..}
+          debug Footer
+     in ProgramResource{..}
 
 -- Fork the program binary
 forkProgram :: (HasLogger, HasTestInfo) => Program -> FilePath -> IO ProgramHandle
 forkProgram program programBin = do
-    -- Check if program exists:
-    programBinExists <- doesFileExist programBin
-    if programBinExists
-        then debugInfo $ "Program binary exists: " <> programBin
-        else debugFail $ "Program binary does NOT exist: " <> programBin
-    -- Start program
-    debugInfo $ "Launching program " <> program.programDesc
-    inheritedEnv <- filter shouldInherit <$> getEnvironment
-    let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
-    let extraEnv = program.env <> maybe [] eventlogSocketEnv program.maybeEventlogSocket
-    debugInfo . unlines . concat $
-        [ [showCommandForUser programBin programArgs]
-        , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
-          | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
-          ]
-        ]
-    -- Create the process:
-    let createProcess =
-            (proc programBin programArgs)
-                { env = Just (inheritedEnv <> extraEnv)
-                , std_in = CreatePipe
-                , std_out = CreatePipe
-                , std_err = CreatePipe
-                }
-    (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
-    -- Create the ProgramInfo:
-    let programPidIO = getPid processHandle
-    programPid <- programPidIO
-    let info = ProgramInfo{..}
-    let ?programInfo = info
-    debugInfo $ "Launched " <> program.programDesc
-    -- Start loggers for stderr and stdout:
-    maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
-    maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
-    let kill = mask_ $ do
-            debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
-            sequence_ maybeKillDebugOut
-            debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
-            sequence_ maybeKillDebugErr
-            debugInfo $ "Cleaning up process for " <> program.name <> "."
-            exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
-            debugInfo $ "Process was killed with exit code " <> show exitCode
-            pure ()
-    let wait = do
-            debugInfo $ "Waiting for " <> program.name <> " to finish."
-            bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
-                when (exitCode /= ExitSuccess) . assertFailure $
-                    "Program " <> program.name <> " failed with exit code " <> show exitCode
-    pure ProgramHandle{..}
+  -- Check if program exists:
+  programBinExists <- doesFileExist programBin
+  if programBinExists
+    then debugInfo $ "Program binary exists: " <> programBin
+    else debugFail $ "Program binary does NOT exist: " <> programBin
+  -- Start program
+  debugInfo $ "Launching program " <> program.programDesc
+  inheritedEnv <- filter shouldInherit <$> getEnvironment
+  let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
+  let extraEnv = program.env <> maybe [] eventlogSocketEnv program.maybeEventlogSocket
+  debugInfo . unlines . concat $
+    [ [showCommandForUser programBin programArgs]
+    , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
+      | (i, (k, v)) <- zip [(1 :: Int) ..] extraEnv
+      ]
+    ]
+  -- Create the process:
+  let createProcess =
+        (proc programBin programArgs)
+          { env = Just (inheritedEnv <> extraEnv)
+          , std_in = CreatePipe
+          , std_out = CreatePipe
+          , std_err = CreatePipe
+          }
+  (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle) <- createProcess_ program.name createProcess
+  -- Create the ProgramInfo:
+  let programPidIO = getPid processHandle
+  programPid <- programPidIO
+  let info = ProgramInfo{..}
+  let ?programInfo = info
+  debugInfo $ "Launched " <> program.programDesc
+  -- Start loggers for stderr and stdout:
+  maybeKillDebugOut <- traverse (debugHandle $ ProgramOut info) maybeHandleOut
+  maybeKillDebugErr <- traverse (debugHandle $ ProgramErr info) maybeHandleErr
+  let kill = mask_ $ do
+        debugInfo $ "Cleaning up stdout reader for " <> program.name <> "."
+        sequence_ maybeKillDebugOut
+        debugInfo $ "Cleaning up stderr reader for " <> program.name <> "."
+        sequence_ maybeKillDebugErr
+        debugInfo $ "Cleaning up process for " <> program.name <> "."
+        exitCode <- murderProcess program.name (maybeHandleIn, maybeHandleOut, maybeHandleErr, processHandle)
+        debugInfo $ "Process was killed with exit code " <> show exitCode
+        pure ()
+  let wait = do
+        debugInfo $ "Waiting for " <> program.name <> " to finish."
+        bracketOnError (waitForProcess processHandle) (const kill) $ \exitCode ->
+          when (exitCode /= ExitSuccess) . assertFailure $
+            "Program " <> program.name <> " failed with exit code " <> show exitCode
+  pure ProgramHandle{..}
 
 -- Run a test with a program
 withProgram :: (HasLogger, HasTestInfo) => Program -> FilePath -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
 withProgram program programBin action =
-    bracket (forkProgram program programBin) kill $ \ProgramHandle{..} ->
-        let ?programInfo = info in action
+  bracket (forkProgram program programBin) kill $ \ProgramHandle{..} ->
+    let ?programInfo = info in action
 
 -- Run a test with a program resource
 withProgramResource :: (HasLogger, HasTestInfo) => ProgramResource -> ((HasCallStack, HasProgramInfo) => IO ()) -> IO ()
 withProgramResource ProgramResource{..} action =
-    bracket setupProgram cleanProgram $ \programBin ->
-        withProgram program programBin action
+  bracket setupProgram cleanProgram $ \programBin ->
+    withProgram program programBin action
 
 {- |
 Kill the process harder than `terminateProcess`.
@@ -486,39 +486,39 @@ This function also hides the evidence by closing the handles.
 -}
 murderProcess :: (HasLogger, HasTestInfo) => String -> (Maybe IO.Handle, Maybe IO.Handle, Maybe IO.Handle, ProcessHandle) -> IO ExitCode
 murderProcess programName (maybeStdIn, maybeStdOut, maybeStdErr, processHandle) = do
-    -- Murder the process until it's dead:
-    let murderLoop :: Int -> IO ExitCode
-        murderLoop n
-            | n > 0 =
-                getProcessExitCode processHandle >>= \case
-                    Nothing -> do
-                        debugInfo $ "Trying to kill the process for " <> programName
-                        terminateProcess processHandle
-                        threadDelay 100_000 -- 100ms
-                        murderLoop (n - 1)
-                    Just exitCode ->
-                        pure exitCode
-            | otherwise =
-                pure $ ExitFailure 1
-    exitCode <- murderLoop 100 -- 100 * 100ms = 10_000ms = 10s
-    debugInfo $ "Killed the process for " <> programName
+  -- Murder the process until it's dead:
+  let murderLoop :: Int -> IO ExitCode
+      murderLoop n
+        | n > 0 =
+            getProcessExitCode processHandle >>= \case
+              Nothing -> do
+                debugInfo $ "Trying to kill the process for " <> programName
+                terminateProcess processHandle
+                threadDelay 100_000 -- 100ms
+                murderLoop (n - 1)
+              Just exitCode ->
+                pure exitCode
+        | otherwise =
+            pure $ ExitFailure 1
+  exitCode <- murderLoop 100 -- 100 * 100ms = 10_000ms = 10s
+  debugInfo $ "Killed the process for " <> programName
 
-    -- Clean up handles:
-    traverse_ (ignoreSigPipe . IO.hClose) maybeStdIn
-    traverse_ IO.hClose maybeStdOut
-    traverse_ IO.hClose maybeStdErr
+  -- Clean up handles:
+  traverse_ (ignoreSigPipe . IO.hClose) maybeStdIn
+  traverse_ IO.hClose maybeStdOut
+  traverse_ IO.hClose maybeStdErr
 
-    pure exitCode
+  pure exitCode
 
 shouldInherit :: (String, String) -> Bool
 shouldInherit = (`elem` ["PATH"]) . fst
 
 eventlogSocketEnv :: EventlogSocketAddr -> [(String, String)]
 eventlogSocketEnv = \case
-    EventlogSocketUnixAddr{..} ->
-        [("GHC_EVENTLOG_UNIX_PATH", esaUnixPath), ("GHC_EVENTLOG_WAIT", "1")]
-    EventlogSocketInetAddr{..} ->
-        [("GHC_EVENTLOG_INET_HOST", esaInetHost), ("GHC_EVENTLOG_INET_PORT", esaInetPort), ("GHC_EVENTLOG_WAIT", "1")]
+  EventlogSocketUnixAddr{..} ->
+    [("GHC_EVENTLOG_UNIX_PATH", esaUnixPath), ("GHC_EVENTLOG_WAIT", "1")]
+  EventlogSocketInetAddr{..} ->
+    [("GHC_EVENTLOG_INET_HOST", esaInetHost), ("GHC_EVENTLOG_INET_PORT", esaInetPort), ("GHC_EVENTLOG_WAIT", "1")]
 
 --------------------------------------------------------------------------------
 -- Eventlog Validation
@@ -526,167 +526,167 @@ eventlogSocketEnv = \case
 
 isEventlogSocketUnixAddr :: EventlogSocketAddr -> Bool
 isEventlogSocketUnixAddr = \case
-    EventlogSocketUnixAddr{} -> True
-    _otherwise -> False
+  EventlogSocketUnixAddr{} -> True
+  _otherwise -> False
 
 isEventlogSocketInetAddr :: EventlogSocketAddr -> Bool
 isEventlogSocketInetAddr = \case
-    EventlogSocketInetAddr{} -> True
-    _otherwise -> False
+  EventlogSocketInetAddr{} -> True
+  _otherwise -> False
 
 data EventlogAssertion x
-    = EventlogAssertion
-    { initialTimeoutS :: Double
-    , timeoutExponent :: Double
-    , eventlogSocket :: EventlogSocketAddr
-    , validateEvents :: Socket -> ProcessT IO Event x
-    }
+  = EventlogAssertion
+  { initialTimeoutS :: Double
+  , timeoutExponent :: Double
+  , eventlogSocket :: EventlogSocketAddr
+  , validateEvents :: Socket -> ProcessT IO Event x
+  }
 
 defaultEventlogAssertion :: EventlogSocketAddr -> EventlogAssertion Event
 defaultEventlogAssertion eventlogSocket =
-    EventlogAssertion
-        { initialTimeoutS = 0.25
-        , timeoutExponent = 1
-        , eventlogSocket
-        , validateEvents = const echo
-        }
+  EventlogAssertion
+    { initialTimeoutS = 0.25
+    , timeoutExponent = 1
+    , eventlogSocket
+    , validateEvents = const echo
+    }
 
 assertEventlogOk ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
-    EventlogSocketAddr ->
-    Assertion
+  (HasLogger, HasTestInfo, HasProgramInfo) =>
+  EventlogSocketAddr ->
+  Assertion
 assertEventlogOk eventlogSocket =
-    assertEventlogWith eventlogSocket (debugEventCounter 1_000)
+  assertEventlogWith eventlogSocket (debugEventCounter 1_000)
 
 assertEventlogWith ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
-    EventlogSocketAddr ->
-    (ProcessT IO Event x) ->
-    Assertion
+  (HasLogger, HasTestInfo, HasProgramInfo) =>
+  EventlogSocketAddr ->
+  (ProcessT IO Event x) ->
+  Assertion
 assertEventlogWith eventlogSocket validateEvents =
-    assertEventlogWith' eventlogSocket (const validateEvents)
+  assertEventlogWith' eventlogSocket (const validateEvents)
 
 assertEventlogWith' ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
-    EventlogSocketAddr ->
-    (Socket -> ProcessT IO Event x) ->
-    Assertion
+  (HasLogger, HasTestInfo, HasProgramInfo) =>
+  EventlogSocketAddr ->
+  (Socket -> ProcessT IO Event x) ->
+  Assertion
 assertEventlogWith' eventlogSocket validateEvents =
-    runEventlogAssertion (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
+  runEventlogAssertion (defaultEventlogAssertion eventlogSocket){validateEvents = validateEvents}
 
 runEventlogAssertion ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
-    EventlogAssertion x ->
-    Assertion
+  (HasLogger, HasTestInfo, HasProgramInfo) =>
+  EventlogAssertion x ->
+  Assertion
 runEventlogAssertion EventlogAssertion{..} =
-    withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket $ \socket ->
-        runT_ $ fromSocket 1000 4096 socket ~> decodeEvent ~> debugEvents ~> validateEvents socket
+  withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket $ \socket ->
+    runT_ $ fromSocket 1000 4096 socket ~> decodeEvent ~> debugEvents ~> validateEvents socket
 
 withEventlogHandle ::
-    (HasLogger, HasTestInfo, HasProgramInfo) =>
-    Double ->
-    Double ->
-    EventlogSocketAddr ->
-    (Socket -> IO a) ->
-    IO a
+  (HasLogger, HasTestInfo, HasProgramInfo) =>
+  Double ->
+  Double ->
+  EventlogSocketAddr ->
+  (Socket -> IO a) ->
+  IO a
 withEventlogHandle initialTimeoutS timeoutExponent eventlogSocket action =
-    connectLoop initialTimeoutS
-  where
-    waitFor timeoutS = threadDelay timeoutMicro
-      where
-        timeoutMicro = round $ timeoutS * 1e6
+  connectLoop initialTimeoutS
+ where
+  waitFor timeoutS = threadDelay timeoutMicro
+   where
+    timeoutMicro = round $ timeoutS * 1e6
 
-    isDoesNotExistError :: IOError -> Bool
-    isDoesNotExistError ioe =
-        "Network.Socket.connect" `L.isPrefixOf` ioeGetLocation ioe
-            && ioeGetErrorString ioe == "does not exist"
+  isDoesNotExistError :: IOError -> Bool
+  isDoesNotExistError ioe =
+    "Network.Socket.connect" `L.isPrefixOf` ioeGetLocation ioe
+      && ioeGetErrorString ioe == "does not exist"
 
-    connectLoop timeoutS = do
-        catch @IOError tryConnect $ \ioe ->
-            if isDoesNotExistError ioe
-                then do
-                    -- Log the error:
-                    debugInfo $ "Caught IOError: " <> displayException ioe
+  connectLoop timeoutS = do
+    catch @IOError tryConnect $ \ioe ->
+      if isDoesNotExistError ioe
+        then do
+          -- Log the error:
+          debugInfo $ "Caught IOError: " <> displayException ioe
 
-                    -- Check if program is still running:
-                    maybePid <- ?programInfo.programPidIO
-                    when (isNothing maybePid) $
-                        error $
-                            "Program " <> ?programInfo.program.name <> " has terminated."
+          -- Check if program is still running:
+          maybePid <- ?programInfo.programPidIO
+          when (isNothing maybePid) $
+            error $
+              "Program " <> ?programInfo.program.name <> " has terminated."
 
-                    -- Wait before retrying:
-                    waitFor timeoutS
+          -- Wait before retrying:
+          waitFor timeoutS
 
-                    -- Retry connection:
-                    connectLoop (timeoutS * timeoutExponent)
-                else throwIO ioe
-      where
-        tryConnect = do
-            let timeoutMSec = round $ timeoutS * 1e3
-            case eventlogSocket of
-                EventlogSocketUnixAddr{..} -> do
-                    let newSocket = S.socket S.AF_UNIX S.Stream S.defaultProtocol
-                    let closeSocket socket = do
-                            debugInfo $ "Disconnecting from Unix socket at " <> esaUnixPath
-                            S.close socket
-                    bracket newSocket closeSocket $ \socket -> do
-                        debugInfo $ "Trying to connect to Unix socket at " <> esaUnixPath
-                        S.connect socket (S.SockAddrUnix esaUnixPath)
-                        debugInfo $ "Connected to Unix socket at " <> esaUnixPath
-                        action socket
-                EventlogSocketInetAddr{..} -> do
-                    let addrInfo =
-                            S.defaultHints
-                                { S.addrFamily = S.AF_INET
-                                , S.addrSocketType = S.Stream
-                                }
-                    addr <- NE.head <$> S.getAddrInfo (Just addrInfo) (Just esaInetHost) (Just $ esaInetPort)
-                    let newSocket = S.socket (S.addrFamily addr) (S.addrSocketType addr) (S.addrProtocol addr)
-                    let closeSocket socket = do
-                            debugInfo $ "Disconnecting from Unix socket at " <> show (S.addrAddress addr)
-                            S.gracefulClose socket timeoutMSec
-                    bracket newSocket closeSocket $ \socket -> do
-                        debugInfo $ "Trying to connect to TCP socket at " <> show (S.addrAddress addr)
-                        S.connect socket (S.addrAddress addr)
-                        debugInfo $ "Connected to TCP socket at " <> show (S.addrAddress addr)
-                        action socket
+          -- Retry connection:
+          connectLoop (timeoutS * timeoutExponent)
+        else throwIO ioe
+   where
+    tryConnect = do
+      let timeoutMSec = round $ timeoutS * 1e3
+      case eventlogSocket of
+        EventlogSocketUnixAddr{..} -> do
+          let newSocket = S.socket S.AF_UNIX S.Stream S.defaultProtocol
+          let closeSocket socket = do
+                debugInfo $ "Disconnecting from Unix socket at " <> esaUnixPath
+                S.close socket
+          bracket newSocket closeSocket $ \socket -> do
+            debugInfo $ "Trying to connect to Unix socket at " <> esaUnixPath
+            S.connect socket (S.SockAddrUnix esaUnixPath)
+            debugInfo $ "Connected to Unix socket at " <> esaUnixPath
+            action socket
+        EventlogSocketInetAddr{..} -> do
+          let addrInfo =
+                S.defaultHints
+                  { S.addrFamily = S.AF_INET
+                  , S.addrSocketType = S.Stream
+                  }
+          addr <- NE.head <$> S.getAddrInfo (Just addrInfo) (Just esaInetHost) (Just $ esaInetPort)
+          let newSocket = S.socket (S.addrFamily addr) (S.addrSocketType addr) (S.addrProtocol addr)
+          let closeSocket socket = do
+                debugInfo $ "Disconnecting from Unix socket at " <> show (S.addrAddress addr)
+                S.gracefulClose socket timeoutMSec
+          bracket newSocket closeSocket $ \socket -> do
+            debugInfo $ "Trying to connect to TCP socket at " <> show (S.addrAddress addr)
+            S.connect socket (S.addrAddress addr)
+            debugInfo $ "Connected to TCP socket at " <> show (S.addrAddress addr)
+            action socket
 
 fromSocket ::
-    Int ->
-    Int ->
-    Socket ->
-    SourceT IO BS.ByteString
+  Int ->
+  Int ->
+  Socket ->
+  SourceT IO BS.ByteString
 fromSocket _timeoutMSec chunkSizeBytes socket = construct go
-  where
-    go = do
-        chunk <- liftIO (SB.recv socket chunkSizeBytes)
-        yield chunk
-        go
+ where
+  go = do
+    chunk <- liftIO (SB.recv socket chunkSizeBytes)
+    yield chunk
+    go
 
 isReady ::
-    (HasLogger, HasTestInfo) =>
-    Int ->
-    IO.Handle ->
-    IO (Maybe Bool)
+  (HasLogger, HasTestInfo) =>
+  Int ->
+  IO.Handle ->
+  IO (Maybe Bool)
 isReady timeoutMSec handle = catch ready onEOF
-  where
-    ready =
-        IO.hWaitForInput handle timeoutMSec
-            >>= pure . Just
-    onEOF (e :: IOError) =
-        if isEOFError e
-            then do
-                debugInfo $ displayException e
-                pure Nothing
-            else assertFailure (displayException e)
+ where
+  ready =
+    IO.hWaitForInput handle timeoutMSec
+      >>= pure . Just
+  onEOF (e :: IOError) =
+    if isEOFError e
+      then do
+        debugInfo $ displayException e
+        pure Nothing
+      else assertFailure (displayException e)
 
 decodeEvent :: ProcessT IO BS.ByteString Event
 decodeEvent = construct $ loop decodeEventLog
-  where
-    loop Done{} = pure ()
-    loop (Consume k) = await >>= \chunk -> loop (k chunk)
-    loop (Produce a d') = yield a >> loop d'
-    loop (Error _ err) = liftIO $ assertFailure err
+ where
+  loop Done{} = pure ()
+  loop (Consume k) = await >>= \chunk -> loop (k chunk)
+  loop (Produce a d') = yield a >> loop d'
+  loop (Error _ err) = liftIO $ assertFailure err
 
 {- |
 Evaluate the machine until the given number of seconds has passed, then stop.
@@ -699,29 +699,29 @@ Evaluate the first machine until the given number of seconds has passed, then co
 -}
 afterTimeoutSec :: Double -> MachineT IO k o -> MachineT IO k o -> MachineT IO k o
 afterTimeoutSec timeoutSec m n = MachineT $ do
-    startTimeNano <- getMonotonicTimeNSec
-    let timeoutNano = round $ 1e9 * timeoutSec
-    let endTimeNSec = startTimeNano + timeoutNano
-    runMachineT $ afterTimeNSec endTimeNSec m n
+  startTimeNano <- getMonotonicTimeNSec
+  let timeoutNano = round $ 1e9 * timeoutSec
+  let endTimeNSec = startTimeNano + timeoutNano
+  runMachineT $ afterTimeNSec endTimeNSec m n
 
 {- |
 Evaluate the first machine until the given time, then continue as the second machine.
 -}
 afterTimeNSec :: Word64 -> MachineT IO k o -> MachineT IO k o -> MachineT IO k o
 afterTimeNSec timeNSec = go
-  where
-    go m n = MachineT $ do
-        getMonotonicTimeNSec >>= \case
-            currentTimeNSec
-                | currentTimeNSec >= timeNSec -> runMachineT n
-                | otherwise ->
-                    runMachineT m >>= \case
-                        Stop ->
-                            pure $ Stop
-                        Yield o m' ->
-                            pure $ Yield o (go m' n)
-                        Await onNext k onStop ->
-                            pure $ Await (\t -> go (onNext t) n) k (go onStop n)
+ where
+  go m n = MachineT $ do
+    getMonotonicTimeNSec >>= \case
+      currentTimeNSec
+        | currentTimeNSec >= timeNSec -> runMachineT n
+        | otherwise ->
+            runMachineT m >>= \case
+              Stop ->
+                pure $ Stop
+              Yield o m' ->
+                pure $ Yield o (go m' n)
+              Await onNext k onStop ->
+                pure $ Await (\t -> go (onNext t) n) k (go onStop n)
 
 infixl 8 !>
 
@@ -738,14 +738,14 @@ Evaluate the first machine until it stops, then continue as the second machine.
 -}
 (&>) :: (Monad m) => MachineT m k o -> MachineT m k o -> MachineT m k o
 (&>) m n =
-    MachineT $ do
-        runMachineT m >>= \case
-            Stop ->
-                runMachineT n
-            Yield o m' ->
-                pure $ Yield o (m' &> n)
-            Await onNext k onStop ->
-                pure $ Await (\t -> onNext t &> n) k (onStop &> n)
+  MachineT $ do
+    runMachineT m >>= \case
+      Stop ->
+        runMachineT n
+      Yield o m' ->
+        pure $ Yield o (m' &> n)
+      Await onNext k onStop ->
+        pure $ Await (\t -> onNext t &> n) k (onStop &> n)
 
 times :: (Monad m) => Int -> MachineT m k o -> MachineT m k o
 times count m = foldr (&>) stopped (replicate count m)
@@ -756,18 +756,18 @@ Throw an exception if the input stream stops.
 -}
 anyOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a a
 anyOf p onSuccess onFailure = go (0 :: Int)
-  where
-    go count = MachineT $ pure $ Await onNext Refl onStop
-      where
-        onNext a = if p a then debugging (onSuccess count) else MachineT $ pure $ Yield a (go (count + 1))
-        onStop = failing (onFailure count)
+ where
+  go count = MachineT $ pure $ Await onNext Refl onStop
+   where
+    onNext a = if p a then debugging (onSuccess count) else MachineT $ pure $ Yield a (go (count + 1))
+    onStop = failing (onFailure count)
 
 {- |
 Evaluate `anyOf` for the given number of seconds, then fail.
 -}
 anyFor :: (HasLogger, HasTestInfo) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a a
 anyFor timeoutSec p onSuccess onFailure =
-    afterTimeoutSec timeoutSec (anyOf p (const onSuccess) (const onFailure)) (failing onFailure)
+  afterTimeoutSec timeoutSec (anyOf p (const onSuccess) (const onFailure)) (failing onFailure)
 
 {- |
 Consume inputs forever.
@@ -775,26 +775,26 @@ Throw an exception if the predicate fails to hold for any input.
 -}
 allOf :: (HasLogger, HasTestInfo) => (a -> Bool) -> (Int -> String) -> (Int -> String) -> ProcessT IO a a
 allOf p onSuccess onFailure = go (0 :: Int)
-  where
-    go count = MachineT $ pure $ Await onNext Refl onStop
-      where
-        onNext a = if p a then MachineT $ pure $ Yield a (go (count + 1)) else failing (onFailure count)
-        onStop = debugging (onSuccess count)
+ where
+  go count = MachineT $ pure $ Await onNext Refl onStop
+   where
+    onNext a = if p a then MachineT $ pure $ Yield a (go (count + 1)) else failing (onFailure count)
+    onStop = debugging (onSuccess count)
 
 {- |
 Evaluate `allFor` for the given number of seconds, then fail.
 -}
 allFor :: (HasLogger, HasTestInfo) => Double -> (a -> Bool) -> String -> String -> ProcessT IO a a
 allFor timeoutSec p onSuccess onFailure =
-    withTimeoutSec timeoutSec (allOf p (const onSuccess) (const onFailure))
+  withTimeoutSec timeoutSec (allOf p (const onSuccess) (const onFailure))
 
 {- |
 Immediately `assertFailure`.
 -}
 failing :: (HasLogger, HasTestInfo) => String -> MachineT IO k o
 failing msg = MachineT $ do
-    debugFail $ msg
-    assertFailure msg
+  debugFail $ msg
+  assertFailure msg
 
 {- |
 Write a debug messages and stop.
@@ -819,18 +819,18 @@ Test if an `Event` is a `WallClockTime` event.
 -}
 isWallClockTime :: Event -> Bool
 isWallClockTime ev
-    | E.WallClockTime{} <- E.evSpec ev = True
-    | otherwise = False
+  | E.WallClockTime{} <- E.evSpec ev = True
+  | otherwise = False
 
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
 -}
 hasWallClockTimeWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasWallClockTimeWithinSec timeoutSec =
-    anyFor timeoutSec isWallClockTime onSuccess onFailure
-  where
-    onSuccess = printf "Found WallClockTime within %0.2f seconds." timeoutSec
-    onFailure = printf "Did not find WallClockTime within %0.2f seconds." timeoutSec
+  anyFor timeoutSec isWallClockTime onSuccess onFailure
+ where
+  onSuccess = printf "Found WallClockTime within %0.2f seconds." timeoutSec
+  onFailure = printf "Did not find WallClockTime within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
@@ -843,28 +843,28 @@ Assert that the input stream contains a `HeapProfSampleString` event.
 -}
 hasWallClockTime :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasWallClockTime =
-    anyOf isWallClockTime onSuccess onFailure
-  where
-    onSuccess = printf "Found WallClockTime after %d events."
-    onFailure = printf "Did not find WallClockTime after %d events."
+  anyOf isWallClockTime onSuccess onFailure
+ where
+  onSuccess = printf "Found WallClockTime after %d events."
+  onFailure = printf "Did not find WallClockTime after %d events."
 
 {- |
 Test if an `Event` is a `HeapProfSampleBegin` event.
 -}
 isHeapProfSampleBegin :: Event -> Bool
 isHeapProfSampleBegin ev
-    | E.HeapProfSampleBegin{} <- E.evSpec ev = True
-    | otherwise = False
+  | E.HeapProfSampleBegin{} <- E.evSpec ev = True
+  | otherwise = False
 
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
 -}
 hasHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasHeapProfSampleBeginWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
-  where
-    onSuccess = printf "Found HeapProfSampleBegin within %0.2f seconds." timeoutSec
-    onFailure = printf "Did not find HeapProfSampleBegin within %0.2f seconds." timeoutSec
+  anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
+ where
+  onSuccess = printf "Found HeapProfSampleBegin within %0.2f seconds." timeoutSec
+  onFailure = printf "Did not find HeapProfSampleBegin within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
@@ -877,20 +877,20 @@ Assert that the input stream contains a `HeapProfSampleString` event.
 -}
 hasHeapProfSampleBegin :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasHeapProfSampleBegin =
-    anyOf isHeapProfSampleBegin onSuccess onFailure
-  where
-    onSuccess = printf "Found HeapProfSampleBegin after %d events."
-    onFailure = printf "Did not find HeapProfSampleBegin after %d events."
+  anyOf isHeapProfSampleBegin onSuccess onFailure
+ where
+  onSuccess = printf "Found HeapProfSampleBegin after %d events."
+  onFailure = printf "Did not find HeapProfSampleBegin after %d events."
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given timeout.
 -}
 hasNoHeapProfSampleBeginWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasNoHeapProfSampleBeginWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
-  where
-    onSuccess = printf "Did not find HeapProfSampleBegin within %0.2f seconds." timeoutSec
-    onFailure = printf "Found HeapProfSampleBegin within %0.2f seconds." timeoutSec
+  anyFor timeoutSec isHeapProfSampleBegin onSuccess onFailure
+ where
+  onSuccess = printf "Did not find HeapProfSampleBegin within %0.2f seconds." timeoutSec
+  onFailure = printf "Found HeapProfSampleBegin within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given number of events.
@@ -903,28 +903,28 @@ Assert that the input stream does not contain a `HeapProfSampleString` event.
 -}
 hasNoHeapProfSampleBegin :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoHeapProfSampleBegin =
-    anyOf isHeapProfSampleBegin onSuccess onFailure
-  where
-    onSuccess = printf "Did not find HeapProfSampleBegin after %d events."
-    onFailure = printf "Found HeapProfSampleBegin after %d events."
+  anyOf isHeapProfSampleBegin onSuccess onFailure
+ where
+  onSuccess = printf "Did not find HeapProfSampleBegin after %d events."
+  onFailure = printf "Found HeapProfSampleBegin after %d events."
 
 {- |
 Test if an `Event` is a `HeapProfSampleEnd` event.
 -}
 isHeapProfSampleEnd :: Event -> Bool
 isHeapProfSampleEnd ev
-    | E.HeapProfSampleEnd{} <- E.evSpec ev = True
-    | otherwise = False
+  | E.HeapProfSampleEnd{} <- E.evSpec ev = True
+  | otherwise = False
 
 {- |
 Assert that the input stream contains a `HeapProfSampleEnd` event within the given timeout.
 -}
 hasHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasHeapProfSampleEndWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
-  where
-    onSuccess = printf "Found HeapProfSampleEnd within %0.2f seconds." timeoutSec
-    onFailure = printf "Did not find HeapProfSampleEnd within %0.2f seconds." timeoutSec
+  anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
+ where
+  onSuccess = printf "Found HeapProfSampleEnd within %0.2f seconds." timeoutSec
+  onFailure = printf "Did not find HeapProfSampleEnd within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a `HeapProfSampleEnd` event within the given number of events.
@@ -937,20 +937,20 @@ Assert that the input stream contains a `HeapProfSampleEnd` event.
 -}
 hasHeapProfSampleEnd :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasHeapProfSampleEnd =
-    anyOf isHeapProfSampleEnd onSuccess onFailure
-  where
-    onSuccess = printf "Found HeapProfSampleEnd after %d events."
-    onFailure = printf "Did not find HeapProfSampleEnd after %d events."
+  anyOf isHeapProfSampleEnd onSuccess onFailure
+ where
+  onSuccess = printf "Found HeapProfSampleEnd after %d events."
+  onFailure = printf "Did not find HeapProfSampleEnd after %d events."
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleEnd` event within the given timeout.
 -}
 hasNoHeapProfSampleEndWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasNoHeapProfSampleEndWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
-  where
-    onSuccess = printf "Did not find HeapProfSampleEnd within %0.2f seconds." timeoutSec
-    onFailure = printf "Found HeapProfSampleEnd within %0.2f seconds." timeoutSec
+  anyFor timeoutSec isHeapProfSampleEnd onSuccess onFailure
+ where
+  onSuccess = printf "Did not find HeapProfSampleEnd within %0.2f seconds." timeoutSec
+  onFailure = printf "Found HeapProfSampleEnd within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleEnd` event within the given number of events.
@@ -963,28 +963,28 @@ Assert that the input stream does not contain a `HeapProfSampleEnd` event.
 -}
 hasNoHeapProfSampleEnd :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoHeapProfSampleEnd =
-    anyOf isHeapProfSampleEnd onSuccess onFailure
-  where
-    onSuccess = printf "Did not find HeapProfSampleEnd after %d events."
-    onFailure = printf "Found HeapProfSampleEnd after %d events."
+  anyOf isHeapProfSampleEnd onSuccess onFailure
+ where
+  onSuccess = printf "Did not find HeapProfSampleEnd after %d events."
+  onFailure = printf "Found HeapProfSampleEnd after %d events."
 
 {- |
 Test if an `Event` is a `HeapProfSampleString` event.
 -}
 isHeapProfSampleString :: Event -> Bool
 isHeapProfSampleString ev
-    | E.HeapProfSampleString{} <- E.evSpec ev = True
-    | otherwise = False
+  | E.HeapProfSampleString{} <- E.evSpec ev = True
+  | otherwise = False
 
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given timeout.
 -}
 hasHeapProfSampleStringWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasHeapProfSampleStringWithinSec timeoutSec =
-    anyFor timeoutSec isHeapProfSampleString onSuccess onFailure
-  where
-    onSuccess = printf "Found HeapProfSampleString within %0.2f seconds." timeoutSec
-    onFailure = printf "Did not find HeapProfSampleString within %0.2f seconds." timeoutSec
+  anyFor timeoutSec isHeapProfSampleString onSuccess onFailure
+ where
+  onSuccess = printf "Found HeapProfSampleString within %0.2f seconds." timeoutSec
+  onFailure = printf "Did not find HeapProfSampleString within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a `HeapProfSampleString` event within the given number of events.
@@ -997,55 +997,55 @@ Assert that the input stream contains a `HeapProfSampleString` event.
 -}
 hasHeapProfSampleString :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasHeapProfSampleString =
-    anyOf isHeapProfSampleString onSuccess onFailure
-  where
-    onSuccess = printf "Found HeapProfSampleString after %d events."
-    onFailure = printf "Did not find HeapProfSampleString after %d events."
+  anyOf isHeapProfSampleString onSuccess onFailure
+ where
+  onSuccess = printf "Found HeapProfSampleString after %d events."
+  onFailure = printf "Did not find HeapProfSampleString after %d events."
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given timeout.
 -}
 hasNoHeapProfSampleStringWithinSec :: (HasLogger, HasTestInfo) => Double -> ProcessT IO Event Event
 hasNoHeapProfSampleStringWithinSec timeoutSec =
-    allFor timeoutSec (not . isHeapProfSampleString) onSuccess onFailure
-  where
-    onSuccess = printf "Did not find HeapProfSampleString within %0.2f seconds." timeoutSec
-    onFailure = printf "Found HeapProfSampleString within %0.2f seconds." timeoutSec
+  allFor timeoutSec (not . isHeapProfSampleString) onSuccess onFailure
+ where
+  onSuccess = printf "Did not find HeapProfSampleString within %0.2f seconds." timeoutSec
+  onFailure = printf "Found HeapProfSampleString within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event within the given number of events.
 -}
 hasNoHeapProfSampleStringWithin :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
 hasNoHeapProfSampleStringWithin count =
-    taking count ~> hasNoHeapProfSampleString
+  taking count ~> hasNoHeapProfSampleString
 
 {- |
 Assert that the input stream does not contain a `HeapProfSampleString` event.
 -}
 hasNoHeapProfSampleString :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 hasNoHeapProfSampleString =
-    allOf (not . isHeapProfSampleString) onSuccess onFailure
-  where
-    onSuccess = printf "Did not find HeapProfSampleString after %d events."
-    onFailure = printf "Found HeapProfSampleString after %d events."
+  allOf (not . isHeapProfSampleString) onSuccess onFailure
+ where
+  onSuccess = printf "Did not find HeapProfSampleString after %d events."
+  onFailure = printf "Found HeapProfSampleString after %d events."
 
 {- |
 Test if an `Event` is a `UserMarker` whose message satisfies the given predicate.
 -}
 isMatchingUserMarker :: (Text -> Bool) -> Event -> Bool
 isMatchingUserMarker p ev
-    | E.UserMarker{markername} <- E.evSpec ev = p markername
-    | otherwise = False
+  | E.UserMarker{markername} <- E.evSpec ev = p markername
+  | otherwise = False
 
 {- |
 Assert that the input stream contains a matching `UserMarker` event within the given timeout.
 -}
 hasMatchingUserMarkerWithinSec :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Double -> ProcessT IO Event Event
 hasMatchingUserMarkerWithinSec p timeoutSec =
-    anyFor timeoutSec (isMatchingUserMarker p) onSuccess onFailure
-  where
-    onSuccess = printf "Found matching UserMarker within %0.2f seconds." timeoutSec
-    onFailure = printf "Did not find matching UserMarker within %0.2f seconds." timeoutSec
+  anyFor timeoutSec (isMatchingUserMarker p) onSuccess onFailure
+ where
+  onSuccess = printf "Found matching UserMarker within %0.2f seconds." timeoutSec
+  onFailure = printf "Did not find matching UserMarker within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a matching `UserMarker` event within the given number of events.
@@ -1058,28 +1058,28 @@ Assert that the input stream contains a matching `UserMarker` event.
 -}
 hasMatchingUserMarker :: (HasLogger, HasTestInfo) => (Text -> Bool) -> ProcessT IO Event Event
 hasMatchingUserMarker p =
-    anyOf (isMatchingUserMarker p) onSuccess onFailure
-  where
-    onSuccess = printf "Found matching UserMarker after %d events."
-    onFailure = printf "Did not find matching UserMarker after %d events."
+  anyOf (isMatchingUserMarker p) onSuccess onFailure
+ where
+  onSuccess = printf "Found matching UserMarker after %d events."
+  onFailure = printf "Did not find matching UserMarker after %d events."
 
 {- |
 Test if an `Event` is a `UserMessage` whose message satisfies the given predicate.
 -}
 isMatchingUserMessage :: (Text -> Bool) -> Event -> Bool
 isMatchingUserMessage p ev
-    | E.UserMessage{msg} <- E.evSpec ev = p msg
-    | otherwise = False
+  | E.UserMessage{msg} <- E.evSpec ev = p msg
+  | otherwise = False
 
 {- |
 Assert that the input stream contains a matching `UserMessage` event within the given timeout.
 -}
 hasMatchingUserMessageWithinSec :: (HasLogger, HasTestInfo) => (Text -> Bool) -> Double -> ProcessT IO Event Event
 hasMatchingUserMessageWithinSec p timeoutSec =
-    anyFor timeoutSec (isMatchingUserMessage p) onSuccess onFailure
-  where
-    onSuccess = printf "Found matching UserMessage within %0.2f seconds." timeoutSec
-    onFailure = printf "Did not find matching UserMessage within %0.2f seconds." timeoutSec
+  anyFor timeoutSec (isMatchingUserMessage p) onSuccess onFailure
+ where
+  onSuccess = printf "Found matching UserMessage within %0.2f seconds." timeoutSec
+  onFailure = printf "Did not find matching UserMessage within %0.2f seconds." timeoutSec
 
 {- |
 Assert that the input stream contains a matching `UserMessage` event within the given number of events.
@@ -1092,39 +1092,39 @@ Assert that the input stream contains a matching `UserMessage` event.
 -}
 hasMatchingUserMessage :: (HasLogger, HasTestInfo) => (Text -> Bool) -> ProcessT IO Event Event
 hasMatchingUserMessage p =
-    anyOf (isMatchingUserMessage p) onSuccess onFailure
-  where
-    onSuccess = printf "Found matching UserMessage after %d events."
-    onFailure = printf "Did not find matching UserMessage after %d events."
+  anyOf (isMatchingUserMessage p) onSuccess onFailure
+ where
+  onSuccess = printf "Found matching UserMessage after %d events."
+  onFailure = printf "Did not find matching UserMessage after %d events."
 
 {- |
 Send the given `Command` over the `Socket`.
 -}
 sendCommand :: (HasLogger, HasTestInfo) => Socket -> Command -> IO ()
 sendCommand socket command = do
-    let commandBytes = B.encode command
-    debugInfo $ "Sending control command: " <> show commandBytes
-    bytesSent <- SB.send socket (BSL.toStrict commandBytes)
-    debugInfo $ "Sent " <> show bytesSent <> " bytes."
+  let commandBytes = B.encode command
+  debugInfo $ "Sending control command: " <> show commandBytes
+  bytesSent <- SB.send socket (BSL.toStrict commandBytes)
+  debugInfo $ "Sent " <> show bytesSent <> " bytes."
 
 {- |
 Send junk over the `Socket`.
 -}
 sendJunk :: (HasLogger, HasTestInfo) => Socket -> BSL.ByteString -> IO ()
 sendJunk socket junkBytes = do
-    debugInfo $ "Sending junk: " <> show junkBytes
-    bytesSent <- SB.send socket (BSL.toStrict junkBytes)
-    debugInfo $ "Sent " <> show bytesSent <> " bytes."
+  debugInfo $ "Sending junk: " <> show junkBytes
+  bytesSent <- SB.send socket (BSL.toStrict junkBytes)
+  debugInfo $ "Sent " <> show bytesSent <> " bytes."
 
 {- |
 Send the given `Command` over the `Socket`.
 -}
 sendCommandWithJunk :: (HasLogger, HasTestInfo) => Socket -> BSL.ByteString -> Command -> BSL.ByteString -> IO ()
 sendCommandWithJunk socket junkBefore command junkAfter = do
-    let commandWithJunkBytes = junkBefore <> B.encode command <> junkAfter
-    debugInfo $ "Sending control command with junk " <> show commandWithJunkBytes
-    bytesSent <- SB.send socket (BSL.toStrict commandWithJunkBytes)
-    debugInfo $ "Sent " <> show bytesSent <> " bytes."
+  let commandWithJunkBytes = junkBefore <> B.encode command <> junkAfter
+  debugInfo $ "Sending control command with junk " <> show commandWithJunkBytes
+  bytesSent <- SB.send socket (BSL.toStrict commandWithJunkBytes)
+  debugInfo $ "Sent " <> show bytesSent <> " bytes."
 
 --------------------------------------------------------------------------------
 -- Print Debug Message
@@ -1133,112 +1133,112 @@ sendCommandWithJunk socket junkBefore command junkAfter = do
 type HasTestInfo = (?testInfo :: TestInfo)
 
 data TestInfo = TestInfo
-    { testName :: TestName
-    }
+  { testName :: TestName
+  }
 
 data ProgramTest = ProgramTest
-    { testInfo :: TestInfo
-    , program :: Program
-    , setupProgram :: IO FilePath
-    , cleanProgram :: FilePath -> IO ()
-    , testProgram :: IO FilePath -> TestTree
-    }
+  { testInfo :: TestInfo
+  , program :: Program
+  , setupProgram :: IO FilePath
+  , cleanProgram :: FilePath -> IO ()
+  , testProgram :: IO FilePath -> TestTree
+  }
 
 runProgramTests :: [ProgramTest] -> [TestTree]
 runProgramTests = fmap toTestGroup . groupByDesc
-  where
-    groupByDesc :: [ProgramTest] -> [NonEmpty ProgramTest]
-    groupByDesc pts =
-        pts
-            & fmap (\pt -> M.singleton pt.program.programDesc (NE.singleton pt))
-            & foldr (M.unionWith (<>)) M.empty
-            & M.elems
-            & fmap (NE.sortBy (compare `on` (.testInfo.testName)))
+ where
+  groupByDesc :: [ProgramTest] -> [NonEmpty ProgramTest]
+  groupByDesc pts =
+    pts
+      & fmap (\pt -> M.singleton pt.program.programDesc (NE.singleton pt))
+      & foldr (M.unionWith (<>)) M.empty
+      & M.elems
+      & fmap (NE.sortBy (compare `on` (.testInfo.testName)))
 
-    toTestGroup :: NonEmpty ProgramTest -> TestTree
-    toTestGroup (pt :| pts) =
-        -- Assert that all tests have the same program description.
-        assert (all (((==) `on` (.program.programDesc)) pt) pts) $
-            askOption @KeepProgramBuild $ \(KeepProgramBuild keepProgramBuild) -> do
-                let maybeFreeProgram programBin = if keepProgramBuild then pure () else pt.cleanProgram programBin
-                withResource pt.setupProgram maybeFreeProgram $ \find ->
-                    testGroup ("With program " <> pt.program.programDesc <> ":") $
-                        [pt'.testProgram find | pt' <- (pt : pts)]
+  toTestGroup :: NonEmpty ProgramTest -> TestTree
+  toTestGroup (pt :| pts) =
+    -- Assert that all tests have the same program description.
+    assert (all (((==) `on` (.program.programDesc)) pt) pts) $
+      askOption @KeepProgramBuild $ \(KeepProgramBuild keepProgramBuild) -> do
+        let maybeFreeProgram programBin = if keepProgramBuild then pure () else pt.cleanProgram programBin
+        withResource pt.setupProgram maybeFreeProgram $ \find ->
+          testGroup ("With program " <> pt.program.programDesc <> ":") $
+            [pt'.testProgram find | pt' <- (pt : pts)]
 
 inetPortCounter :: MVar Word16
 inetPortCounter = unsafePerformIO (newMVar 0)
 
 programTestFor ::
-    (HasLogger) =>
-    TestName ->
-    Program ->
-    ((HasTestInfo, HasProgramInfo) => EventlogSocketAddr -> Assertion) ->
-    EventlogSocketAddr ->
-    ProgramTest
+  (HasLogger) =>
+  TestName ->
+  Program ->
+  ((HasTestInfo, HasProgramInfo) => EventlogSocketAddr -> Assertion) ->
+  EventlogSocketAddr ->
+  ProgramTest
 programTestFor testBaseName program eventlogAssertion = \case
-    EventlogSocketUnixAddr{..} -> do
-        -- Create test info
-        let testName = testBaseName <> "_Unix"
-        let testInfo = TestInfo{..}
-        let ?testInfo = testInfo
+  EventlogSocketUnixAddr{..} -> do
+    -- Create test info
+    let testName = testBaseName <> "_Unix"
+    let testInfo = TestInfo{..}
+    let ?testInfo = testInfo
 
-        -- Create program resource
-        --
-        -- NOTE: The `Program` passed to `programResource` does not have an
-        --       `EventlogSocketAddr`, as this is only used by `withProgram`.
-        let ProgramResource{program = _, ..} = programResource program
+    -- Create program resource
+    --
+    -- NOTE: The `Program` passed to `programResource` does not have an
+    --       `EventlogSocketAddr`, as this is only used by `withProgram`.
+    let ProgramResource{program = _, ..} = programResource program
 
-        -- Create program test
-        let testProgram find = do
-                testCase testName $ do
-                    debug Header
-                    -- Update the eventlog socket to avoid conflicts
-                    let (directory, fileName) = splitFileName esaUnixPath
-                    let testHash = showHex hshW ""
-                          where
-                            hshI :: Int
-                            hshI = hash testName
-                            hshW :: Word
-                            hshW
-                                | hshI >= 0 = fromIntegral hshI + fromIntegral (maxBound :: Int)
-                                | otherwise = fromIntegral (abs hshI)
-                    let unixPath' = directory </> testHash <> "_" <> fileName
-                    let eventlogSocketAddr = EventlogSocketUnixAddr unixPath'
-                    -- Find and start the program
-                    programBin <- find
-                    withProgram program{maybeEventlogSocket = Just eventlogSocketAddr} programBin $ do
-                        -- The the eventlog assertion
-                        debugInfo $ "Using Unix socket: " <> unixPath'
-                        eventlogAssertion eventlogSocketAddr
-                    debug Footer
-        ProgramTest{..}
-    EventlogSocketInetAddr{..} -> do
-        -- Create test info
-        let testName = testBaseName <> "_Inet"
-        let testInfo = TestInfo{..}
-        let ?testInfo = testInfo
+    -- Create program test
+    let testProgram find = do
+          testCase testName $ do
+            debug Header
+            -- Update the eventlog socket to avoid conflicts
+            let (directory, fileName) = splitFileName esaUnixPath
+            let testHash = showHex hshW ""
+                 where
+                  hshI :: Int
+                  hshI = hash testName
+                  hshW :: Word
+                  hshW
+                    | hshI >= 0 = fromIntegral hshI + fromIntegral (maxBound :: Int)
+                    | otherwise = fromIntegral (abs hshI)
+            let unixPath' = directory </> testHash <> "_" <> fileName
+            let eventlogSocketAddr = EventlogSocketUnixAddr unixPath'
+            -- Find and start the program
+            programBin <- find
+            withProgram program{maybeEventlogSocket = Just eventlogSocketAddr} programBin $ do
+              -- The the eventlog assertion
+              debugInfo $ "Using Unix socket: " <> unixPath'
+              eventlogAssertion eventlogSocketAddr
+            debug Footer
+    ProgramTest{..}
+  EventlogSocketInetAddr{..} -> do
+    -- Create test info
+    let testName = testBaseName <> "_Inet"
+    let testInfo = TestInfo{..}
+    let ?testInfo = testInfo
 
-        -- Create program resource
-        let ProgramResource{program = _, ..} = programResource program
+    -- Create program resource
+    let ProgramResource{program = _, ..} = programResource program
 
-        -- Create program test
-        let testProgram find = do
-                testCase testName $ do
-                    -- Update the eventlog socket to avoid conflicts
-                    esainetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
-                        let nextTcpPortOffset = currentTcpPortOffset + 1
-                        pure (nextTcpPortOffset, currentTcpPortOffset)
-                    let esaInetPortWithOffset = show (read esaInetPort + esainetPortOffset)
-                    let eventlogSocketAddr = EventlogSocketInetAddr esaInetHost esaInetPortWithOffset
-                    -- Find and start the program
-                    programBin <- find
-                    withProgram program{maybeEventlogSocket = Just eventlogSocketAddr} programBin $ do
-                        -- The the eventlog assertion
-                        debug Header
-                        debugInfo $ "Using Inet socket: " <> esaInetHost <> ":" <> esaInetPortWithOffset
-                        eventlogAssertion eventlogSocketAddr
-                        debug Footer
-        ProgramTest{..}
+    -- Create program test
+    let testProgram find = do
+          testCase testName $ do
+            -- Update the eventlog socket to avoid conflicts
+            esainetPortOffset <- modifyMVar inetPortCounter $ \currentTcpPortOffset -> do
+              let nextTcpPortOffset = currentTcpPortOffset + 1
+              pure (nextTcpPortOffset, currentTcpPortOffset)
+            let esaInetPortWithOffset = show (read esaInetPort + esainetPortOffset)
+            let eventlogSocketAddr = EventlogSocketInetAddr esaInetHost esaInetPortWithOffset
+            -- Find and start the program
+            programBin <- find
+            withProgram program{maybeEventlogSocket = Just eventlogSocketAddr} programBin $ do
+              -- The the eventlog assertion
+              debug Header
+              debugInfo $ "Using Inet socket: " <> esaInetHost <> ":" <> esaInetPortWithOffset
+              eventlogAssertion eventlogSocketAddr
+              debug Footer
+    ProgramTest{..}
 
 type HasLogger = (?logger :: Logger, HasCallStack)
 
@@ -1256,13 +1256,13 @@ newLogger = pure Logger
 #endif
 
 data Message
-    = Header
-    | Footer
-    | ProgramOut ProgramInfo String
-    | ProgramErr ProgramInfo String
-    | Event Event
-    | Info String
-    | Fail String
+  = Header
+  | Footer
+  | ProgramOut ProgramInfo String
+  | ProgramErr ProgramInfo String
+  | Event Event
+  | Info String
+  | Fail String
 
 debug :: (HasLogger, HasTestInfo) => Message -> IO ()
 #if defined(DEBUG)
@@ -1328,41 +1328,41 @@ withLogger action = do
 
 debugHandle :: (HasLogger, HasTestInfo) => (String -> Message) -> IO.Handle -> IO (IO ())
 debugHandle wrapper handle = do
-    let runner = do
-            threadDelay 30 -- Wait 30mcg.
-            isReady 1_000 handle >>= \case
-                Just ready
-                    | ready -> do
-                        line <- IO.hGetLine handle
-                        debug . wrapper $ line
-                        runner
-                    | otherwise -> runner
-                Nothing -> pure ()
-    threadId <- forkIO runner
-    pure $ killThread threadId
+  let runner = do
+        threadDelay 30 -- Wait 30mcg.
+        isReady 1_000 handle >>= \case
+          Just ready
+            | ready -> do
+                line <- IO.hGetLine handle
+                debug . wrapper $ line
+                runner
+            | otherwise -> runner
+          Nothing -> pure ()
+  threadId <- forkIO runner
+  pure $ killThread threadId
 
 debugEvents :: (HasLogger, HasTestInfo) => ProcessT IO Event Event
 debugEvents =
-    repeatedly $
-        await >>= \event -> do
-            liftIO (debug $ Event event)
-            yield event
+  repeatedly $
+    await >>= \event -> do
+      liftIO (debug $ Event event)
+      yield event
 
 debugEventCounter :: (HasLogger, HasTestInfo) => Int -> ProcessT IO Event Event
 debugEventCounter limit = go (1 :: Int)
-  where
-    go count = MachineT $ pure $ Await onNext Refl onStop
-      where
-        onNext event =
-            MachineT $ do
-                let count' = count + 1
-                if (count' >= limit)
-                    then do
-                        liftIO (debugInfo $ "Saw " <> show count' <> " events.")
-                        pure $ Yield event (go 0)
-                    else do
-                        pure $ Yield event (go count')
-        onStop =
-            MachineT $ do
-                liftIO (debugInfo $ "Saw " <> show count <> " events.")
-                pure Stop
+ where
+  go count = MachineT $ pure $ Await onNext Refl onStop
+   where
+    onNext event =
+      MachineT $ do
+        let count' = count + 1
+        if (count' >= limit)
+          then do
+            liftIO (debugInfo $ "Saw " <> show count' <> " events.")
+            pure $ Yield event (go 0)
+          else do
+            pure $ Yield event (go count')
+    onStop =
+      MachineT $ do
+        liftIO (debugInfo $ "Saw " <> show count <> " events.")
+        pure Stop

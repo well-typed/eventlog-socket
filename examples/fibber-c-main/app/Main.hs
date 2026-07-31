@@ -14,29 +14,29 @@ parseArgs args = (Finite, args)
 
 main :: IO ()
 main = do
-    -- Emit Initialising marker.
-    traceMarkerIO "Initialising fibber"
-    -- Wait for connection – if requested.
-    traverse_ (const wait) =<< lookupEnv "GHC_EVENTLOG_SOCKET"
-    args <- getArgs
-    let (mode, fibArgs) = parseArgs args
-        workload = for_ fibArgs $ \arg -> do
-            traceMarkerIO $ "Starting fib " <> arg
-            print $ fib (read arg)
-            traceMarkerIO $ "Finished fib " <> arg
+  -- Emit Initialising marker.
+  traceMarkerIO "Initialising fibber"
+  -- Wait for connection – if requested.
+  traverse_ (const wait) =<< lookupEnv "GHC_EVENTLOG_SOCKET"
+  args <- getArgs
+  let (mode, fibArgs) = parseArgs args
+      workload = for_ fibArgs $ \arg -> do
+        traceMarkerIO $ "Starting fib " <> arg
+        print $ fib (read arg)
+        traceMarkerIO $ "Finished fib " <> arg
 
-            -- Poll for asynchronous errors
-            testWorkerStatus
-            testControlStatus
-    case (mode, fibArgs) of
-        (_, []) -> putStrLn "Provide at least one integer argument."
-        (Finite, _) -> workload
-        (Infinite, _) -> forever workload
-    flushEventLog
+        -- Poll for asynchronous errors
+        testWorkerStatus
+        testControlStatus
+  case (mode, fibArgs) of
+    (_, []) -> putStrLn "Provide at least one integer argument."
+    (Finite, _) -> workload
+    (Infinite, _) -> forever workload
+  flushEventLog
 
-    -- Poll for asynchronous errors
-    testWorkerStatus
-    testControlStatus
+  -- Poll for asynchronous errors
+  testWorkerStatus
+  testControlStatus
 
 fib :: Integer -> Integer
 fib 0 = 0

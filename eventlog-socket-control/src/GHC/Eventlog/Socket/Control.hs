@@ -27,29 +27,29 @@ sendRequestHeapCensus eventlogSocket =
 @
 -}
 module GHC.Eventlog.Socket.Control (
-    -- * Control Commands
-    Command,
-    CommandId (..),
-    Namespace,
-    startProfiling,
-    stopProfiling,
-    startHeapProfiling,
-    stopHeapProfiling,
-    requestHeapCensus,
-    userNamespace,
-    userCommand,
-    encodeLazy,
-    encodeStrict,
+  -- * Control Commands
+  Command,
+  CommandId (..),
+  Namespace,
+  startProfiling,
+  stopProfiling,
+  startHeapProfiling,
+  stopHeapProfiling,
+  requestHeapCensus,
+  userNamespace,
+  userCommand,
+  encodeLazy,
+  encodeStrict,
 
-    -- ** Protocol Version
-    ProtocolVersion (..),
-    protocolVersion,
-    minProtocolVersion,
-    ProtocolVersionNotSupportedError (..),
+  -- ** Protocol Version
+  ProtocolVersion (..),
+  protocolVersion,
+  minProtocolVersion,
+  ProtocolVersionNotSupportedError (..),
 
-    -- ** Namespace Errors
-    NamespaceReservedError (..),
-    NamespaceTooLongError (..),
+  -- ** Namespace Errors
+  NamespaceReservedError (..),
+  NamespaceTooLongError (..),
 ) where
 
 import Control.Exception (Exception (..), assert, throw)
@@ -86,16 +86,16 @@ magicBytes :: [Word8]
 magicBytes = [0xF0, 0x9E, 0x97, 0x8C]
 
 instance Binary (WithBinary Magic) where
-    put :: (WithBinary Magic) -> Put
-    put (WithBinary Magic) = traverse_ putWord8 magicBytes
+  put :: (WithBinary Magic) -> Put
+  put (WithBinary Magic) = traverse_ putWord8 magicBytes
 
-    get :: Get (WithBinary Magic)
-    get = do
-        for_ magicBytes $ \expect ->
-            getWord8 >>= \actual ->
-                unless (expect == actual) . fail $
-                    printf "Unexpected %02x, expected %02x" actual expect
-        pure $ WithBinary Magic
+  get :: Get (WithBinary Magic)
+  get = do
+    for_ magicBytes $ \expect ->
+      getWord8 >>= \actual ->
+        unless (expect == actual) . fail $
+          printf "Unexpected %02x, expected %02x" actual expect
+    pure $ WithBinary Magic
 
 --------------------------------------------------------------------------------
 -- Protocol Versions
@@ -107,7 +107,7 @@ Version numbers for @eventlog-socket@'s control command protocol.
 @since 0.1.0.0
 -}
 newtype ProtocolVersion = ProtocolVersion Word8
-    deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show)
 
 {- |
 The error thrown when deserialising a protocol message from an incompatible protocol version.
@@ -115,7 +115,7 @@ The error thrown when deserialising a protocol message from an incompatible prot
 @since 0.1.0.0
 -}
 data ProtocolVersionNotSupportedError = ProtocolVersionNotSupportedError ProtocolVersion
-    deriving (Show)
+  deriving (Show)
 
 instance Exception ProtocolVersionNotSupportedError
 
@@ -144,11 +144,11 @@ isProtocolVersionSupported :: ProtocolVersion -> Bool
 isProtocolVersionSupported = (>= minProtocolVersion)
 
 instance Binary (WithBinary ProtocolVersion) where
-    put :: (WithBinary ProtocolVersion) -> Put
-    put (WithBinary (ProtocolVersion protocolVersionByte)) = putWord8 protocolVersionByte
+  put :: (WithBinary ProtocolVersion) -> Put
+  put (WithBinary (ProtocolVersion protocolVersionByte)) = putWord8 protocolVersionByte
 
-    get :: Get (WithBinary ProtocolVersion)
-    get = WithBinary . ProtocolVersion <$> getWord8
+  get :: Get (WithBinary ProtocolVersion)
+  get = WithBinary . ProtocolVersion <$> getWord8
 
 --------------------------------------------------------------------------------
 -- Namespaces
@@ -162,50 +162,50 @@ Namespaces are opaque and can only be obtained using `userNamespace`.
 @since 0.1.0.0
 -}
 data Namespace = Namespace
-    { namespaceText :: !Text
-    -- ^ The namespace name.
-    , namespaceUtf8 :: BS.ByteString
-    -- ^ Must satisfy the following invariants:
-    --     prop> namespaceUtf8 == encodeUtf8 namespaceText
-    --     prop> length namespaceUtf8 <= fromIntegral (maxBound :: Word8)
-    }
-    deriving (Eq)
+  { namespaceText :: !Text
+  -- ^ The namespace name.
+  , namespaceUtf8 :: BS.ByteString
+  -- ^ Must satisfy the following invariants:
+  --     prop> namespaceUtf8 == encodeUtf8 namespaceText
+  --     prop> length namespaceUtf8 <= fromIntegral (maxBound :: Word8)
+  }
+  deriving (Eq)
 
 {- |
 __Warning__: This instance uses `userNamespace` and may throw the same errors.
 -}
 instance IsString Namespace where
-    fromString :: String -> Namespace
-    fromString = userNamespace . T.pack
+  fromString :: String -> Namespace
+  fromString = userNamespace . T.pack
 
 instance Show Namespace where
-    show :: Namespace -> String
-    show = show . T.unpack . namespaceText
+  show :: Namespace -> String
+  show = show . T.unpack . namespaceText
 
 instance Binary (WithBinary Namespace) where
-    put :: WithBinary Namespace -> Put
-    put (WithBinary Namespace{namespaceUtf8 = namespaceBytes}) = do
-        let namespaceNumBytes = BS.length namespaceBytes
-        assert (namespaceNumBytes <= namespaceMaxBytes) $ do
-            -- Put the namespace length as a Word8
-            putWord8 (fromIntegral namespaceNumBytes)
-            -- -- Put the namespace bytes
-            for_ [0 .. namespaceNumBytes - 1] $ \i ->
-                for_ (BS.indexMaybe namespaceBytes i) $ \namespaceByte ->
-                    putWord8 namespaceByte
+  put :: WithBinary Namespace -> Put
+  put (WithBinary Namespace{namespaceUtf8 = namespaceBytes}) = do
+    let namespaceNumBytes = BS.length namespaceBytes
+    assert (namespaceNumBytes <= namespaceMaxBytes) $ do
+      -- Put the namespace length as a Word8
+      putWord8 (fromIntegral namespaceNumBytes)
+      -- -- Put the namespace bytes
+      for_ [0 .. namespaceNumBytes - 1] $ \i ->
+        for_ (BS.indexMaybe namespaceBytes i) $ \namespaceByte ->
+          putWord8 namespaceByte
 
-    get :: Get (WithBinary Namespace)
-    get = do
-        -- Get the namespace length as a Word8
-        namespaceNumBytes <- fromIntegral <$> getWord8
-        -- Get the namespace bytes
-        namespaceBytes <- BS.pack <$> replicateM namespaceNumBytes getWord8
-        -- Create a namespace
-        pure . WithBinary $
-            Namespace
-                { namespaceText = TE.decodeUtf8 namespaceBytes
-                , namespaceUtf8 = namespaceBytes
-                }
+  get :: Get (WithBinary Namespace)
+  get = do
+    -- Get the namespace length as a Word8
+    namespaceNumBytes <- fromIntegral <$> getWord8
+    -- Get the namespace bytes
+    namespaceBytes <- BS.pack <$> replicateM namespaceNumBytes getWord8
+    -- Create a namespace
+    pure . WithBinary $
+      Namespace
+        { namespaceText = TE.decodeUtf8 namespaceBytes
+        , namespaceUtf8 = namespaceBytes
+        }
 
 {- |
 Internal helper.
@@ -214,10 +214,10 @@ Construct a namespace ignoring the user namespace invariants.
 -}
 unsafeMakeNamespace :: Text -> Namespace
 unsafeMakeNamespace namespaceText' =
-    Namespace
-        { namespaceText = namespaceText'
-        , namespaceUtf8 = TE.encodeUtf8 namespaceText'
-        }
+  Namespace
+    { namespaceText = namespaceText'
+    , namespaceUtf8 = TE.encodeUtf8 namespaceText'
+    }
 
 {- |
 Internal helper.
@@ -241,7 +241,7 @@ The error thrown when the name passed to `userNamespace` is reserved.
 @since 0.1.0.0
 -}
 newtype NamespaceReservedError = NamespaceReservedError Namespace
-    deriving (Show)
+  deriving (Show)
 
 instance Exception NamespaceReservedError
 
@@ -260,7 +260,7 @@ Check if a namespace name is too long.
 -}
 isNamespaceTooLong :: Namespace -> Bool
 isNamespaceTooLong Namespace{namespaceUtf8 = namespaceBytes} =
-    BS.length namespaceBytes > namespaceMaxBytes
+  BS.length namespaceBytes > namespaceMaxBytes
 
 {- |
 The error thrown when the name passed to `userNamespace` is longer than 255 bytes.
@@ -268,7 +268,7 @@ The error thrown when the name passed to `userNamespace` is longer than 255 byte
 @since 0.1.0.0
 -}
 data NamespaceTooLongError = NamespaceTooLongError Namespace
-    deriving (Show)
+  deriving (Show)
 
 instance Exception NamespaceTooLongError
 
@@ -281,11 +281,11 @@ This function may throw t`NamespaceReservedError` or t`NamespaceTooLongError`.
 -}
 userNamespace :: Text -> Namespace
 userNamespace namespaceText'
-    | isNamespaceReserved namespace = throw (NamespaceReservedError namespace)
-    | isNamespaceTooLong namespace = throw (NamespaceTooLongError namespace)
-    | otherwise = namespace
-  where
-    namespace = unsafeMakeNamespace namespaceText'
+  | isNamespaceReserved namespace = throw (NamespaceReservedError namespace)
+  | isNamespaceTooLong namespace = throw (NamespaceTooLongError namespace)
+  | otherwise = namespace
+ where
+  namespace = unsafeMakeNamespace namespaceText'
 
 --------------------------------------------------------------------------------
 -- Command ID
@@ -299,7 +299,7 @@ Command IDs must be non-zero integers between 1 and 255.
 @since 0.1.0.0
 -}
 newtype CommandId = CommandId Word8
-    deriving (Eq, Show)
+  deriving (Eq, Show)
 
 -- NOTE: Take care that this definition does not drift too far from the
 --       definition of the same name in @eventlog-socket@. The two live
@@ -309,11 +309,11 @@ newtype CommandId = CommandId Word8
 --       mean we should be giving the user any surprises.
 
 instance Binary (WithBinary CommandId) where
-    put :: (WithBinary CommandId) -> Put
-    put (WithBinary (CommandId i)) = putWord8 i
+  put :: (WithBinary CommandId) -> Put
+  put (WithBinary (CommandId i)) = putWord8 i
 
-    get :: Get (WithBinary CommandId)
-    get = WithBinary . CommandId <$> getWord8
+  get :: Get (WithBinary CommandId)
+  get = WithBinary . CommandId <$> getWord8
 
 --------------------------------------------------------------------------------
 -- Command
@@ -328,7 +328,7 @@ commands `startHeapProfiling`, `stopHeapProfiling`, and `requestHeapCensus`.
 @since 0.1.0.0
 -}
 data Command = Command !Namespace !CommandId
-    deriving (Eq, Show)
+  deriving (Eq, Show)
 
 {- |
 Construct a custom control command message.
@@ -355,23 +355,23 @@ encodeStrict :: Command -> BS.ByteString
 encodeStrict = BSL.toStrict . encodeLazy
 
 instance Binary Command where
-    put :: Command -> Put
-    put (Command namespace commandId) = do
-        put $ WithBinary Magic
-        put $ WithBinary protocolVersion
-        put $ WithBinary namespace
-        put $ WithBinary commandId
+  put :: Command -> Put
+  put (Command namespace commandId) = do
+    put $ WithBinary Magic
+    put $ WithBinary protocolVersion
+    put $ WithBinary namespace
+    put $ WithBinary commandId
 
-    get :: Get Command
-    get = do
-        WithBinary Magic <- get
-        WithBinary commandProtocolVersion <- get
-        unless (isProtocolVersionSupported commandProtocolVersion) $
-            throw $
-                ProtocolVersionNotSupportedError commandProtocolVersion
-        WithBinary namespace <- get
-        WithBinary commandId <- get
-        pure $ Command namespace commandId
+  get :: Get Command
+  get = do
+    WithBinary Magic <- get
+    WithBinary commandProtocolVersion <- get
+    unless (isProtocolVersionSupported commandProtocolVersion) $
+      throw $
+        ProtocolVersionNotSupportedError commandProtocolVersion
+    WithBinary namespace <- get
+    WithBinary commandId <- get
+    pure $ Command namespace commandId
 
 --------------------------------------------------------------------------------
 -- Builtin Commands
