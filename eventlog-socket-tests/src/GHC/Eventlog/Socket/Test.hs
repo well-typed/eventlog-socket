@@ -3,7 +3,7 @@
 
 module GHC.Eventlog.Socket.Test (
     -- * Example Programs
-    Program (name, args, rtsopts, buildOrFind, maybeEventlogSocket),
+    Program (name, args, rtsopts, env, buildOrFind, maybeEventlogSocket),
     BuildOrFind (..),
     buildProgram,
     buildProgramWith,
@@ -174,6 +174,7 @@ data Program = Program
     { name :: String
     , args :: [String]
     , rtsopts :: [String]
+    , env :: [(String, String)]
     , buildOrFind :: BuildOrFind
     , maybeEventlogSocket :: Maybe EventlogSocketAddr
     }
@@ -190,6 +191,7 @@ buildProgramWith name buildFlags =
         { name
         , args = []
         , rtsopts = []
+        , env = []
         , buildOrFind = Build{buildFlags}
         , maybeEventlogSocket = Nothing
         }
@@ -424,7 +426,7 @@ forkProgram program programBin = do
     debugInfo $ "Launching program " <> program.programDesc
     inheritedEnv <- filter shouldInherit <$> getEnvironment
     let programArgs = program.args <> ["+RTS"] <> program.rtsopts <> ["-RTS"]
-    let extraEnv = maybe [] eventlogSocketEnv program.maybeEventlogSocket
+    let extraEnv = program.env <> maybe [] eventlogSocketEnv program.maybeEventlogSocket
     debugInfo . unlines . concat $
         [ [showCommandForUser programBin programArgs]
         , [ bool "       " "  with " (i == 0) <> k <> "=" <> v
